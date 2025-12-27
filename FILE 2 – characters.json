@@ -1,0 +1,55 @@
+[
+  {
+    "id": "kuroo",
+    "name": "Kuroo Tetsurō",
+    "rarity": "UR",
+    "position": "MB",
+    "stats": {
+      "receive": 2789,
+      "block": 3873,
+      "set": 2168,
+      "serve": 2885,
+      "quickAttack": 3262,
+      "powerAttack": 1098,
+      "save": 2121,
+      "reflex": 33.86,
+      "spirit": 26.36,
+      "awareness": 13.6
+    }
+  },
+  {
+    "id": "hinata",
+    "name": "Hinata Shōyō",
+    "rarity": "SR",
+    "position": "MB",
+    "stats": { "receive": 2100, "block": 2200, "set": 1500, "serve": 1600, "quickAttack": 3500, "powerAttack": 1300, "save": 1800, "reflex": 30, "spirit": 20, "awareness": 10 }
+  },
+  {
+    "id": "kageyama",
+    "name": "Kageyama Tobio",
+    "rarity": "SR",
+    "position": "S",
+    "stats": { "receive": 1800, "block": 1700, "set": 3200, "serve": 2600, "quickAttack": 2800, "powerAttack": 1500, "save": 1900, "reflex": 25, "spirit": 35, "awareness": 15 }
+  },
+  {
+    "id": "tsukishima",
+    "name": "Tsukishima Kei",
+    "rarity": "SR",
+    "position": "MB",
+    "stats": { "receive": 2300, "block": 3100, "set": 1800, "serve": 1700, "quickAttack": 2100, "powerAttack": 1900, "save": 2100, "reflex": 28, "spirit": 22, "awareness": 18 }
+  },
+  {
+    "id": "tanaka",
+    "name": "Tanaka Ryūnosuke",
+    "rarity": "SR",
+    "position": "OH",
+    "stats": { "receive": 2000, "block": 1900, "set": 1400, "serve": 2300, "quickAttack": 2900, "powerAttack": 3100, "save": 1700, "reflex": 21, "spirit": 19, "awareness": 12 }
+  },
+  {
+    "id": "nishinoya",
+    "name": "Nishinoya Yū",
+    "rarity": "SR",
+    "position": "L",
+    "stats": { "receive": 3400, "block": 1600, "set": 1500, "serve": 1800, "quickAttack": 2400, "powerAttack": 1200, "save": 2800, "reflex": 40, "spirit": 30, "awareness": 20 }
+  }
+]
