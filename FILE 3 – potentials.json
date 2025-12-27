@@ -1,0 +1,70 @@
+[
+  {
+    "id": "sup_rec_top",
+    "slot": "top",
+    "rarity": "UR",
+    "main": { "stat": "receive", "value": 35, "isPercent": true },
+    "subs": [
+      { "stat": "spirit", "value": 6.4, "isPercent": true },
+      { "stat": "powerAttack", "value": 48, "isPercent": false },
+      { "stat": "reflex", "value": 1.6, "isPercent": true },
+      { "stat": "quickAttack", "value": 4, "isPercent": true }
+    ],
+    "set": {
+      "name": "Supreme Receive",
+      "bonus2": { "stat": "receive", "value": 15, "isPercent": true },
+      "bonus4": { "effect": "quickSpikeReceive", "value": 30, "isPercent": true }
+    }
+  },
+  {
+    "id": "sup_serve_bot",
+    "slot": "bottom",
+    "rarity": "UR",
+    "main": { "stat": "serve", "value": 300, "isPercent": false },
+    "subs": [
+      { "stat": "quickAttack", "value": 4, "isPercent": true },
+      { "stat": "block", "value": 24, "isPercent": false },
+      { "stat": "set", "value": 4, "isPercent": true },
+      { "stat": "serve", "value": 72, "isPercent": false }
+    ],
+    "set": {
+      "name": "Supreme Receive",
+      "bonus2": { "stat": "receive", "value": 15, "isPercent": true },
+      "bonus4": { "effect": "quickSpikeReceive", "value": 30, "isPercent": true }
+    }
+  },
+  {
+    "id": "assist_set_acc",
+    "slot": "accessory",
+    "rarity": "UR",
+    "main": { "stat": "set", "value": 35, "isPercent": true },
+    "subs": [
+      { "stat": "receive", "value": 24, "isPercent": false },
+      { "stat": "powerAttack", "value": 48, "isPercent": false },
+      { "stat": "awareness", "value": 3.2, "isPercent": true },
+      { "stat": "quickAttack", "value": 4, "isPercent": true }
+    ],
+    "set": {
+      "name": "Assist Receive",
+      "bonus2": { "stat": "receive", "value": 15, "isPercent": true },
+      "bonus4": { "effect": "perfectReceiveSpike", "value": 30, "isPercent": true }
+    }
+  },
+  {
+    "id": "assist_rec_shoes",
+    "slot": "shoes",
+    "rarity": "UR",
+    "main": { "stat": "receive", "value": 300, "isPercent": false },
+    "subs": [
+      { "stat": "quickAttack", "value": 4, "isPercent": true },
+      { "stat": "receive", "value": 2, "isPercent": true },
+      { "stat": "block", "value": 24, "isPercent": false },
+      { "stat": "receive", "value": 72, "isPercent": false }
+    ],
+    "set": {
+      "name": "Assist Receive",
+      "bonus2": { "stat": "receive", "value": 15, "isPercent": true },
+      "bonus4": { "effect": "perfectReceiveSpike", "value": 30, "isPercent": true }
+    }
+  }
+]
