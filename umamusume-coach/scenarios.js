@@ -9,6 +9,9 @@
 // gainScale: how big trainings are compared with URA. The coach replaces this with your
 //            own numbers once you have entered real gains on a few turns.
 // finale.forced: true only where the finale race turns are certain.
+// train:     base training values at facility level 1 per facility:
+//            [speed, stamina, power, guts, wit, skill points, energy] (GameTora scenario pages).
+//            trainApprox marks scenarios whose values aren't published yet (Island values are used).
 // inputs:    extra fields. scope "facility" shows on each training, "turn" once per turn.
 //            type is "number", "check" or "select" (with options).
 (function (root) {
@@ -23,6 +26,7 @@
       totalTurns: 78,
       caps: [1400, 1400, 1400, 1400, 1400],
       gainScale: 1.05,
+      train: { speed: [11, 0, 6, 0, 0, 4, -21], stamina: [0, 10, 0, 6, 0, 4, -19], power: [0, 6, 9, 0, 0, 4, -20], guts: [5, 0, 5, 8, 0, 4, -22], wit: [2, 0, 0, 0, 10, 5, 5] },
       finale: { name: "URA Finals", turns: [74, 76, 78], forced: true, note: "Qualifier, Semifinal and Final, with a training turn before each." },
       summary: "The base scenario. Win your goal races and spend every other turn on the best friendship training. Since the July 2026 update, Happy Meek can appear on trainings for a duel, and every stat caps at 1400.",
       coreLoop: [
@@ -54,6 +58,9 @@
       totalTurns: 78,
       caps: [1300, 1300, 1300, 1300, 1800],
       gainScale: 1.15,
+      formulaBoost: 1.35,
+      train: { speed: [8, 0, 4, 0, 0, 2, -19], stamina: [0, 7, 0, 3, 0, 2, -17], power: [0, 4, 6, 0, 0, 2, -18], guts: [3, 0, 3, 6, 0, 2, -20], wit: [2, 0, 0, 0, 6, 3, 5] },
+      trainNote: "Global values (JP raised some after its 2023 update).",
       finale: { name: "Unity Cup Final", turns: [], forced: false, note: "The team final closes the career. Mark it as a goal race on the turn your game shows." },
       summary: "You recruit a team. Training next to team members (Unity training) raises their stats, and a full spirit flame triggers a Spirit Burst. The July 2026 update raised burst and Unity training gains, removed their extra energy cost, and added Extreme Spirit Bursts.",
       coreLoop: [
@@ -90,6 +97,8 @@
       totalTurns: 78,
       caps: [1200, 1900, 1200, 1200, 1500],
       gainScale: 1.0,
+      formulaBoost: 1.15,
+      train: { speed: [8, 0, 4, 0, 0, 2, -19], stamina: [0, 7, 0, 3, 0, 2, -17], power: [0, 4, 6, 0, 0, 2, -18], guts: [3, 0, 3, 6, 0, 2, -20], wit: [2, 0, 0, 0, 6, 3, 5] },
       finale: { name: "Twinkle Star Climax", turns: [74, 76, 78], forced: true, note: "Three finale races. Your result decides the scenario bonus." },
       summary: "There are no fixed goal races. You race for Grade Points and shop coins (1st place 100, 2nd-3rd 60, 4th-5th 30), then spend coins on items that boost training. The shop restocks every 6 turns.",
       coreLoop: [
@@ -127,6 +136,7 @@
       totalTurns: 78,
       caps: [1600, 1300, 1300, 1500, 1300],
       gainScale: 1.15,
+      train: { speed: [8, 0, 4, 0, 0, 4, -19], stamina: [0, 8, 0, 6, 0, 4, -20], power: [0, 4, 9, 0, 0, 4, -20], guts: [2, 0, 2, 7, 0, 4, -20], wit: [2, 0, 0, 0, 6, 5, 5] },
       finale: { name: "Grand Concert", turns: [], forced: false, note: "The career builds to the Grand Concert. Mark goal races as your game shows them." },
       summary: "Training earns performance points (Dance, Passion, Vocal, Visual, Mental; 200 each at first). You spend them on song lessons, which take no turn. Promo concerts run every six months from Late December of Junior year.",
       coreLoop: [
@@ -160,6 +170,7 @@
       totalTurns: 78,
       caps: [1500, 1400, 1500, 1300, 1300],
       gainScale: 1.3,
+      train: { speed: [10, 0, 3, 0, 0, 5, -19], stamina: [0, 8, 0, 6, 0, 5, -20], power: [0, 4, 9, 0, 0, 5, -20], guts: [2, 0, 3, 9, 0, 5, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
       finale: { name: "Grand Masters finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
       summary: "From turn 3, trainings, rests, outings and races drop Knowledge Fragments in three goddess colors. Eight fragments fuse into a Goddess Wisdom, which levels that goddess up and gives a one-turn buff.",
       coreLoop: [
@@ -190,6 +201,7 @@
       totalTurns: 67,
       caps: [1600, 1600, 1500, 1500, 1300],
       gainScale: 1.35,
+      train: { speed: [10, 0, 3, 0, 0, 6, -21], stamina: [0, 9, 0, 4, 0, 6, -19], power: [0, 5, 11, 0, 0, 6, -20], guts: [3, 0, 2, 10, 0, 6, -21], wit: [2, 0, 0, 0, 9, 6, 5] },
       finale: { name: "Prix de l'Arc de Triomphe (Senior)", turns: [67], forced: true, note: "The career ends with the Senior-year Arc." },
       summary: "An overseas campaign aimed at the Arc. Supporter points raise the Expectation gauge (a training bonus), the summer camps become France expeditions, and the SS Match facility trains with members whose Star gauge is full.",
       coreLoop: [
@@ -223,6 +235,8 @@
       totalTurns: 78,
       caps: [1700, 1500, 1500, 1500, 1300],
       gainScale: 1.45,
+      train: { speed: [12, 0, 1, 0, 0, 6, -15], stamina: [0, 11, 0, 2, 0, 6, -15], power: [0, 2, 11, 0, 0, 6, -15], guts: [1, 0, 1, 12, 0, 6, -15], wit: [2, 0, 0, 0, 11, 6, -15] },
+      trainNote: "Sphere genre values; Fight gives fewer stats and more skill points, Free gives more Speed.",
       finale: { name: "U.A.F. Showdown", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
       summary: "The five facilities become 15 sports in three genres (Sphere, Fight, Free). Every time a genre passes a 50-level mark, a Heat-Up gives all trainings a bonus for two turns. The festival runs in three parts: Test Stage, Trials and Showdown.",
       coreLoop: [
@@ -253,6 +267,7 @@
       totalTurns: 78,
       caps: [1750, 1000, 1700, 1700, 1350],
       gainScale: 1.45,
+      train: { speed: [11, 0, 2, 0, 0, 5, -19], stamina: [0, 8, 0, 5, 0, 5, -20], power: [0, 4, 9, 0, 0, 5, -20], guts: [2, 0, 2, 10, 0, 5, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
       finale: { name: "Food Festival finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
       summary: "Training trims vegetables (carrot, garlic, potato, chili, strawberry), which are harvested every 4 turns. A cooked dish only lasts for the turn you cook it, giving +25% or +50% training bonus to its stats.",
       coreLoop: [
@@ -280,6 +295,7 @@
       totalTurns: 78,
       caps: [1750, 1700, 1500, 1300, 1300],
       gainScale: 1.5,
+      train: { speed: [11, 0, 2, 0, 0, 5, -19], stamina: [0, 10, 0, 4, 0, 5, -20], power: [0, 4, 10, 0, 0, 5, -20], guts: [2, 0, 2, 9, 0, 5, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
       finale: { name: "Mecha finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
       summary: "Training raises Research Levels, which boost training and must pass each Upgrade Exam. Mecha Gears on a facility add research and Overdrive gauge, and a full gauge unlocks Overdrive training turns.",
       coreLoop: [
@@ -308,6 +324,7 @@
       totalTurns: 78,
       caps: [1850, 1600, 1600, 1500, 1450],
       gainScale: 1.55,
+      train: { speed: [11, 0, 2, 0, 0, 7, -20], stamina: [0, 8, 0, 6, 0, 7, -21], power: [0, 4, 10, 0, 0, 7, -21], guts: [2, 0, 2, 10, 0, 7, -21], wit: [3, 0, 0, 0, 7, 5, 5] },
       finale: { name: "Legends finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
       summary: "Three legends guide you. Training with one fills her Guidance gauge (+1 normal, +3 friendship, 8 slots). Every 6 turns you pick a Heart Knowledge, and a full gauge unlocks that legend's guidance buff.",
       coreLoop: [
@@ -337,6 +354,7 @@
       totalTurns: 78,
       caps: [1850, 1700, 1700, 1600, 1300],
       gainScale: 1.6,
+      train: { speed: [12, 0, 1, 0, 0, 6, -20], stamina: [0, 9, 0, 5, 0, 6, -20], power: [0, 3, 11, 0, 0, 6, -20], guts: [2, 0, 2, 10, 0, 6, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
       finale: { name: "Island finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
       summary: "You build training facilities on an island. Development points earn Island Training tickets. Island Training costs no energy, can't fail and trains every facility at once, but it can't be used during camp, the finale or goal-race turns.",
       coreLoop: [
@@ -372,6 +390,8 @@
       totalTurns: 78,
       caps: [1900, 1800, 1700, 1700, 1400],
       gainScale: 1.65,
+      train: { speed: [12, 0, 1, 0, 0, 6, -20], stamina: [0, 9, 0, 5, 0, 6, -20], power: [0, 3, 11, 0, 0, 6, -20], guts: [2, 0, 2, 10, 0, 6, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
+      trainApprox: true,
       finale: { name: "Onsen finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
       summary: "Training digs hot springs, and each spring adds energy recovery and friendship bonuses. A bath ticket (max 3) takes no turn and restores energy, gives skill points and boosts training for 2 turns. Bathing parties at the end of Junior and Classic raise every training level by 1.",
       coreLoop: [
@@ -407,6 +427,8 @@
       totalTurns: 78,
       caps: [2100, 1700, 1700, 1700, 1800],
       gainScale: 1.8,
+      train: { speed: [12, 0, 1, 0, 0, 6, -20], stamina: [0, 9, 0, 5, 0, 6, -20], power: [0, 3, 11, 0, 0, 6, -20], guts: [2, 0, 2, 10, 0, 6, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
+      trainApprox: true,
       finale: { name: "Breeders' Cup goal", turns: [], forced: false, note: "You pick the final Breeders' Cup race; the top-sorted choice is usually best. Mark it as a goal race on the turn your game shows." },
       summary: "You lead a team of three. Training with a member fills her Dream gauge (about 3 trainings), and training with her at full gauge ranks her up. Team rank equals your lowest member's rank. DREAMS training puts the members plus up to 5 cards on every facility.",
       coreLoop: [
@@ -437,6 +459,8 @@
       totalTurns: 78,
       caps: [2150, 1800, 1700, 1700, 1800],
       gainScale: 1.85,
+      train: { speed: [12, 0, 1, 0, 0, 6, -20], stamina: [0, 9, 0, 5, 0, 6, -20], power: [0, 3, 11, 0, 0, 6, -20], guts: [2, 0, 2, 10, 0, 6, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
+      trainApprox: true,
       finaleEnergy: 20,
       finale: { name: "URA Finals (special ramen)", turns: [74, 76, 78], forced: true, note: "The special ramen gives +20 energy per turn, +1 mood and +150% friendship bonus, so take friendship training every turn." },
       summary: "Training fills noodle, soup and topping gauges that earn ramen tips (max 10). A tasting session spends a region's tips for a buff, and the Ramen Jamboree (RMJ) checks your progress. It has the highest stat caps so far.",
@@ -467,6 +491,8 @@
       totalTurns: 78,
       caps: [2150, 1800, 1700, 1700, 1800],
       gainScale: 1.85,
+      train: { speed: [12, 0, 1, 0, 0, 6, -20], stamina: [0, 9, 0, 5, 0, 6, -20], power: [0, 3, 11, 0, 0, 6, -20], guts: [2, 0, 2, 10, 0, 6, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
+      trainApprox: true,
       finale: { name: "Festival finale", turns: [], forced: false, note: "Mechanics haven't been revealed yet." },
       summary: "Announced for late October 2026 in JP. It's set at a festival held once every twelve years, with Umamusume appointed as sacred horses (神駒). Mechanics haven't been revealed, so the coach uses general training logic and assumes Trecen-ken's stat caps.",
       coreLoop: [

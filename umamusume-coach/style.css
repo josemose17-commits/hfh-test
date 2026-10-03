@@ -248,3 +248,60 @@ tr.phase-row b { color: var(--fg); font-family: var(--font-display); font-size: 
 @media (min-width: 901px) { .toast { bottom: 24px; } }
 
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+
+/* Trainee and deck */
+.ty-speed { --c: var(--speed); } .ty-stamina { --c: var(--stamina); } .ty-power { --c: var(--power); } .ty-guts { --c: var(--guts); } .ty-wit { --c: var(--wit); } .ty-friend { --c: var(--gold); } .ty-group { --c: var(--fin); }
+.deckpanel summary { cursor: pointer; display: grid; gap: 2px; list-style: none; }
+.deckpanel summary::-webkit-details-marker { display: none; }
+.deckpanel summary h2::before { content: "▸ "; color: var(--muted); }
+.deckpanel[open] summary h2::before { content: "▾ "; }
+.deck-body { display: grid; gap: 10px; margin-top: 8px; }
+.deck-body input:not([type]), .db-controls input:not([type]) { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; width: 100%; min-width: 0; }
+.trainee-info { display: grid; gap: 6px; justify-items: start; }
+.apts { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.apts .sep { width: 6px; }
+.apt { display: inline-flex; align-items: baseline; gap: 3px; font-family: var(--font-mono); font-size: .78rem; border-radius: 4px; padding: 0 5px; background: var(--surface-2); font-weight: 600; }
+.apt i { font-style: normal; font-family: var(--font-body); font-weight: 400; font-size: .7rem; color: var(--muted); }
+.apt-S, .apt-A { background: var(--accent); color: var(--accent-ink); }
+.apt-S i, .apt-A i { color: var(--accent-ink); opacity: .85; }
+.apt-B, .apt-C { background: var(--surface-2); }
+.apt-E, .apt-F, .apt-G { color: var(--muted); }
+.slots { display: grid; gap: 8px; }
+.slot { border: 1px solid var(--line); border-left: 5px solid var(--c, var(--line)); border-radius: 8px; padding: 6px 8px; display: grid; gap: 4px; min-width: 0; }
+.slot.empty { border-style: dashed; border-left-width: 1px; }
+.slot-top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.slot-top .slot-name { flex: 1 1 200px; }
+.slot-top select { padding: 5px 6px; }
+.tydot { width: 10px; height: 10px; border-radius: 50%; background: var(--c, var(--muted)); flex: none; }
+.bond { display: inline-flex; align-items: center; gap: 4px; font-size: .75rem; color: var(--muted); }
+.bond input { width: 56px; padding: 5px; text-align: right; }
+.bond.full input { border-color: var(--gold); }
+.slot-fx { display: flex; flex-wrap: wrap; gap: 3px 10px; font-size: .78rem; }
+.fx b { font-weight: 600; color: var(--muted); }
+.fx.uq { color: var(--fin); flex-basis: 100%; }
+.fx.dim { color: var(--muted); font-style: italic; }
+
+/* Cards on a training */
+.mchips { display: flex; flex-wrap: wrap; gap: 4px; }
+.mchip { position: relative; border: 2px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 6px; font-size: .74rem; cursor: pointer; line-height: 1.2; color: var(--muted); min-height: 30px; }
+.mchip::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--c); margin-right: 4px; vertical-align: middle; }
+.mchip small { margin-left: 4px; font-family: var(--font-mono); font-size: .66rem; opacity: .8; }
+.mchip.on { border-color: var(--c); color: var(--fg); background: var(--surface-2); font-weight: 600; }
+.mchip.rb { box-shadow: 0 0 0 2px var(--gold); }
+.mchip.rb.on { background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 22%, var(--surface)), var(--surface-2)); }
+.nf.lv select { padding: 4px 6px; }
+
+/* Card and trainee browser */
+.db-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px; }
+.cardgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 8px; }
+.cardrow { background: var(--surface); border: 1px solid var(--line); border-top: 4px solid var(--c, var(--line)); border-radius: var(--r); padding: 8px 10px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.cardrow.open { grid-column: 1 / -1; }
+.cardrow-head { display: flex; gap: 8px; align-items: center; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; width: 100%; }
+.cardname { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rar { font-family: var(--font-display); font-weight: 700; font-size: .85rem; padding: 0 6px; border-radius: 4px; border: 1px solid var(--line); }
+.rar.r3 { color: var(--gold); border-color: var(--gold); }
+.cardrow > .btn { justify-self: start; }
+.card-detail { display: grid; gap: 6px; }
+.lbtable th, .lbtable td { padding: 4px 8px; font-size: .82rem; }
+.lbtable tbody th { font-weight: 500; }
+.trainees td { font-size: .85rem; }

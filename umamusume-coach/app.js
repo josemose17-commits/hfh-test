@@ -5,7 +5,14 @@
   const STORE_KEY = "uma-turn-coach-v2";
   const PIP_MAX = 5;
 
-  const blankFacility = (stat) => ({ stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {} });
+  const D = window.UmaDeck;
+  const HAS_DATA = !!(D && D.DATA);
+  const TODAY = new Date().toISOString().slice(0, 10);
+  const APT = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
+  const FX_SHORT = { 1: "Friendship", 8: "Training", 2: "Mood", 15: "Race", 19: "Specialty", 14: "Init. bond", 30: "SP bonus", 3: "Spd bonus", 4: "Sta bonus", 5: "Pow bonus", 6: "Gut bonus", 7: "Wit bonus", 27: "Fail prot.", 28: "Energy cut", 31: "Wit recovery", 41: "All stats", 18: "Hint rate", 17: "Hint Lv" };
+  const blankFacility = (stat) => ({ stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], extra: 0 });
+  const blankDeck = () => ({ trainee: null, slots: [null, null, null, null, null, null], globalOnly: true });
+  const resetBonds = (d) => Object.assign({}, d, { slots: d.slots.map((sl) => (sl ? { id: sl.id, lb: sl.lb, bond: null } : null)) });
 
   function freshState(keep) {
     const k = keep || {};
@@ -18,7 +25,11 @@
       maxEnergy: k.maxEnergy || 100,
       trackStats: k.trackStats != null ? k.trackStats : true,
       calib: k.calib || [],
+      fcal: k.fcal || [],
       caps: k.caps || {},
+      deck: k.deck ? resetBonds(k.deck) : blankDeck(),
+      facLevels: {},
+      db: k.db || null,
       turn: 1,
       energy: 100,
       mood: 2,
@@ -44,14 +55,19 @@
       { stat: "power", gain: null, cards: 2, rainbows: 1, unbonded: 1, hint: false, fail: null, extras: {} },
       { stat: "guts", gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {} },
       { stat: "wit", gain: null, cards: 1, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {} }
-    ];
+    ].map((f) => Object.assign(blankFacility(f.stat), f));
     return s;
   }
 
   function load() {
     try {
       const s = JSON.parse(localStorage.getItem(STORE_KEY));
-      if (s && s.v === 2 && s.facilities && s.facilities.length === 5) return s;
+      if (s && s.v === 2 && s.facilities && s.facilities.length === 5) {
+        s.deck = s.deck || blankDeck();
+        s.facLevels = s.facLevels || {};
+        s.facilities.forEach((f) => { f.members = f.members || []; f.extra = f.extra || 0; });
+        return s;
+      }
     } catch (e) { /* storage unavailable */ }
     return exampleState();
   }
@@ -116,6 +132,20 @@
 
       <main class="grid">
         <section class="inputs" aria-label="This turn">
+          <details class="panel deckpanel" id="deckPanel">
+            <summary><h2>Trainee and deck</h2><span class="mini" id="deckSummary"></span></summary>
+            <div class="deck-body">
+              <div class="row-wrap">
+                <label class="field grow"><span>Trainee</span><input id="traineeInput" list="traineeList" placeholder="Type a name, e.g. Special Week" autocomplete="off"></label>
+                <label class="chip-toggle"><input type="checkbox" id="globalOnly"> Global only</label>
+              </div>
+              <div id="traineeInfo" class="trainee-info"></div>
+              <div class="slots" id="slots"></div>
+              <p class="mini">With a deck set, tap which of your cards are on each training. Friendship is detected from each card's type and bond. Bonds start at the card's initial value and go up by 7 each time you train together and press Done. Fix them here if they drift from the game.</p>
+            </div>
+          </details>
+          <datalist id="traineeList"></datalist><datalist id="cardList"></datalist>
+
           <div class="panel status">
             <div class="row2">
               <div class="field">
@@ -143,7 +173,7 @@
             <button type="button" class="btn ghost small" id="clearFacs">Clear</button>
           </div>
           <div class="facilities" id="facilities"></div>
-          <p class="mini">Tap the dots to set <b>Cards</b> on the training, <b>Rainbow</b> (friendship) cards and cards with <b>Bond under 80</b>. Leave <b>Gain</b> and <b>Fail</b> blank and the coach estimates them. Typing the real total gain (the green numbers added up) makes the call much sharper.</p>
+          <p class="mini" id="facHelp"></p>
 
           <details class="panel stats" id="statsPanel">
             <summary><h2>Stats and caps</h2><span class="mini">Optional. Lets the coach stop pushing stats that are capped or already enough.</span></summary>
@@ -163,9 +193,11 @@
         <button type="button" role="tab" data-tab="log">Career log</button>
         <button type="button" role="tab" data-tab="guide">Scenario guide</button>
         <button type="button" role="tab" data-tab="all">All scenarios</button>
+        <button type="button" role="tab" data-tab="cards" id="tabCards">Support cards</button>
+        <button type="button" role="tab" data-tab="trainees" id="tabTrainees">Trainees</button>
       </nav>
       <section id="tabBody" class="tab-body"></section>
-      <footer class="foot">Scenario notes are compiled from JP and Global guides as of October 2026 (Global after the July 2026 rebalance). Turns marked "approx." can shift, so the in-game goal list always wins. Scores are estimates: 100 means a typical training for this point in the career. Fan-made tool, not affiliated with Cygames.</footer>
+      <footer class="foot">Scenario notes are compiled from JP and Global guides as of October 2026 (Global after the July 2026 rebalance). Turns marked "approx." can shift, so the in-game goal list always wins. Scores are estimates: 100 means a typical training for this point in the career. Card and trainee data from <a href="https://gametora.com/umamusume" target="_blank" rel="noopener">GameTora</a>${HAS_DATA ? " (built " + D.DATA.meta.built + ")" : ""}. Fan-made tool, not affiliated with Cygames.</footer>
       <div class="dock" id="dock"><div class="dock-text" id="dockText"></div><button type="button" class="btn" id="dockDone">Done ▶</button></div>
     `;
 
@@ -220,6 +252,18 @@
 
     // Training cards: pips, toggles and number boxes.
     $("#facilities").addEventListener("click", (e) => {
+      const mc = e.target.closest("[data-member]");
+      if (mc) {
+        // A card shows up on one training per turn, so tapping it here removes it elsewhere.
+        const f = state.facilities[+mc.closest("[data-idx]").dataset.idx];
+        const si = +mc.dataset.member;
+        const on = f.members.indexOf(si) !== -1;
+        state.facilities.forEach((x) => { x.members = (x.members || []).filter((m) => m !== si); });
+        if (!on) f.members.push(si);
+        renderFacilities();
+        commit();
+        return;
+      }
       const pip = e.target.closest("[data-pip]");
       if (!pip) return;
       const box = pip.closest("[data-idx]");
@@ -228,7 +272,8 @@
       const k = pip.dataset.pip;
       let v = +pip.dataset.v;
       if (f[k] === v) v = v - 1; // tapping the last filled dot clears it
-      setCount(f, k, Math.max(0, v));
+      if (k === "extra") f.extra = Math.max(0, v);
+      else setCount(f, k, Math.max(0, v));
       box.outerHTML = facilityHTML(f, idx);
       commit();
     });
@@ -239,6 +284,10 @@
         const k = e.target.dataset.k;
         f[k] = e.target.type === "checkbox" ? e.target.checked : numOrNull(e.target.value);
         if (k === "hint") e.target.closest("label").classList.toggle("on", f.hint);
+      }
+      if (e.target.dataset.lv) {
+        const v = +e.target.value;
+        if (v) state.facLevels[f.stat] = v; else delete state.facLevels[f.stat];
       }
       if (e.target.dataset.extra) {
         f.extras[e.target.dataset.extra] = readExtra(e.target);
@@ -256,6 +305,50 @@
       commit();
     });
 
+    if (HAS_DATA) {
+      $("#globalOnly").addEventListener("change", (e) => { state.deck.globalOnly = e.target.checked; fillLists(); commit(); });
+      $("#traineeInput").addEventListener("change", (e) => {
+        const v = e.target.value.trim();
+        const t = traineeByLabel.get(v);
+        if (t && t.id === state.deck.trainee) return;
+        if (t) { state.deck.trainee = t.id; commit(true); flash(t.n + " set as trainee"); }
+        else if (!v) { state.deck.trainee = null; commit(true); }
+        else flash("No trainee matches that name. Pick one from the list.");
+      });
+      $("#traineeInfo").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-build]");
+        if (b) { state.build = b.dataset.build; commit(true); flash("Build set to " + E.BUILDS[state.build].label); }
+      });
+      $("#slots").addEventListener("change", (e) => {
+        const t = e.target;
+        if (t.dataset.slotName != null) {
+          const i = +t.dataset.slotName;
+          const v = t.value.trim();
+          const c = cardByLabel.get(v);
+          const cur = state.deck.slots[i];
+          if (c && cur && cur.id === c.id) return;
+          if (c) { state.deck.slots[i] = { id: c.id, lb: 4, bond: null }; commit(true); }
+          else if (!v) { clearSlot(i); }
+          else flash("No card matches that name. Pick one from the list.");
+        }
+        if (t.dataset.slotLb != null) { const sl = state.deck.slots[+t.dataset.slotLb]; sl.lb = +t.value; sl.bond = sl.bond; commit(true); }
+      });
+      $("#slots").addEventListener("input", (e) => {
+        const t = e.target;
+        if (t.dataset.slotBond != null) {
+          const v = numOrNull(t.value);
+          state.deck.slots[+t.dataset.slotBond].bond = v == null ? null : Math.max(0, Math.min(100, v));
+          renderFacilities();
+          commit();
+        }
+      });
+      $("#slots").addEventListener("click", (e) => { const b = e.target.closest("[data-slot-clear]"); if (b) clearSlot(+b.dataset.slotClear); });
+    } else {
+      $("#deckPanel").hidden = true;
+      $("#tabCards").hidden = true;
+      $("#tabTrainees").hidden = true;
+    }
+
     $("#options").addEventListener("click", (e) => {
       const did = e.target.closest("[data-did]");
       if (did) { done(rec.ranked[+did.dataset.did]); return; }
@@ -272,6 +365,22 @@
       const t = e.target.closest("[data-goto]"); if (t) { setTurn(+t.dataset.goto); window.scrollTo({ top: 0, behavior: "smooth" }); }
       const s = e.target.closest("[data-pick]"); if (s) { sel.value = s.dataset.pick; sel.dispatchEvent(new Event("change")); state.tab = "guide"; save(); renderTab(); }
       if (e.target.closest("[data-undo]")) undoTurn();
+      const add = e.target.closest("[data-add-card]");
+      if (add) { addToDeck(+add.dataset.addCard); return; }
+      const use = e.target.closest("[data-use-trainee]");
+      if (use) { state.deck.trainee = +use.dataset.useTrainee; commit(true); flash(D.trainee(state.deck.trainee).n + " set as trainee"); return; }
+      const more = e.target.closest("[data-more]");
+      if (more) { db().limit += 60; renderDbList(); return; }
+      const row = e.target.closest("[data-db-row]");
+      if (row) { const id = +row.dataset.dbRow; db().open = db().open === id ? null : id; renderDbList(); }
+    });
+    $("#tabBody").addEventListener("input", (e) => {
+      const k = e.target.dataset.db; if (!k) return;
+      const d = db();
+      d[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+      d.limit = 60;
+      save();
+      renderDbList();
     });
 
     document.addEventListener("keydown", (e) => {
@@ -415,12 +524,233 @@
           <label class="nf"><span>Gain</span><input type="number" inputmode="numeric" data-k="gain" min="0" max="400" value="${f.gain != null ? f.gain : ""}" placeholder="auto"></label>
           <label class="nf"><span>Fail %</span><input type="number" inputmode="numeric" data-k="fail" min="0" max="99" value="${f.fail != null ? f.fail : ""}" placeholder="auto"></label>
         </div>
-        ${pipsHTML("cards", f.cards, "Cards", "c")}
+        ${deckOn() ? memberChips(f) : `${pipsHTML("cards", f.cards, "Cards", "c")}
         ${pipsHTML("rainbows", f.rainbows, "Rainbow", "r")}
-        ${pipsHTML("unbonded", f.unbonded, "Bond<80", "b")}
+        ${pipsHTML("unbonded", f.unbonded, "Bond<80", "b")}`}
         <label class="chk ${f.hint ? "on" : ""}"><input type="checkbox" data-k="hint" ${f.hint ? "checked" : ""}> Hint !</label>
         ${facInputs.map((i) => extraField(i, f.extras)).join("")}
       </fieldset>`;
+  }
+
+
+  // ---- Deck (GameTora data) ----
+  const cardByLabel = new Map();
+  const traineeByLabel = new Map();
+  if (HAS_DATA) {
+    D.DATA.supports.forEach((c) => cardByLabel.set(D.label(c), c));
+    D.DATA.trainees.forEach((t) => traineeByLabel.set(traineeLabel(t), t));
+  }
+
+  function traineeLabel(t) { return t.n + " [" + t.t + "]"; }
+  function deckOn() { return HAS_DATA && state.deck && state.deck.slots.some(Boolean); }
+  function shortName(c) { return c.n.length > 11 ? c.n.split(/[\s.]/)[0] : c.n; }
+  function slotBond(sl) {
+    const c = D.card(sl.id);
+    return sl.bond != null ? sl.bond : D.initialBond(c, D.levelFor(c, sl.lb));
+  }
+
+  function renderFacilities() {
+    $("#facilities").innerHTML = state.facilities.map(facilityHTML).join("");
+    $("#facHelp").innerHTML = deckOn()
+      ? "Tap your cards on each training (a gold ring means friendship there) and add <b>Others</b> for characters not in your deck. Gains come from your cards' real effects. Typing the real total gain still wins, and teaches the coach this scenario's extra bonuses."
+      : "Tap the dots to set <b>Cards</b> on the training, <b>Rainbow</b> (friendship) cards and cards with <b>Bond under 80</b>. Leave <b>Gain</b> and <b>Fail</b> blank and the coach estimates them. Typing the real total gain (the green numbers added up) makes the call much sharper. For exact gains, set your deck under <b>Trainee and deck</b>.";
+  }
+
+  function memberChips(f) {
+    const sc = scenario();
+    const chips = state.deck.slots.map((sl, si) => {
+      if (!sl) return "";
+      const c = D.card(sl.id);
+      const bond = slotBond(sl);
+      const on = (f.members || []).indexOf(si) !== -1;
+      const rb = D.isRainbow(c, bond, f.stat);
+      return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""}">${esc(shortName(c))}${bond < 80 ? `<small>${Math.round(bond)}</small>` : ""}</button>`;
+    }).join("");
+    const auto = E.facLevelFor(Object.assign({}, state, { facLevels: {} }), sc, f.stat);
+    const cur = state.facLevels[f.stat] || 0;
+    return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>
+      ${pipsHTML("extra", f.extra || 0, "Others (not in deck)", "c")}
+      <label class="nf lv"><span>Facility level</span><select data-lv="1"><option value="0">Auto (${auto})</option>${[1, 2, 3, 4, 5].map((l) => `<option value="${l}" ${cur === l ? "selected" : ""}>Lv ${l}</option>`).join("")}</select></label>`;
+  }
+
+  function keyEffects(c, level) {
+    const fx = D.baseEffects(c, level);
+    const order = [1, 8, 2, 15, 19, 14, 30, 3, 4, 5, 6, 7, 41, 27, 28, 31, 18, 17];
+    const parts = order.filter((id) => fx[id]).map((id) => `<span class="fx"><b>${FX_SHORT[id]}</b> ${D.formatEffect(id, fx[id])}</span>`);
+    const cond = D.conditionalUniques(c, level).map((u) => `<span class="fx uq">${esc(D.uniqueText(u))}</span>`);
+    const locked = c.u && c.u.lv > level ? `<span class="fx dim">Unique effect unlocks at Lv ${c.u.lv}</span>` : "";
+    return parts.concat(cond).join("") + locked;
+  }
+
+  function fillLists() {
+    if (!HAS_DATA) return;
+    const g = state.deck.globalOnly;
+    const cards = D.DATA.supports.filter((c) => !g || D.onGlobal(c, TODAY)).sort((a, b) => b.r - a.r || a.n.localeCompare(b.n));
+    $("#cardList").innerHTML = cards.map((c) => `<option value="${esc(D.label(c))}"></option>`).join("");
+    const ts = D.DATA.trainees.filter((t) => !g || D.onGlobal(t, TODAY)).sort((a, b) => a.n.localeCompare(b.n));
+    $("#traineeList").innerHTML = ts.map((t) => `<option value="${esc(traineeLabel(t))}"></option>`).join("");
+  }
+
+  function aptChips(t) {
+    const grp = (from, to) => APT.slice(from, to).map((n, i) => `<span class="apt apt-${t.apt[from + i]}"><i>${n}</i>${t.apt[from + i]}</span>`).join("");
+    return `<div class="apts">${grp(0, 2)}<span class="sep"></span>${grp(2, 6)}<span class="sep"></span>${grp(6, 10)}</div>`;
+  }
+
+  function growthText(t) {
+    const g = E.STATS.map((s, i) => (t.g[i] ? "+" + t.g[i] + "% " + E.STAT_LABELS[s] : "")).filter(Boolean);
+    return g.length ? g.join(", ") : "no growth bonus";
+  }
+
+  // Re-rendering the deck must not steal the field the user just moved into.
+  function renderDeck() {
+    if (!HAS_DATA) return;
+    const a = document.activeElement;
+    const keep = a && a.closest && a.closest("#deckPanel") && Object.keys(a.dataset).length ? Object.entries(a.dataset)[0] : a && a.id === "traineeInput" ? ["id", "traineeInput"] : null;
+    renderDeckInner();
+    if (keep) {
+      const el = keep[0] === "id" ? $("#" + keep[1]) : $("#deckPanel [data-" + keep[0].replace(/[A-Z]/g, (m) => "-" + m.toLowerCase()) + '="' + keep[1] + '"]');
+      if (el) el.focus();
+    }
+  }
+
+  function renderDeckInner() {
+    const dk = state.deck;
+    $("#globalOnly").checked = !!dk.globalOnly;
+    const t = dk.trainee ? D.trainee(dk.trainee) : null;
+    $("#traineeInput").value = t ? traineeLabel(t) : "";
+    if (t) {
+      const sug = D.suggestBuild(t);
+      $("#traineeInfo").innerHTML = `${aptChips(t)}
+        <div class="mini">Growth: <b>${growthText(t)}</b> · Unique skill: <b>${esc(t.us.map((id) => D.DATA.skills[id] || id).join(", "))}</b></div>
+        ${sug !== state.build ? `<button type="button" class="btn ghost small" data-build="${sug}">Use suggested build: ${E.BUILDS[sug].label}</button>` : `<span class="mini">Build matches her best distance.</span>`}`;
+    } else {
+      $("#traineeInfo").innerHTML = `<span class="mini">Pick your trainee to apply her growth bonuses and get a build suggestion.</span>`;
+    }
+    $("#slots").innerHTML = dk.slots.map((sl, i) => {
+      const c = sl && D.card(sl.id);
+      if (!c) return `<div class="slot empty"><input class="slot-name" data-slot-name="${i}" list="cardList" placeholder="Card ${i + 1}: type a name" autocomplete="off" aria-label="Support card ${i + 1}"></div>`;
+      const lvl = D.levelFor(c, sl.lb);
+      const bond = slotBond(sl);
+      return `<div class="slot ty-${c.ty}">
+        <div class="slot-top">
+          <span class="tydot" aria-hidden="true"></span>
+          <input class="slot-name" data-slot-name="${i}" list="cardList" value="${esc(D.label(c))}" autocomplete="off" aria-label="Support card ${i + 1}">
+          <select data-slot-lb="${i}" aria-label="Limit break">${[0, 1, 2, 3, 4].map((lb) => `<option value="${lb}" ${lb === sl.lb ? "selected" : ""}>LB${lb} · Lv${D.levelFor(c, lb)}</option>`).join("")}</select>
+          <label class="bond${bond >= 80 ? " full" : ""}"><span>Bond</span><input type="number" inputmode="numeric" data-slot-bond="${i}" min="0" max="100" value="${Math.round(bond)}"></label>
+          <button type="button" class="btn ghost small square" data-slot-clear="${i}" aria-label="Remove card">✕</button>
+        </div>
+        <div class="slot-fx">${keyEffects(c, lvl)}</div>
+      </div>`;
+    }).join("");
+    const used = dk.slots.filter(Boolean).length;
+    const info = E.deckInfo(state);
+    $("#deckSummary").textContent = (t ? t.n + " · " : "") + (used ? used + " card" + (used > 1 ? "s" : "") + (info ? " · race bonus " + info.raceBonus + "%" : "") : "Optional: set your deck for exact gains");
+    if (!used && !t) $("#deckPanel").open = $("#deckPanel").open || false;
+  }
+
+  function clearSlot(i) {
+    state.deck.slots[i] = null;
+    state.facilities.forEach((f) => { f.members = (f.members || []).filter((m) => m !== i); });
+    commit(true);
+  }
+
+  function addToDeck(id) {
+    const i = state.deck.slots.findIndex((x) => !x);
+    if (i < 0) { flash("Your deck is full. Remove a card first."); return; }
+    state.deck.slots[i] = { id, lb: 4, bond: null };
+    commit(true);
+    flash(D.card(id).n + " added to slot " + (i + 1) + " (LB4; change it in Trainee and deck)");
+  }
+
+  // ---- Support card and trainee browser ----
+  function db() {
+    if (!state.db) state.db = { q: "", type: "", rarity: "", lb: "4", sort: "1", global: true, open: null, limit: 60, tq: "", tsort: "name" };
+    return state.db;
+  }
+
+  const SORTS = [["1", "Friendship"], ["8", "Training effectiveness"], ["2", "Mood effect"], ["19", "Specialty priority"], ["15", "Race bonus"], ["14", "Initial bond"], ["30", "Skill point bonus"], ["stat", "Stat bonuses"], ["new", "Newest"]];
+
+  function dbControls() {
+    const d = db();
+    const opt = (pairs, v) => pairs.map(([k, l]) => `<option value="${k}" ${String(v) === k ? "selected" : ""}>${l}</option>`).join("");
+    if (state.tab === "cards") {
+      return `<div class="db-controls">
+        <label class="field grow"><span>Search</span><input data-db="q" value="${esc(d.q)}" placeholder="Name or title" autocomplete="off"></label>
+        <label class="field"><span>Type</span><select data-db="type">${opt([["", "All"], ["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"]], d.type)}</select></label>
+        <label class="field"><span>Rarity</span><select data-db="rarity">${opt([["", "All"], ["3", "SSR"], ["2", "SR"], ["1", "R"]], d.rarity)}</select></label>
+        <label class="field"><span>Limit break</span><select data-db="lb">${opt([["0", "LB0"], ["1", "LB1"], ["2", "LB2"], ["3", "LB3"], ["4", "LB4 (max)"]], d.lb)}</select></label>
+        <label class="field"><span>Sort by</span><select data-db="sort">${opt(SORTS, d.sort)}</select></label>
+        <label class="chip-toggle"><input type="checkbox" data-db="global" ${d.global ? "checked" : ""}> Global only</label>
+      </div><div id="dbList"></div>`;
+    }
+    return `<div class="db-controls">
+      <label class="field grow"><span>Search</span><input data-db="tq" value="${esc(d.tq)}" placeholder="Name or title" autocomplete="off"></label>
+      <label class="field"><span>Best distance</span><select data-db="tdist">${opt([["", "Any"], ["2", "Sprint"], ["3", "Mile"], ["4", "Medium"], ["5", "Long"], ["1", "Dirt"]], d.tdist || "")}</select></label>
+      <label class="chip-toggle"><input type="checkbox" data-db="global" ${d.global ? "checked" : ""}> Global only</label>
+    </div><div id="dbList"></div>`;
+  }
+
+  function renderDbList() {
+    const el = $("#dbList");
+    if (!el) return;
+    const d = db();
+    if (state.tab === "cards") {
+      const q = d.q.trim().toLowerCase();
+      let list = D.DATA.supports.filter((c) =>
+        (!d.global || D.onGlobal(c, TODAY)) && (!d.type || c.ty === d.type) && (!d.rarity || c.r === +d.rarity) &&
+        (!q || (c.n + " " + c.t).toLowerCase().indexOf(q) !== -1));
+      const lvOf = (c) => D.levelFor(c, +d.lb);
+      const key = (c) => {
+        const fx = D.baseEffects(c, lvOf(c));
+        if (d.sort === "stat") return [3, 4, 5, 6, 7, 41].reduce((a, id) => a + (fx[id] || 0), 0);
+        if (d.sort === "new") return (d.global ? c.en : c.jp) || "";
+        return fx[+d.sort] || 0;
+      };
+      list = list.map((c) => [c, key(c)]).sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : b[0].r - a[0].r)).map((x) => x[0]);
+      const shown = list.slice(0, d.limit);
+      el.innerHTML = `<p class="mini">${list.length} card${list.length === 1 ? "" : "s"}. Values at ${["LB0", "LB1", "LB2", "LB3", "LB4"][+d.lb]}. Tap a card for every limit break, its skills and its unique effect.</p>
+        <div class="cardgrid">${shown.map((c) => cardRow(c, lvOf(c), d.open === c.id)).join("")}</div>
+        ${list.length > shown.length ? `<button type="button" class="btn ghost" data-more="1">Show more (${list.length - shown.length} left)</button>` : ""}`;
+    } else {
+      const q = (d.tq || "").trim().toLowerCase();
+      const rank = (g) => "GFEDCBAS".indexOf(g);
+      let list = D.DATA.trainees.filter((t) => (!d.global || D.onGlobal(t, TODAY)) && (!q || (t.n + " " + t.t).toLowerCase().indexOf(q) !== -1));
+      if (d.tdist) list = list.filter((t) => rank(t.apt[+d.tdist]) >= rank("A"));
+      list.sort((a, b) => a.n.localeCompare(b.n));
+      el.innerHTML = `<p class="mini">${list.length} trainee${list.length === 1 ? "" : "s"}.</p>
+        <div class="table-wrap"><table class="trainees"><thead><tr><th>Trainee</th><th>Aptitudes (surface · distance · style)</th><th>Growth</th><th>Unique skill</th><th></th></tr></thead><tbody>
+        ${list.map((t) => `<tr${state.deck.trainee === t.id ? ' class="cur"' : ""}><td><b>${esc(t.n)}</b><div class="jp">${esc(t.t)} · ${"★".repeat(t.r)}${t.en ? " · Global " + t.en : " · JP " + t.jp}</div></td><td>${aptChips(t)}</td><td>${growthText(t)}</td><td>${esc(t.us.map((id) => D.DATA.skills[id] || id).join(", "))}</td><td><button type="button" class="btn ghost small" data-use-trainee="${t.id}">Use</button></td></tr>`).join("")}
+        </tbody></table></div>`;
+    }
+  }
+
+  function cardRow(c, level, open) {
+    const inDeck = state.deck.slots.some((sl) => sl && sl.id === c.id);
+    let detail = "";
+    if (open) {
+      const ids = new Set();
+      [0, 4].forEach((lb) => Object.keys(D.baseEffects(c, D.levelFor(c, lb))).forEach((k) => ids.add(+k)));
+      const rows = Array.from(ids).sort((a, b) => a - b).map((id) => `<tr><th scope="row">${esc(D.effectName(id))}</th>${[0, 1, 2, 3, 4].map((lb) => { const v = D.baseEffects(c, D.levelFor(c, lb))[id]; return `<td class="num">${v ? D.formatEffect(id, v) : "–"}</td>`; }).join("")}</tr>`).join("");
+      const uq = c.u ? `<p class="mini"><b>Unique effect (Lv ${c.u.lv}+):</b> ${c.u.e.map((u) => (u.type >= 100 && u.type !== 9991 ? esc(D.uniqueText(u)) : esc(D.effectName(u.type)) + " +" + u.value)).join("; ")}</p>` : "";
+      const sk = (ids2) => ids2.map((id) => esc(D.DATA.skills[id] || "#" + id)).join(", ") || "none";
+      detail = `<div class="card-detail">
+        <div class="table-wrap"><table class="lbtable"><thead><tr><th>Effect</th>${[0, 1, 2, 3, 4].map((lb) => `<th>LB${lb}<br><span class="mini">Lv${D.levelFor(c, lb)}</span></th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
+        ${uq}
+        <p class="mini"><b>Hint skills:</b> ${sk(c.hs)}</p>
+        <p class="mini"><b>Event skills:</b> ${sk(c.es)}</p>
+        <p class="mini">Released JP ${esc(c.jp || "?")}${c.en ? ", Global " + esc(c.en) : ", not on Global yet"} · ${esc(c.src || "")}</p>
+      </div>`;
+    }
+    return `<div class="cardrow ty-${c.ty}${open ? " open" : ""}">
+      <button type="button" class="cardrow-head" data-db-row="${c.id}" aria-expanded="${open}">
+        <span class="tydot" aria-hidden="true"></span>
+        <span class="cardname"><b>${esc(c.n)}</b> <span class="mini">${esc(c.t)}</span></span>
+        <span class="rar r${c.r}">${D.RARITY[c.r]}</span>
+      </button>
+      <div class="slot-fx">${keyEffects(c, level)}</div>
+      ${detail}
+      <button type="button" class="btn ghost small" data-add-card="${c.id}" ${inDeck ? "disabled" : ""}>${inDeck ? "In deck" : "Add to deck"}</button>
+    </div>`;
   }
 
   function extraField(i, bag) {
@@ -448,7 +778,8 @@
     const turnInputs = sc.inputs.filter((i) => i.scope === "turn");
     $("#turnExtras").innerHTML = turnInputs.length ? `<div class="extras-head">${esc(sc.name)}</div>` + turnInputs.map((i) => extraField(i, state.extras)).join("") : "";
     $("#turnExtras").hidden = !turnInputs.length;
-    $("#facilities").innerHTML = state.facilities.map(facilityHTML).join("");
+    renderFacilities();
+    renderDeck();
 
     const build = E.BUILDS[state.build];
     $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th>Cap</th><th>Enough at</th></tr></thead><tbody>${E.STATS.map((s, i) => `
@@ -460,6 +791,9 @@
 
   function syncLight() {
     $("#riskOut").textContent = state.risk + "%";
+    const info = E.deckInfo(state);
+    $("#raceBonus").disabled = !!info;
+    if (info) $("#raceBonus").value = info.raceBonus;
     $("#energyOut").textContent = state.energy + " / " + state.maxEnergy;
     $$("#mood [data-mood]").forEach((b) => b.setAttribute("aria-checked", String(+b.dataset.mood === state.mood)));
     $("#exampleNote").hidden = !state.example;
@@ -534,6 +868,11 @@
     const sc = scenario();
     $$(".tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
     const body = $("#tabBody");
+    if ((state.tab === "cards" || state.tab === "trainees") && HAS_DATA) {
+      body.innerHTML = dbControls();
+      renderDbList();
+      return;
+    }
     if (state.tab === "guide") {
       body.innerHTML = `
         <div class="guide">
@@ -606,5 +945,6 @@
   }
 
   shell();
+  fillLists();
   render();
 })();

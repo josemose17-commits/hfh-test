@@ -15,6 +15,21 @@ Open `index.html` in a browser. It needs no build step or server, and it saves y
 
 Shortcuts: ← and → change turns.
 
+## Your deck and trainee (exact gains)
+
+Open **Trainee and deck** and type your trainee and up to 6 support cards. Names autocomplete from the full database. Then set each card's limit break. From then on:
+
+- each training shows your cards as chips. Tap the ones that appear there, and add **Others** for characters not in your deck;
+- friendship (rainbow) is detected from each card's type and bond, and bonds go up by 7 each time you train together and press Done;
+- gains, skill points, energy cost and failure come from the game's training formula with your cards' real effects at their level: stat bonus, friendship, mood effect, training effectiveness, card count, your trainee's growth bonuses, plus energy cost reduction, failure protection and conditional unique effects such as bond-gated bonuses;
+- your race bonus is added up from your cards automatically.
+
+Scenario-specific boosts that the formula doesn't cover (Unity training, island facilities, springs and so on) use an estimated multiplier. Type the real total gain on a few turns and the coach corrects it.
+
+**Support cards** and **Trainees** tabs browse the whole database:
+- **Support cards**: filter by type, rarity, Global availability and limit break, and sort by any effect. Tap a card for its effects at every limit break, its unique effect, hint skills, event skills and release dates.
+- **Trainees**: aptitudes, growth bonuses and unique skill.
+
 ## How the coach decides
 
 Every option is scored in value points: stats, skill points, bond building, hints, scenario bonuses, energy, mood and failure risk. A score of 100 means a typical training for that point in the career.
@@ -47,13 +62,27 @@ Every option is scored in value points: stats, skill points, bond building, hint
 
 Inheritance can raise caps. Override them under **Stats and caps**.
 
+## Data
+
+`data/gametora.js` holds 563 support cards (effects at every level, unique effects, hint and event skills, JP and Global release dates), 270 trainees (aptitudes, growth bonuses, skills) and the skill names they reference. It comes from [GameTora](https://gametora.com/umamusume). Effect values at each level use a port of GameTora's own interpolation, so they match its card pages. Base training values per scenario come from GameTora's scenario pages. Onsen, Beyond Dreams and Trecen-ken haven't been published yet, so they use Island's values as a stand-in.
+
+To refresh the data (needs network access to gametora.com):
+
+```
+python3 tools/build_data.py
+```
+
+The generated file is committed, so the coach works offline.
+
 ## Files
 
-- `scenarios.js`: scenario data (mechanics, caps, key turns, deck advice, extra inputs).
+- `scenarios.js`: scenario data (mechanics, caps, base training values, key turns, deck advice, extra inputs).
+- `data/gametora.js`: generated card, trainee and skill data. `tools/build_data.py` rebuilds it.
+- `deck.js`: card effects at any level, unique effects and the training gain formula.
 - `engine.js`: scoring, the energy lookahead, turn advance and undo. Pure functions, shared by the page and the tests.
 - `app.js`, `style.css`, `index.html`: the page.
 - `test/engine.test.js`: run with `node --test test/*.test.js`.
 
 ## Limits
 
-These are estimates, not a game simulator. Energy costs, rest amounts, race rewards and scenario bonuses are approximations from guides. Real gains and failure rates from your screen always beat the built-in estimates. Turns marked "approx." are best-effort, so trust the in-game goal list when they disagree. The newest JP scenarios are based on launch-period guides.
+These are estimates, not a game simulator. Card effects and level-1 base training values come from GameTora's data. The increase per facility level, rest amounts, race rewards and scenario-specific bonuses are approximations. Real gains and failure rates from your screen always beat the built-in estimates. Turns marked "approx." are best-effort, so trust the in-game goal list when they disagree. The newest JP scenarios are based on launch-period guides.

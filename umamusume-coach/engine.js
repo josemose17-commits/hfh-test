@@ -7,6 +7,7 @@
 // rest is only recommended when the energy is worth more later (camp coming up, failure
 // climbing) than this turn's training.
 (function (root) {
+  const Deck = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const STAT_LABELS = { speed: "Speed", stamina: "Stamina", power: "Power", guts: "Guts", wit: "Wit" };
   const MOODS = ["Awful", "Bad", "Normal", "Good", "Great"];
@@ -178,6 +179,8 @@
       turnsLeft: sc.totalTurns - state.turn,
       typ: typAt(state.turn, sc, calib)
     };
+    ctx.deck = deckInfo(state);
+    ctx.boost = sc.train ? scenarioBoost(state, sc) : 1;
     ctx.V = continuation(state, sc, calib);
     ctx.gainValue = (stat, g) => gainValue(stat, g, ctx);
     ctx.energyValue = (delta) => ctx.V[clamp(Math.round(ctx.E + delta), 0, ctx.maxE)] - ctx.V[ctx.E];
@@ -254,6 +257,81 @@
     return next;
   }
 
+  // ---- Deck mode: real card effects and the game's training formula ----
+
+  // The deck in use: slots with their card, level and current bond. Null when no cards are set.
+  function deckInfo(state) {
+    if (!Deck || !Deck.DATA || !state.deck) return null;
+    const slots = (state.deck.slots || []).map((sl, i) => {
+      const card = sl && sl.id ? Deck.card(sl.id) : null;
+      if (!card) return null;
+      const level = Deck.levelFor(card, sl.lb);
+      const bond = sl.bond != null ? sl.bond : Deck.initialBond(card, level);
+      return { idx: i, card, level, bond };
+    });
+    const used = slots.filter(Boolean);
+    if (!used.length) return null;
+    const trainee = state.deck.trainee ? Deck.trainee(state.deck.trainee) : null;
+    return {
+      slots,
+      used,
+      trainee,
+      growth: trainee ? trainee.g : [0, 0, 0, 0, 0],
+      deckTypes: new Set(used.map((s) => s.card.ty)).size,
+      totalBond: used.reduce((a, s) => a + s.bond, 0),
+      raceBonus: used.reduce((a, s) => a + (Deck.baseEffects(s.card, s.level)[15] || 0), 0)
+    };
+  }
+
+  // Training facility level: your override, else 5 at camp, else counted from logged trainings
+  // (most scenarios level a facility every 4 trainings), else an estimate for the stage.
+  function facLevelFor(state, sc, stat) {
+    const o = state.facLevels && state.facLevels[stat];
+    if (o) return o;
+    if (isCamp(state.turn, sc)) return 5;
+    const log = state.log || [];
+    if (log.length >= Math.max(4, (state.turn - 1) * 0.8)) {
+      const n = log.filter((l) => l.kind === "train" && l.stat === stat).length;
+      return Math.min(5, 1 + Math.floor(n / 4));
+    }
+    return Math.round(facilityLevel(state.turn, sc));
+  }
+
+  // Multiplier for scenario bonuses the card formula doesn't model (Unity training, island
+  // facilities, springs...). Learned from your real gains once you type a few.
+  function defaultBoost(sc) {
+    if (sc.formulaBoost) return sc.formulaBoost;
+    const avg = STATS.reduce((a, st) => a + sc.train[st].slice(0, 5).reduce((x, y) => x + y, 0), 0) / 5;
+    return clamp((sc.gainScale || 1) * 15.6 / avg, 1, 2.2);
+  }
+
+  function scenarioBoost(state, sc) {
+    let b = defaultBoost(sc);
+    const c = (state.fcal || []).slice(-12).filter((x) => x > 0).sort((x, y) => x - y);
+    if (c.length >= 2) b *= clamp(c[Math.floor(c.length / 2)], 0.5, 2);
+    return b;
+  }
+
+  function deckGain(f, ctx) {
+    const { state, sc, deck } = ctx;
+    if (!deck || !sc.train || !Array.isArray(f.members)) return null;
+    const members = f.members.map((i) => deck.slots[i]).filter(Boolean);
+    const L = facLevelFor(state, sc, f.stat);
+    const r = Deck.trainingGain(sc.train[f.stat], f.stat, members, {
+      facilityLevel: L, extra: f.extra || 0, mood: state.mood, growth: deck.growth,
+      energy: ctx.E, maxEnergy: ctx.maxE, deckTypes: deck.deckTypes, totalBond: deck.totalBond
+    });
+    const boost = ctx.boost;
+    r.level = L;
+    r.boost = boost;
+    r.rawTotal = r.total;
+    r.gains = r.gains.map((g) => g * boost);
+    r.total = r.gains.reduce((a, b) => a + b, 0);
+    r.sp *= boost;
+    r.members = members;
+    return r;
+  }
+
   function sumParts(p) {
     return Object.keys(p).reduce((a, k) => a + p[k], 0);
   }
@@ -262,39 +340,60 @@
     const { state, sc, typ } = ctx;
     const hook = HOOKS[sc.hook] || {};
     const est = !(f.gain > 0);
-    const gain = est ? estimateGain(f, state, sc, ctx.calib) : +f.gain;
+    const dg = deckGain(f, ctx);
     const failBlank = f.fail === null || f.fail === undefined || f.fail === "";
-    let fail = failBlank ? estimateFail(f.stat, ctx.E) : clamp(+f.fail, 0, 100);
-    const cards = f.cards || 0;
-    const rainbows = Math.min(f.rainbows || 0, cards);
     const statGains = {};
+    let gain, cards, rainbows, unbonded, spPts, energyDelta, fail;
+    if (dg) {
+      // Card formula. A typed total gain rescales the formula's split across stats.
+      const scale = !est && dg.total > 0 ? +f.gain / dg.total : 1;
+      STATS.forEach((st, i) => { if (dg.gains[i] > 0) statGains[st] = dg.gains[i] * scale; });
+      gain = est ? dg.total : +f.gain;
+      if (!est && !(dg.total > 0)) Object.keys(FACILITY[f.stat].split).forEach((st) => { statGains[st] = gain * FACILITY[f.stat].split[st]; });
+      cards = dg.cards;
+      rainbows = dg.rainbows;
+      unbonded = dg.unbonded;
+      spPts = dg.sp * scale;
+      energyDelta = dg.energy;
+      fail = failBlank ? Math.round(estimateFail(f.stat, ctx.E) * dg.failMult) : clamp(+f.fail, 0, 100);
+    } else {
+      gain = est ? estimateGain(f, state, sc, ctx.calib) : +f.gain;
+      Object.keys(FACILITY[f.stat].split).forEach((st) => { statGains[st] = gain * FACILITY[f.stat].split[st]; });
+      cards = f.cards || 0;
+      rainbows = Math.min(f.rainbows || 0, cards);
+      unbonded = Math.min(f.unbonded || 0, cards - rainbows);
+      spPts = gain * SP_RATE[f.stat];
+      energyDelta = f.stat === "wit" ? 5 + 2 * rainbows : -energyCost(f.stat, state.turn, sc);
+      fail = failBlank ? estimateFail(f.stat, ctx.E) : clamp(+f.fail, 0, 100);
+    }
     let stats = 0;
-    Object.keys(FACILITY[f.stat].split).forEach((s) => {
-      const g = gain * FACILITY[f.stat].split[s];
-      statGains[s] = g;
-      stats += ctx.gainValue(s, g);
-    });
+    Object.keys(statGains).forEach((st) => { stats += ctx.gainValue(st, statGains[st]); });
     const o = {
       kind: "train",
       stat: f.stat,
       label: "Train " + STAT_LABELS[f.stat],
       gain, gainEst: est, fail, failEst: failBlank, cards, rainbows, statGains,
-      energyDelta: f.stat === "wit" ? 5 + 2 * rainbows : -energyCost(f.stat, state.turn, sc),
+      formula: dg ? { level: dg.level, boost: dg.boost, sp: Math.round(spPts) } : null,
+      energyDelta,
       moodDelta: 0,
       notes: [],
       prefix: [],
       consume: {},
       parts: {
         stats,
-        sp: gain * SP_RATE[f.stat] * SP_VALUE,
-        bond: Math.min(f.unbonded || 0, cards - rainbows) * bondK(state.turn) * typ,
+        sp: spPts * SP_VALUE,
+        bond: unbonded * bondK(state.turn) * typ,
         hint: f.hint ? 0.12 * typ : 0,
         scenario: 0
       }
     };
+    if (dg && dg.members.length) {
+      const names = dg.members.map((m) => m.card.n + (Deck.isRainbow(m.card, m.bond, f.stat) ? " (friendship)" : m.bond < 80 ? " (bond " + Math.round(m.bond) + ")" : ""));
+      o.notes.push(names.join(", "));
+    }
     if (rainbows >= 2) o.notes.push(rainbows + " friendship cards stacked");
     else if (rainbows === 1) o.notes.push("1 friendship card");
-    if (o.parts.bond >= 0.1 * typ) o.notes.push(Math.min(f.unbonded, cards - rainbows) + " card(s) still building bond");
+    if (o.parts.bond >= 0.1 * typ) o.notes.push(unbonded + " card(s) still building bond");
     if (f.hint) o.notes.push("skill hint");
     if (hook.facility) {
       const r = hook.facility(f, ctx, o) || {};
@@ -378,7 +477,7 @@
       }
       if (state.race && RACES[state.race]) {
         const r = RACES[state.race];
-        const rb = 1 + (state.raceBonus || 0) / 100;
+        const rb = 1 + (ctx.deck ? ctx.deck.raceBonus : state.raceBonus || 0) / 100;
         const consec = (state.extras && state.extras.consec) || 0;
         const p = {
           stats: r.stats * rb * ctx.avgW,
@@ -481,9 +580,30 @@
     });
     const hook = HOOKS[scenario.hook] || {};
     if (hook.afterTurn) hook.afterTurn(s, option);
+    // Deck bonds: +7 for every card that trained with you this turn.
+    if (option.kind === "train" && s.deck && s.deck.slots) {
+      const fac = s.facilities.find((f) => f.stat === option.stat);
+      (fac && fac.members || []).forEach((i) => {
+        const sl = s.deck.slots[i];
+        if (!sl || !sl.id) return;
+        const c = Deck && Deck.card(sl.id);
+        const start = sl.bond != null ? sl.bond : (c ? Deck.initialBond(c, Deck.levelFor(c, sl.lb)) : 0);
+        sl.bond = Math.min(100, start + (Deck ? Deck.BOND_PER_TRAINING : 7));
+      });
+    }
+    // Learn deck strength (and the formula's scenario multiplier) from real or formula gains.
     const entered = s.facilities.filter((f) => f.gain > 0);
-    if (entered.length) {
-      const bestGain = Math.max.apply(null, entered.map((f) => f.gain));
+    let bestGain = entered.length ? Math.max.apply(null, entered.map((f) => f.gain)) : 0;
+    const ctx = deckInfo(state) && scenario.train ? makeCtx(state, scenario) : null;
+    if (ctx) {
+      state.facilities.forEach((f) => {
+        const dg = deckGain(f, ctx);
+        if (!dg) return;
+        if (f.gain > 0 && dg.rawTotal > 0) s.fcal = (s.fcal || []).concat([f.gain / (dg.rawTotal * defaultBoost(scenario))]).slice(-12);
+        if (!bestGain) bestGain = Math.max(bestGain, dg.total);
+      });
+    }
+    if (bestGain > 0) {
       s.calib = (s.calib || []).concat([bestGain / (typGainAt(s.turn, scenario) * (scenario.gainScale || 1))]).slice(-12);
     }
     s.log = (s.log || []).concat([{
@@ -496,7 +616,7 @@
       snapshot: JSON.stringify(Object.assign({}, state, { log: undefined }))
     }]).slice(-90);
     s.turn = Math.min(scenario.totalTurns, s.turn + 1);
-    s.facilities = s.facilities.map((f) => ({ stat: f.stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {} }));
+    s.facilities = s.facilities.map((f) => ({ stat: f.stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], extra: 0 }));
     s.goalRace = (s.goals || []).indexOf(s.turn) !== -1;
     s.race = "";
     return s;
@@ -776,7 +896,7 @@
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
     turnInfo, phaseFor, eventsFor, isCamp, campTurns, recommend, evaluate, advance, undo,
-    estimateFail, estimateGain, calibFactor, typAt, forcedTurns
+    estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;
