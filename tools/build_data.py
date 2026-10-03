@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Download support card, trainee and skill data from GameTora and write data/gametora.js.
 
-Run from the umamusume-coach folder:  python3 tools/build_data.py
+Run from the repository root:  python3 tools/build_data.py
 Needs network access to gametora.com. The output is committed, so the coach works offline.
 Data source: GameTora (https://gametora.com/umamusume). Game data © Cygames, Inc.
 """
