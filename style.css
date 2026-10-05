@@ -305,3 +305,35 @@ tr.phase-row b { color: var(--fg); font-family: var(--font-display); font-size: 
 .lbtable th, .lbtable td { padding: 4px 8px; font-size: .82rem; }
 .lbtable tbody th { font-weight: 500; }
 .trainees td { font-size: .85rem; }
+
+/* Bond gauge, events and outings on deck slots */
+.slot-bond, .slot-dates { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.gauge { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 2px 9px; font-size: .74rem; cursor: pointer; min-height: 28px; }
+.gauge::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; background: var(--gc); }
+.gauge.g-blue { --gc: #4a8fe0; } .gauge.g-green { --gc: #3fae63; } .gauge.g-orange { --gc: #f0962c; } .gauge.g-max { --gc: var(--gold); }
+.gauge.on { border-color: var(--gc); background: var(--surface-2); font-weight: 700; }
+.chip-toggle.small { padding: 2px 10px; min-height: 28px; font-size: .8rem; }
+.mchip.hint { border-style: solid; }
+.mchip .bang { display: inline-grid; place-items: center; width: 14px; height: 14px; margin-right: 3px; border-radius: 50%; background: var(--bad); color: #fff; font-size: .62rem; font-weight: 800; vertical-align: middle; }
+
+/* Grand Concert songs */
+.songs summary { cursor: pointer; display: grid; gap: 2px; list-style: none; }
+.songs summary::-webkit-details-marker { display: none; }
+.songs summary h2::before { content: "▸ "; color: var(--muted); }
+.songs[open] summary h2::before { content: "▾ "; }
+.songs-body { display: grid; gap: 10px; margin-top: 8px; }
+.tokens { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.tokens input { text-align: right; }
+.song-status { display: grid; gap: 3px; font-size: .86rem; background: var(--surface-2); border-radius: 8px; padding: 8px 10px; }
+.song-advice { font-size: .86rem; }
+.song-group { display: grid; gap: 4px; }
+.song-group h3 { margin: 4px 0 0; font-size: 1rem; color: var(--muted); }
+.song { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; cursor: pointer; }
+.song input { accent-color: var(--accent); }
+.song.on { border-color: var(--accent); background: var(--surface-2); }
+.song.locked { opacity: .5; cursor: not-allowed; }
+.song-name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; font-size: .88rem; }
+.song-cost { display: flex; gap: 3px; flex-wrap: wrap; justify-content: flex-end; }
+.song-fx { grid-column: 2 / -1; }
+.tok { font-family: var(--font-mono); font-size: .7rem; border-radius: 4px; padding: 0 4px; border: 1px solid var(--tc); color: var(--fg); }
+.tok.t0 { --tc: var(--guts); } .tok.t1 { --tc: var(--stamina); } .tok.t2 { --tc: var(--speed); } .tok.t3 { --tc: var(--power); } .tok.t4 { --tc: var(--wit); }
