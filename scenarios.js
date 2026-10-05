@@ -26,27 +26,37 @@
       totalTurns: 78,
       caps: [1400, 1400, 1400, 1400, 1400],
       gainScale: 1.05,
+      energyEvents: { 38: 30, 62: 30 },
+      moodEvents: { 29: 1 },
       train: { speed: [11, 0, 6, 0, 0, 4, -21], stamina: [0, 10, 0, 6, 0, 4, -19], power: [0, 6, 9, 0, 0, 4, -20], guts: [5, 0, 5, 8, 0, 4, -22], wit: [2, 0, 0, 0, 10, 5, 5] },
       finale: { name: "URA Finals", turns: [74, 76, 78], forced: true, note: "Qualifier, Semifinal and Final, with a training turn before each." },
       summary: "The base scenario. Win your goal races and spend every other turn on the best friendship training. Since the July 2026 update, Happy Meek can appear on trainings for a duel, and every stat caps at 1400.",
       coreLoop: [
         "Junior: train where the most un-bonded cards gather so friendship trainings unlock by early Classic.",
         "From Classic on, take friendship (rainbow) trainings in your main stats and skip weak single-card turns.",
-        "When Happy Meek shows up on a training, dueling her gives stats and the Race Essence (レースの真髄) hint. Enough wins bring a powered-up Meek to the final, who drops the Beyond the Limit (限界の先へ) hint.",
-        "Arrive at both summer camps with high energy and Good or Great mood.",
+        "Happy Meek duels start when you train with her while she shows the orange Duel mark (a failed training cancels it). A win gives 10-25 of the stat, 30 SP, +4 to that stat's cap, +4 max energy and an Essence of Racing hint. Five wins bring a powered-up Meek to the final; beating her adds 20 to every stat and 150 SP at the end.",
+        "Chairman Akikawa's snack event restores 30 energy at the end of Late July in years 2 and 3, so you can push one extra training in mid-camp.",
+        "A guaranteed mood-up event happens in Early March of year 2.",
+        "Fans: 50,000 by Classic Early November gives Aoi's event (20 SP, 20 Wit, a hint); 100,000 by the end of year 2 and 240,000 by the end of year 3 give 30 SP each.",
         "Save skill points for the finale and buy skills that suit your distance and style."
       ],
       deck: "Speed-heavy deck (3-4 Speed) plus Power or Stamina for your distance, and one Wit card for energy.",
       keyCards: ["Kitasan Black (Speed)", "Fine Motion (Wit)", "Super Creek (Stamina)"],
       inputs: [
-        { id: "meek", label: "Happy Meek here", scope: "facility", type: "check", help: "Training with her starts a duel" }
+        { id: "meek", label: "Meek Duel mark", scope: "facility", type: "check", help: "Happy Meek is here with the orange Duel mark. A failed training cancels the duel." }
       ],
       events: [
         { turn: 12, label: "Make Debut", tip: "Goal race. Have mood at Good or better." },
+        { turn: 29, label: "Mood-up event", tip: "A guaranteed mood-up happens this turn, so an outing now is worth less." },
+        { turn: 38, label: "Akikawa's snack", tip: "+30 energy at the end of this turn." },
+        { turn: 45, label: "Three-Legged Race", tip: "With 50,000+ fans: 20 SP, 20 Wit and a skill hint (Aoi's event)." },
+        { turn: 48, label: "Fan bonus", tip: "100,000 fans by now: +30 SP." },
+        { turn: 62, label: "Akikawa's snack", tip: "+30 energy at the end of this turn." },
         { turn: 73, label: "Finale prep", tip: "Training turns sit between the finale races. Use them on the best friendship training." },
         { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
         { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
-        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
+        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." },
+        { turn: 78, label: "Fan bonus", tip: "240,000 fans by the end: +30 SP." }
       ],
       hook: "ura"
     },
@@ -61,31 +71,38 @@
       totalTurns: 78,
       caps: [1300, 1300, 1300, 1300, 1800],
       gainScale: 1.15,
+      levelRule: "rank",
       formulaBoost: 1.35,
       train: { speed: [8, 0, 4, 0, 0, 2, -19], stamina: [0, 7, 0, 3, 0, 2, -17], power: [0, 4, 6, 0, 0, 2, -18], guts: [3, 0, 3, 6, 0, 2, -20], wit: [2, 0, 0, 0, 6, 3, 5] },
       trainNote: "Global values (JP raised some after its 2023 update).",
-      finale: { name: "Unity Cup Final", turns: [], forced: false, note: "The team final closes the career. Mark it as a goal race on the turn your game shows." },
-      summary: "You recruit a team. Training next to team members (Unity training) raises their stats, and a full spirit flame triggers a Spirit Burst. The July 2026 update raised burst and Unity training gains, removed their extra energy cost, and added Extreme Spirit Bursts.",
+      finale: { name: "URA Finals", turns: [74, 76, 78], forced: true, note: "Unity Cup still ends with the three URA Finals races, after the Unity Cup Finals against team Zenith." },
+      summary: "You recruit a team. Characters with a white flame on a training join Special Training (2+ flames pay the trainee extra stats), a full spirit gauge fires a Spirit Burst, and after a member's burst one Extreme Spirit Burst (0% failure) follows. Facility levels follow your team rank for each training type.",
       coreLoop: [
-        "Junior: train where team members (unity icons) gather to recruit them and grow the team early.",
-        "Spirit flames fill as you train with a card. A full white flame triggers a Spirit Burst when you train with it: +15 to that facility's stat and +5 skill points (more with scenario-linked cards).",
-        "You don't have to burst right away. Hold it until that member sits on a facility you want, ideally Speed or your second main stat.",
-        "A Wit burst also restores 5 more energy. Bursts no longer cost extra energy.",
-        "After a member's normal burst, each member can fire one Extreme Spirit Burst. It raises your stats and stat caps, gives an Ignited skill hint, and sets that training's failure to 0%. Use it on a risky but strong training.",
-        "Wit caps at 1800 here, so Wit-heavy builds are strong in this scenario."
+        "Junior: train where the most white flames gather. Every flame you train with grows that teammate, and team rank sets your facility levels (F/G=1, D/E=2, B/C=3, A=4, S=5).",
+        "2+ white flames on one training is Special Training: 2 flames give +2 main stat, 3 give +4/+1, 4 give +6/+3, 5 give +10/+5 plus skill points. Scenario-linked cards add +1 to each.",
+        "A full spirit gauge fires a Spirit Burst: +15 main stat, +7 second stat, +5 SP (Wit: +2 Speed, +15 Wit, and +5 energy). Hold it for a facility you want.",
+        "After a member's burst, her next Unity training fires an Extreme Spirit Burst: +20/+10 stats, +15 SP, a hint and 0% failure. Use it on a risky but strong training.",
+        "Team Zenith Declares War (Senior Late November) rewards total bursts: 4+ white hint, 7+ hint Lv3, 10+ gold hint, 13+ gold Lv3 with stats.",
+        "Wit caps at 1800 here, so Wit-heavy builds are strong."
       ],
       deck: "Fewer cards of your main type than in URA. Mixed decks make more flames. Speed and Wit work well because of the high Wit cap.",
       keyCards: ["Riko Kashimoto (Friend, scenario link)", "Kitasan Black (Speed)"],
       inputs: [
-        { id: "burst", label: "Bursts ready", scope: "facility", type: "number", max: 5, help: "Cards here with a full (white) flame" },
-        { id: "extreme", label: "Extreme burst", scope: "facility", type: "check", help: "An Extreme Spirit Burst fires on this training" },
-        { id: "team", label: "Team members", scope: "facility", type: "number", max: 5, help: "Unity Cup members shown on the facility" }
+        { id: "flames", label: "White flames", scope: "facility", type: "number", max: 5, help: "Characters on this training with a white flame (Special Training at 2+)" },
+        { id: "burst", label: "Spirit Bursts", scope: "facility", type: "number", max: 5, help: "Characters here whose spirit gauge is full" },
+        { id: "extreme", label: "Extreme burst", scope: "facility", type: "check", help: "An Extreme Spirit Burst fires on this training (failure becomes 0%)" },
+        { id: "bursts", label: "Bursts so far", scope: "turn", type: "number", max: 30, help: "Spirit + Extreme bursts this career; Team Zenith's Senior Late Nov event pays more at 4, 7, 10 and 13" }
       ],
       events: [
-        { turn: 24, label: "Unity Cup round", tip: "approx. Team stats decide the result. Train with members beforehand." },
-        { turn: 36, label: "Unity Cup round", tip: "approx." },
-        { turn: 48, label: "Unity Cup round", tip: "approx." },
-        { turn: 60, label: "Unity Cup round", tip: "approx." }
+        { turn: 24, label: "Unity Cup race 1", tip: "approx. Pick an opponent with 3+ circles in Tazuna's preview." },
+        { turn: 36, label: "Unity Cup race 2", tip: "approx." },
+        { turn: 48, label: "Unity Cup race 3", tip: "approx." },
+        { turn: 60, label: "Unity Cup race 4", tip: "approx. League rank 10+, team A+ and an Extreme burst unlock the powerhouse team." },
+        { turn: 70, label: "Team Zenith Declares War", tip: "Rewards scale with total Spirit + Extreme bursts (4/7/10/13)." },
+        { turn: 72, label: "Unity Cup Finals", tip: "Beat team Zenith." },
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up. No Akikawa bond needed here." },
+        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
       ],
       hook: "unity"
     },
@@ -103,28 +120,36 @@
       formulaBoost: 1.15,
       train: { speed: [8, 0, 4, 0, 0, 2, -19], stamina: [0, 7, 0, 3, 0, 2, -17], power: [0, 4, 6, 0, 0, 2, -18], guts: [3, 0, 3, 6, 0, 2, -20], wit: [2, 0, 0, 0, 6, 3, 5] },
       finale: { name: "Twinkle Star Climax", turns: [74, 76, 78], forced: true, note: "Three finale races. Your result decides the scenario bonus." },
-      summary: "There are no fixed goal races. You race for Grade Points and shop coins (1st place 100, 2nd-3rd 60, 4th-5th 30), then spend coins on items that boost training. The shop restocks every 6 turns.",
+      summary: "No fixed race goals: you need Grade Points (60, then +300, then +300) from races. Races also pay shop coins (1st 100, 2nd-3rd 60, 4th-5th 30), and the shop (restocks every 6 turns, max 5 of each item) sells training boosts, energy, mood, stats, facility levels and race bonus.",
       coreLoop: [
-        "Race often. G1s and G2s that fit your aptitude pay the most Grade Points and coins.",
+        "Race often. A win pays Grade Points by grade: G1 100, G2 80, G3 60, OP 40, Pre-OP 20 (less for lower places), plus 100 coins.",
         "Avoid more than 3 races in a row. Back-to-back racing risks bad conditions and mood drops.",
-        "Megaphones: Coaching +20% for 4 turns (40 coins), Motivating +40% for 3 turns (55), Empowering +60% for 2 turns (70). Start one when a run of strong turns begins, such as summer camp.",
-        "Ankle Weights: +50% to one stat's training for one turn and +20% energy use (50 coins). Use them on that stat's stacked friendship training.",
-        "Good-Luck Charm sets failure to 0%, so you can train a big turn at low energy.",
+        "Megaphones: +20% for 4 turns (40 coins), +40% for 3 (55), +60% for 2 (70). Start one when a run of strong turns begins, such as summer camp.",
+        "Ankle Weights (50): +50% to one stat's training for one turn, +20% energy use. Good-Luck Charm (40): 0% failure for one turn.",
+        "Vita 20/40/65 (35/55/75 coins) restore energy without using a turn, so drinking one often beats resting. Cupcakes (+1 or +2 mood) replace outings.",
+        "Reset Whistle (20) reshuffles where cards stand when every training is weak. Cleat Hammers add +20% or +35% race bonus to one race; save them for G1s.",
+        "Training Applications (150) raise a facility level permanently. Grilled Carrots (40) give every card +5 bond.",
+        "Your unique skill levels up via Umamusume of the Year in Late December, which needs Akikawa's bond: 1 blue bar (Junior), 2 blue bars (Classic), green (Senior), plus wins and fans that year. Cat Food (10) gives her +5 bond.",
         "Speed, Power and Guts cap at 1200 here, but Stamina reaches 1900 and Wit 1500."
       ],
       deck: "Race-bonus cards matter (aim for 35%+ total race bonus). Speed and Power cards with high race bonus are best.",
       keyCards: ["Kitasan Black (Speed, race bonus)", "Satono Diamond (Stamina)"],
       inputs: [
-        { id: "megaphone", label: "Megaphone", scope: "turn", type: "select", options: [["0", "None"], ["20", "+20%"], ["40", "+40%"], ["60", "+60%"]] },
+        { id: "megaphone", label: "Megaphone", scope: "turn", type: "select", options: [["0", "None"], ["20", "+20% (4 turns)"], ["40", "+40% (3 turns)"], ["60", "+60% (2 turns)"]] },
         { id: "weights", label: "Ankle Weights", scope: "turn", type: "check" },
         { id: "charm", label: "Good-Luck Charm", scope: "turn", type: "check" },
+        { id: "vita", label: "Best Vita", scope: "turn", type: "select", options: [["0", "None"], ["20", "Vita 20"], ["40", "Vita 40"], ["65", "Vita 65"]] },
+        { id: "cupcake", label: "Cupcake", scope: "turn", type: "select", options: [["0", "None"], ["1", "Plain (+1)"], ["2", "Berry (+2)"]] },
+        { id: "whistle", label: "Reset Whistle", scope: "turn", type: "check" },
+        { id: "hammer", label: "Cleat Hammer", scope: "turn", type: "select", options: [["0", "None"], ["20", "+20% race"], ["35", "+35% race"]] },
+        { id: "gpNeed", label: "Grade Pt still needed", scope: "turn", type: "number", max: 400 },
         { id: "consec", label: "Races in a row", scope: "turn", type: "number", max: 6, help: "Filled in for you from the career log" }
       ],
       events: [
-        { turn: 12, label: "Make Debut", tip: "Coins start flowing once you race." },
-        { turn: 24, label: "Grade Point check", tip: "approx. Make sure you are on pace." },
-        { turn: 48, label: "Grade Point check", tip: "approx." },
-        { turn: 72, label: "Grade Point check", tip: "approx. Last check before the Climax." }
+        { turn: 12, label: "Make Debut", tip: "Goal race. The shop unlocks after it." },
+        { turn: 24, label: "Junior Uma of the Year", tip: "Unique skill level-up if picked: needs 1 blue bar of Akikawa bond plus wins and fans this year." },
+        { turn: 48, label: "Classic Uma of the Year", tip: "Needs 2 blue bars of Akikawa bond plus wins and fans this year." },
+        { turn: 72, label: "Senior Uma of the Year", tip: "Needs a green Akikawa bond plus wins and fans this year." }
       ],
       hook: "trackblazer"
     },
@@ -179,7 +204,8 @@
         "Each training gives a main and second token: Speed gives Dance/Visual, Stamina Passion/Vocal, Power Vocal/Mental, Guts Visual/Dance, Wit Mental/Passion. Friendship trainings give two token types, and scenario-link cards (Light Hello, Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon) give more.",
         "Pace yourself at about 4 songs per half year. Three songs fill the Hype gauge for each concert.",
         "Friendship trainings give the most performance points, so they stay your priority.",
-        "Finish with at least 3 songs before Girls' Legend U in Early December of Senior year.",
+        "Lives also pay 5 SP per technique lesson and 25 SP per song learned since the last live, and raise the token cap by 50.",
+        "Chairman Akikawa is here: the April unique skill check needs a green (3-bar) bond with her.",
         "Stats above 1200 count half in races, but Speed (1600) and Guts (1500) can go past it here."
       ],
       deck: "A normal stat deck works. The scenario friend card Light Hello is a strong pick: her outings are better than normal ones, and her unique effect cuts energy cost on friendship trainings.",
@@ -210,26 +236,32 @@
       caps: [1500, 1400, 1500, 1300, 1300],
       gainScale: 1.3,
       train: { speed: [10, 0, 3, 0, 0, 5, -19], stamina: [0, 8, 0, 6, 0, 5, -20], power: [0, 4, 9, 0, 0, 5, -20], guts: [2, 0, 3, 9, 0, 5, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
-      finale: { name: "Grand Masters finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
-      summary: "From turn 3, trainings, rests, outings and races drop Knowledge Fragments in three goddess colors. Eight fragments fuse into a Goddess Wisdom, which levels that goddess up and gives a one-turn buff.",
+      finale: { name: "Grand Masters race", turns: [78], forced: true, note: "No URA Finals here. After the SWBC in Senior Late December you get 5 more training turns, then the Grand Masters race against the three goddesses." },
+      summary: "From turn 3, trainings, rests, outings and races drop Knowledge Fragments (rainbow trainings drop two). Every fragment you hold adds +1 to that stat in training, and 8 fragments fuse into a Goddess Wisdom you trigger by hand (no turn used). Each Wisdom levels up its goddess for the rest of the run and gives a one-turn effect.",
       coreLoop: [
-        "Friendship (rainbow) trainings drop double fragments, and goal races always give 2 matching fragments.",
-        "Red (Darley Arabian, Power and Guts): a big training-effect boost. Use it on a stacked friendship training or at summer camp.",
-        "Blue (Godolphin Barb, Stamina and Guts): skill hints and inspiration. Use it whenever it's ready.",
-        "Yellow (Byerley Turk, Speed and Wit): energy recovery and bond gains. Use it when energy is low, or in Junior to speed up bonds.",
-        "Using a Wisdom levels up that goddess for the rest of the career, so focus on one or two colors."
+        "Rainbow trainings drop two matching fragments (Wit rarely does). Goal races give two. With 7 held, no doubles; with 8, nothing until you obtain the Wisdom.",
+        "Obtain a Wisdom from the Knowledge Table at the start of a turn; it doesn't use a turn. Its one-turn effect applies to what you do that turn.",
+        "Red (Darley Arabian): +50 energy, mood to max, and every facility trains past level 5 this turn. Use it when energy is low and a good training is up, or on your best camp turn.",
+        "Blue (Godolphin Barb): every card on the training you pick gives a skill hint plus a few stats. Use it on the training with the most cards.",
+        "Yellow (Byerley Turk): every card on the training you pick counts as friendship, whatever its type or bond. Use it on the training with the most non-rainbow cards.",
+        "Goddess levels (up to 5) add permanent training bonus (+5% to +15% each): Blue also hint rate, Red energy discount, Yellow support event effects. Year-end races pay extra when a goddess's level is at least the year number.",
+        "You control the Wisdom color with the 1st and 5th fragments of each table (the left side of each crystal decides the color)."
       ],
       deck: "Speed and Power core, plus cards that bring the goddess colors you want.",
       keyCards: [],
       inputs: [
-        { id: "frag", label: "Fragments", scope: "facility", type: "number", max: 4, help: "Fragments shown on this training" },
-        { id: "wisdom", label: "Wisdom ready", scope: "turn", type: "select", options: [["", "None"], ["red", "Red (training)"], ["blue", "Blue (hints)"], ["yellow", "Yellow (energy)"]] }
+        { id: "frag", label: "Fragments", scope: "facility", type: "number", max: 2, help: "Fragments this training would drop (2 for x2)" },
+        { id: "wisdom", label: "Wisdom ready", scope: "turn", type: "select", options: [["", "None"], ["red", "Red: +50 energy, past Lv5"], ["blue", "Blue: hint per card"], ["yellow", "Yellow: all cards friendship"]] }
       ],
       events: [
         { turn: 3, label: "Fragments start", tip: "Every action can drop fragments from now on." },
+        { turn: 24, label: "GUR (Junior)", tip: "Year-end race after this turn (no turn used): all stats +10, 50 SP, more from goddesses at level 1+." },
+        { turn: 48, label: "WBC (Classic)", tip: "Year-end race after this turn: all stats +15, 60 SP, more from goddesses at level 2+." },
+        { turn: 72, label: "SWBC (Senior)", tip: "Year-end race after this turn: all stats +20, 70 SP, more from goddesses at level 3+." },
         { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
         { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
-        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
+        { turn: 71, label: "Unique skill check", tip: "120,000 fans by Late December (80,000 dirt-only) levels it up again." },
+        { turn: 77, label: "Goddess skill event", tip: "Pick a goddess: level 4+ gives the rare skill hint, level 5 both. Total level 12+ makes it Lv 3." }
       ],
       hook: "grandmasters"
     },
@@ -243,26 +275,38 @@
       totalTurns: 67,
       caps: [1600, 1600, 1500, 1500, 1300],
       gainScale: 1.35,
+      goalTurns: [34, 41, 43, 60, 65],
+      levelBonus: (state) => { const g = +((state.extras && state.extras.expect) || 0); return (g >= 20) + (g >= 60) + (g >= 100); },
       train: { speed: [10, 0, 3, 0, 0, 6, -21], stamina: [0, 9, 0, 4, 0, 6, -19], power: [0, 5, 11, 0, 0, 6, -20], guts: [3, 0, 2, 10, 0, 6, -21], wit: [2, 0, 0, 0, 9, 6, 5] },
       finale: { name: "Prix de l'Arc de Triomphe (Senior)", turns: [67], forced: true, note: "The career ends with the Senior-year Arc." },
-      summary: "An overseas campaign aimed at the Arc. Supporter points raise the Expectation gauge (a training bonus), the summer camps become France expeditions, and the SS Match facility trains with members whose Star gauge is full.",
+      summary: "An overseas campaign aimed at the Arc, ending in Senior Early October (67 turns). Training with members fills their Star gauge (3 blocks, +1 per rainbow); full gauges open the SS Match facility. Supporter Points from SS Matches and races fill the Expectation gauge, which boosts training and raises every facility level at 20%, 60% and 100%.",
       coreLoop: [
-        "Training with a supporter fills their Star gauge (3 slots). Members with a full gauge can join an SS Match.",
-        "An SS Match uses a turn but no energy. It's best with many members ready, or on a turn where every training is weak.",
-        "Supporter points raise the Expectation gauge, which boosts all training.",
-        "France expeditions (the summer camps) earn Overseas Aptitude points. Spend them on the L'Arc aptitudes first.",
-        "Some effects scale with total potential level: 1.1x at 10 and 1.2x at 20."
+        "Every trainee has the same goals: Make Debut, 7,000 Supporter Pt by Junior Late Dec, 3rd+ in the Japan Derby, Prix Niel, the Classic Arc, 42,000 Supporter Pt by Senior Late Mar, 3rd+ in the Takarazuka Kinen, Prix Foy, and the Senior Arc.",
+        "A training fills each member's Star gauge by one block, plus one more for each rainbow character. A double rainbow fills it at once. Friend cards have no gauge.",
+        "An SS Match (from turn 3) uses a turn but no energy and trains every stat. With 5 members it can become an SSS Match (much bigger), more likely the more members have done SS Matches since the last SSS.",
+        "Supporter Points: G1 win 1300, G2 900, G3 700; the exhibition races pay 1500, Prix Niel and Foy 2000, the Arc 3000. The Expectation gauge raises all facility levels at 20%, 60% and 100%.",
+        "France expeditions (the summer camps) allow no Japanese races, no Star gauge and no SS Matches, but pay lots of Overseas Aptitude points.",
+        "Raise each Overseas Aptitude to Lv2 before the French races to clear its challenge, or you take stat penalties there. Mental Strength Lv3 gives +20% Friendship."
       ],
       deck: "Speed and Stamina for 2400m turf, plus Power for the heavy French ground.",
       keyCards: [],
       inputs: [
         { id: "star", label: "Star gauge members", scope: "facility", type: "number", max: 5, help: "Members here whose Star gauge isn't full yet" },
-        { id: "ss", label: "SS Match members ready", scope: "turn", type: "number", max: 5 }
+        { id: "ss", label: "SS Match members", scope: "turn", type: "number", max: 5 },
+        { id: "expect", label: "Expectation gauge %", scope: "turn", type: "number", max: 100 }
       ],
       events: [
-        { turn: 37, label: "France expedition", tip: "Overseas training starts. Arrive with high energy." },
-        { turn: 43, label: "Arc (Classic)", tip: "approx. Mark it as a goal race if your game lists it." },
+        { turn: 3, label: "SS Match opens", tip: "The SS Match facility appears from this turn." },
+        { turn: 24, label: "Exhibition race + goal", tip: "Exhibition race after this turn (no turn used). Goal: 7,000 Supporter Pt by now." },
+        { turn: 34, label: "Japan Derby", tip: "Goal: 3rd or better." },
+        { turn: 36, label: "Exhibition race", tip: "After this turn, no turn used." },
+        { turn: 37, label: "France expedition", tip: "No Japanese races, Star gauges or SS Matches until September." },
+        { turn: 41, label: "Prix Niel", tip: "Goal race." },
+        { turn: 43, label: "Arc (Classic)", tip: "Goal race against Venus Park and Rigantona." },
+        { turn: 54, label: "Exhibition race + goal", tip: "Goal: 42,000 Supporter Pt by now." },
+        { turn: 60, label: "Takarazuka Kinen", tip: "Goal: 3rd or better. Exhibition race after it." },
         { turn: 61, label: "France expedition", tip: "Last expedition." },
+        { turn: 65, label: "Prix Foy", tip: "Goal race." },
         { turn: 67, label: "Arc (Senior)", tip: "Final race." }
       ],
       hook: "larc"
@@ -277,25 +321,40 @@
       totalTurns: 78,
       caps: [1700, 1500, 1500, 1500, 1300],
       gainScale: 1.45,
+      levelRule: "discipline",
       train: { speed: [12, 0, 1, 0, 0, 6, -15], stamina: [0, 11, 0, 2, 0, 6, -15], power: [0, 2, 11, 0, 0, 6, -15], guts: [1, 0, 1, 12, 0, 6, -15], wit: [2, 0, 0, 0, 11, 6, -15] },
-      trainNote: "Sphere genre values; Fight gives fewer stats and more skill points, Free gives more Speed.",
+      trainByGenre: {
+        sphere: { speed: [12, 0, 1, 0, 0, 6, -15], stamina: [0, 11, 0, 2, 0, 6, -15], power: [0, 2, 11, 0, 0, 6, -15], guts: [1, 0, 1, 12, 0, 6, -15], wit: [2, 0, 0, 0, 11, 6, -15] },
+        fight: { speed: [8, 0, 1, 0, 0, 10, -15], stamina: [0, 7, 0, 2, 0, 10, -15], power: [0, 2, 7, 0, 0, 10, -15], guts: [1, 0, 1, 8, 0, 10, -15], wit: [2, 0, 0, 0, 5, 10, -15] },
+        free: { speed: [14, 0, 1, 0, 0, 4, -15], stamina: [1, 10, 0, 2, 0, 6, -15], power: [1, 2, 10, 0, 0, 6, -15], guts: [2, 0, 1, 12, 0, 5, -15], wit: [4, 0, 0, 0, 10, 5, -15] }
+      },
+      trainNote: "Sphere genre values are the default; each training uses its own genre when you set it.",
       finale: { name: "U.A.F. Showdown", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
-      summary: "The five facilities become 15 sports in three genres (Sphere, Fight, Free). Every time a genre passes a 50-level mark, a Heat-Up gives all trainings a bonus for two turns. The festival runs in three parts: Test Stage, Trials and Showdown.",
+      summary: "The five facilities become sports in three genres (Sphere, Fight, Free), rerolled every turn. Picking a sport whose genre appears more than once is a Link Training: stronger, and every linked sport levels up. Each genre passing a 50-level mark triggers a 2-turn Heat-Up. Every sport costs 15 energy, Wit included.",
       coreLoop: [
-        "Watch genre levels. A training that pushes a genre past the next 50-level mark triggers a Heat-Up for the next 2 turns.",
-        "Line up Heat-Ups with strong friendship turns or summer camp when you can.",
-        "Every festival part tests all 15 sports, so don't leave one genre far behind.",
-        "Friendship training stays the best source of both stats and sport levels."
+        "Link Training: pick a sport whose genre shows up on several facilities this turn. It boosts the training and levels every linked sport, and the genre level rises by all of their gains.",
+        "Consult Elfie (3 charges, refilled after the debut and each tournament part; no turn used) to swap a whole genre into another, e.g. turn 3 Sphere + 2 Fight into 5 Sphere for a big link.",
+        "Heat-Up at every 50 genre levels lasts 2 training turns: Sphere boosts stats and SP by genre level, Fight boosts main stats by link size, Free adds hints.",
+        "Every sport costs 15 energy, including Wit, so plan rests; resting, racing or an outing adds +3 to the next turn's sport level gains.",
+        "Before each tournament part, get 12 sports to level 10/20/30/40/50. Wins add permanent Training Bonus per genre (5 wins +3%, 10 +7%, 15 +12%, 20 +17%).",
+        "Genres differ: Fight gives fewer stats but more SP, Free gives more Speed."
       ],
       deck: "Five-type deck (one of each stat) so every genre has support.",
       keyCards: [],
       inputs: [
-        { id: "heat", label: "Triggers Heat-Up", scope: "facility", type: "check", help: "This training pushes a genre past the next 50-level mark" }
+        { id: "genre", label: "Genre", scope: "facility", type: "select", options: [["sphere", "Sphere (blue)"], ["fight", "Fight (red)"], ["free", "Free (yellow)"]] },
+        { id: "heat", label: "Triggers Heat-Up", scope: "facility", type: "check", help: "This training pushes a genre past the next 50-level mark" },
+        { id: "consult", label: "Consultations left", scope: "turn", type: "number", max: 3, default: 3 }
       ],
       events: [
-        { turn: 24, label: "U.A.F. Test Stage", tip: "approx." },
-        { turn: 48, label: "U.A.F. Trials", tip: "approx." },
-        { turn: 72, label: "U.A.F. Showdown", tip: "approx." }
+        { turn: 24, label: "U.A.F. Test Stage", tip: "Aim for 12 sports at level 10+. Consultations refill after it." },
+        { turn: 36, label: "Trial 1", tip: "12 sports at level 20+." },
+        { turn: 48, label: "Trial 2", tip: "12 sports at level 30+." },
+        { turn: 60, label: "Trial 3", tip: "12 sports at level 40+." },
+        { turn: 72, label: "Showdown", tip: "12 sports at level 50+. Overall victory in all five parts unlocks extra skill evolutions." },
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
+        { turn: 71, label: "Unique skill check", tip: "120,000 fans by Late December (80,000 dirt-only) levels it up again." }
       ],
       hook: "uaf"
     },
@@ -310,21 +369,42 @@
       caps: [1750, 1000, 1700, 1700, 1350],
       gainScale: 1.45,
       train: { speed: [11, 0, 2, 0, 0, 5, -19], stamina: [0, 8, 0, 5, 0, 5, -20], power: [0, 4, 9, 0, 0, 5, -20], guts: [2, 0, 2, 10, 0, 5, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
-      finale: { name: "Food Festival finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
-      summary: "Training trims vegetables (carrot, garlic, potato, chili, strawberry), which are harvested every 4 turns. A cooked dish only lasts for the turn you cook it, giving +25% or +50% training bonus to its stats.",
+      dishes: [
+        { tier: 1, name: "Sandwich", from: 1, pct: 25, stats: ["speed", "power", "wit"], cost: [25, 0, 50, 0, 50] },
+        { tier: 1, name: "Vegetable Curry", from: 1, pct: 25, stats: ["speed", "stamina", "guts"], cost: [25, 50, 0, 50, 0] },
+        { tier: 2, name: "Carrot and Potato Pot-au-feu", from: 25, pct: 50, stats: ["speed"], cost: [150, 0, 80, 0, 0] },
+        { tier: 2, name: "Garlic Ramen", from: 25, pct: 50, stats: ["stamina"], cost: [0, 150, 0, 80, 0] },
+        { tier: 2, name: "Potato Garlic Pizza", from: 25, pct: 50, stats: ["power"], cost: [0, 80, 150, 0, 0] },
+        { tier: 2, name: "Potato and Carrot Mapo Tofu", from: 25, pct: 50, stats: ["guts"], cost: [40, 0, 40, 150, 0] },
+        { tier: 2, name: "Strawberry Ice Cream", from: 25, pct: 50, stats: ["wit"], cost: [80, 0, 0, 0, 150] },
+        { tier: 3, name: "Chunky Carrot Pot-au-feu", from: 49, pct: 80, stats: ["speed"], cost: [250, 0, 80, 0, 0] },
+        { tier: 3, name: "Whole Garlic Ramen", from: 49, pct: 80, stats: ["stamina"], cost: [0, 250, 0, 80, 0] },
+        { tier: 3, name: "Fluffy Potato Garlic Pizza", from: 49, pct: 80, stats: ["power"], cost: [0, 80, 250, 0, 0] },
+        { tier: 3, name: "Extra Spicy Mapo Tofu", from: 49, pct: 80, stats: ["guts"], cost: [40, 0, 40, 250, 0] },
+        { tier: 3, name: "Double Strawberry Ice Cream", from: 49, pct: 80, stats: ["wit"], cost: [80, 0, 0, 0, 250] },
+        { tier: 4, name: "G1 Plate", from: 73, pct: 150, stats: ["speed", "stamina", "power", "guts", "wit"], cost: [100, 100, 100, 100, 100], energy: 25 }
+      ],
+      finale: { name: "URA Finals", turns: [74, 76, 78], forced: true, note: "During the URA Finals you can cook the G1 Plate: +150% training, +70% race bonus, +25 energy." },
+      summary: "Training grows vegetables (carrot, garlic, potato, chili, strawberry), harvested every 4 turns. A dish only lasts for the turn you cook it: +25% to a group of stats at first, +50% to one stat from Classic, +80% plus race bonus from Senior, and the G1 Plate in the URA Finals. Cooking Challenges every six months score your Cooking Points.",
       coreLoop: [
-        "Cook on the turn you will take a strong training. Dishes only last that turn.",
-        "+50% dishes (for example Pot-au-feu or Garlic Ramen) target specific stats, so match them to the facility you train.",
-        "Vegetable Curry gives +25% to Speed, Stamina and Guts plus +2 bond with everyone. It's good in Junior.",
-        "Upgrade the plots for the vegetables your best dishes need.",
-        "Stamina caps at 1000 here, so keep it for sprint and mile builds."
+        "Cook on the turn you take a strong training, and pick the dish for that training's stat. Dishes last only that turn.",
+        "Junior: Sandwich (+25% Speed/Power/Wit) or Vegetable Curry (+25% Speed/Stamina/Guts, +2 bond to everyone).",
+        "From Classic: single-stat +50% dishes; from Senior: +80% plus +30% race bonus (or the linked character's specialty dish).",
+        "A Great Success when cooking gives a skill hint and may restore 10 energy or pull another card onto the training.",
+        "12,000 Cooking Points before the Great Food Festival (Super Satisfaction) makes the G1 Plate cheaper and stronger.",
+        "Upgrade the plots for the vegetables your best dishes need. Stamina caps at 1000 here, so keep it for sprint and mile builds."
       ],
       deck: "Normal stat deck. Scenario-linked characters (Special Week, Hishi Akebono, Rice Shower, Nishino Flower, Katsuragi Ace, Akikawa Yayoi) raise starting vegetables.",
       keyCards: [],
       inputs: [
-        { id: "dish", label: "Dish ready", scope: "turn", type: "select", options: [["0", "None"], ["25", "+25% dish"], ["50", "+50% dish"]] }
+        { id: "dish", label: "Best dish you can afford", scope: "turn", type: "select", options: [["0", "None"], ["1", "+25% (Sandwich/Curry)"], ["2", "+50% stat dish"], ["3", "+80% stat dish"], ["4", "G1 Plate"]] }
       ],
       events: [
+        { turn: 24, label: "Tasting Party 1", tip: "Cooking Challenge. New dishes unlock for Classic." },
+        { turn: 36, label: "Tasting Party 2", tip: "Cooking Challenge." },
+        { turn: 48, label: "Tasting Party 3", tip: "Cooking Challenge. +80% dishes unlock for Senior." },
+        { turn: 60, label: "Tasting Party 4", tip: "Cooking Challenge." },
+        { turn: 72, label: "Great Food Festival", tip: "12,000 Cooking Points by now is Super Satisfaction (cheaper, stronger G1 Plate)." },
         { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
         { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
         { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
@@ -342,7 +422,7 @@
       caps: [1750, 1700, 1500, 1300, 1300],
       gainScale: 1.5,
       train: { speed: [11, 0, 2, 0, 0, 5, -19], stamina: [0, 10, 0, 4, 0, 5, -20], power: [0, 4, 10, 0, 0, 5, -20], guts: [2, 0, 2, 9, 0, 5, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
-      finale: { name: "Mecha finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
+      finale: { name: "URA Finals", turns: [74, 76, 78], forced: true, note: "Qualifier, Semifinal and Final, with a training turn before each." },
       summary: "Training raises Research Levels, which boost training and must pass each Upgrade Exam. Mecha Gears on a facility add research and Overdrive gauge, and a full gauge unlocks Overdrive training turns.",
       coreLoop: [
         "Research gain grows with the number of characters on a facility, Mecha Gears and friendship.",
@@ -357,6 +437,11 @@
         { id: "overdrive", label: "Overdrive ready", scope: "turn", type: "check" }
       ],
       events: [
+        { turn: 24, label: "Upgrade Exam 1", tip: "Research Levels decide the rank. S in every exam unlocks extra skill evolutions." },
+        { turn: 36, label: "Upgrade Exam 2", tip: "" },
+        { turn: 48, label: "Upgrade Exam 3", tip: "" },
+        { turn: 60, label: "Upgrade Exam 4", tip: "" },
+        { turn: 72, label: "Upgrade Exam 5", tip: "S here gives a better skill hint and extra evolutions." },
         { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
         { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
         { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
@@ -381,7 +466,9 @@
         "Blue (Saint Lite): a 3-turn motivation state worth +20% to +55% stats, and it can be extended. Fire it right before a run of strong turns such as summer camp.",
         "Pink (Speed Symboli): builds on consecutive successful trainings, then rearms after 4 more. Keep failure low so the streak doesn't break.",
         "Green (Haiseiko): raises a Best Friend gauge and recruits NPCs who join trainings for strong friendship trainings.",
-        "Pick one legend early so her Heart Knowledge buffs stack."
+        "Pick one legend early so her Heart Knowledge buffs stack.",
+        "Your unique skill levels up by winning the Dream Fest race at the end of each year, not by fan count.",
+        "100,000+ fans plus two strategy skills (or 150,000 fans) unlock this scenario's extra skill evolutions."
       ],
       deck: "Normal stat deck. Include the legend-linked cards for the color you plan to follow.",
       keyCards: [],
@@ -390,7 +477,11 @@
         { id: "follow", label: "Legend you follow", scope: "turn", type: "select", options: [["blue", "Blue (Saint Lite)"], ["pink", "Pink (Speed Symboli)"], ["green", "Green (Haiseiko)"]] },
         { id: "buff", label: "Guidance buff ready", scope: "turn", type: "check" }
       ],
-      events: [],
+      events: [
+        { turn: 24, label: "Dream Fest (Junior)", tip: "Year-end race. Winning it levels up your unique skill." },
+        { turn: 48, label: "Dream Fest (Classic)", tip: "Winning it levels up your unique skill." },
+        { turn: 72, label: "Dream Fest Legend", tip: "Winning it levels up your unique skill (with Almond Eye racing, a loss can still count)." }
+      ],
       hook: "legends"
     },
     {
@@ -412,7 +503,8 @@
         "Use Island Training when 3 or more facilities show friendship (the beach house bonus scales with that).",
         "A new building plan follows each evaluation. Usual target: two Instinct (本能全開) facilities at Lv5 and two Technique (熟練技巧) at Lv4, mostly Speed and Stamina, ordered by the highest stat caps.",
         "Build the beach house in the first or second plan and leave it at Lv1.",
-        "You can carry up to 3 tickets into the last half year, so bank them during Senior spring."
+        "You can carry up to 3 tickets into the last half year, so bank them during Senior spring.",
+        "Great success at every Island Assembly (and the last one) unlocks this scenario's extra skill evolutions."
       ],
       deck: "Highlander deck (one of each type). SSR Tucker Bryne at 3LB+ is the top pick.",
       keyCards: ["Tucker Bryne (SSR, 3LB+)"],
@@ -445,7 +537,8 @@
       gainScale: 1.65,
       train: { speed: [12, 0, 1, 0, 0, 6, -20], stamina: [0, 9, 0, 5, 0, 6, -20], power: [0, 3, 11, 0, 0, 6, -20], guts: [2, 0, 2, 10, 0, 6, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
       trainApprox: true,
-      finale: { name: "Onsen finale", turns: [], forced: false, note: "Mark the finale races on the turns your game shows." },
+      finale: { name: "URA Finals", turns: [74, 76, 78], forced: true, note: "Qualifier, Semifinal and Final, with a training turn before each." },
+      levelBonus: (state) => (state.turn > 24) + (state.turn > 48),
       summary: "Training digs hot springs, and each spring adds energy recovery and friendship bonuses. A bath ticket (max 3) takes no turn and restores energy, gives skill points and boosts training for 2 turns. Bathing parties at the end of Junior and Classic raise every training level by 1.",
       coreLoop: [
         "Dig order: Shikku (疾駆) → Meiseki (明晰) → Tensho (天翔の古湯) → Shunsen (駿閃) → Yukoma (ゆこま源泉) → Densetsu (伝説の秘湯).",
@@ -453,7 +546,8 @@
         "Stay in a bath almost all the time. A bath doesn't use a turn, so bathe whenever the 2-turn buff has run out.",
         "Never sit on 3 tickets. They cap at 3, so extra tickets are lost.",
         "PR activity is an extra command that always succeeds and gives 1 ticket, but it costs as much energy as a training for small stats. Use it only when you have no tickets.",
-        "Yukoma Spring appears in Senior January. Dig it right away. Avoid extra races."
+        "Yukoma Spring appears in Senior January. Dig it right away. Avoid extra races.",
+        "A bath lasts 2 turns, so bathe the turn before a goal race or on the goal turn itself."
       ],
       deck: "SSR Kenko Hoshina (friend) is close to required: her link effect greatly raises bath tickets.",
       keyCards: ["Kenko Hoshina (SSR Friend)"],
@@ -463,10 +557,14 @@
         { id: "pr", label: "PR activity open", scope: "turn", type: "check" }
       ],
       events: [
-        { turn: 3, label: "Shikku deadline", tip: "Give up on Shikku if it isn't dug by now." },
-        { turn: 24, label: "Bathing party", tip: "Success raises every training level by 1." },
-        { turn: 48, label: "Bathing party", tip: "Success raises every training level by 1." },
-        { turn: 49, label: "Yukoma Spring", tip: "Strongest spring. Dig it right away." }
+        { turn: 3, label: "Pick a spring", tip: "Choose what to dig. Give up on Shikku if it isn't dug by now. You can switch when a spring is finished or after a bathing party." },
+        { turn: 24, label: "Bathing party 1", tip: "Success raises every training level by 1." },
+        { turn: 48, label: "Bathing party 2", tip: "Success raises every training level by 1." },
+        { turn: 49, label: "Yukoma Spring", tip: "Strongest spring. Dig it right away." },
+        { turn: 72, label: "Bathing party 3", tip: "Last party before the URA Finals." },
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up." },
+        { turn: 71, label: "Unique skill check", tip: "120,000 fans by Late December (80,000 dirt-only) levels it up again." }
       ],
       hook: "onsen"
     },
@@ -496,9 +594,15 @@
       inputs: [
         { id: "members", label: "Team members", scope: "facility", type: "number", max: 3 },
         { id: "fullgauge", label: "Rank-ups ready", scope: "facility", type: "number", max: 3, help: "Members here with a full Dream gauge" },
-        { id: "dreamsReady", label: "DREAMS training ready", scope: "turn", type: "check" }
+        { id: "dreamsLeft", label: "DREAMS trainings left", scope: "turn", type: "number", max: 2, default: 2, help: "You get 2 per half year" }
       ],
-      events: [],
+      events: [
+        { turn: 12, label: "Review", tip: "Half-year review: team results are scored. Unused DREAMS trainings don't carry over." },
+        { turn: 24, label: "Review", tip: "Half-year review." },
+        { turn: 36, label: "Review", tip: "Half-year review." },
+        { turn: 48, label: "Review", tip: "Half-year review." },
+        { turn: 60, label: "Final review", tip: "After this, up to 4 strategy meetings are available." }
+      ],
       hook: "dreams"
     },
     {
@@ -519,7 +623,8 @@
       summary: "Training fills noodle, soup and topping gauges that earn ramen tips (max 10). A tasting session spends a region's tips for a buff, and the Ramen Jamboree (RMJ) checks your progress. It has the highest stat caps so far.",
       coreLoop: [
         "Pick regions so base gauge gains are spread out, for example 2 noodle / 3 soup / 5 topping.",
-        "Hold a tasting session right before a friendship training. The buff makes that training much stronger.",
+        "A tasting session uses no turn (max one per turn). Hold it right before a friendship training; the buff makes that training much stronger, and it earns hype points for the RMJ.",
+        "More regions (stronger ramen) unlock each year.",
         "Tips cap at 10. Spend them before they overflow.",
         "During the URA Finals the special ramen removes energy limits, so take friendship training every turn."
       ],
@@ -530,7 +635,11 @@
         { id: "tasting", label: "Tasting available", scope: "turn", type: "check" }
       ],
       events: [
-        { turn: 73, label: "Special ramen", tip: "Free energy every turn. Take friendship training every turn." }
+        { turn: 72, label: "Ultimate Tracen Ramen", tip: "From Senior Late December a buff fires automatically every turn." },
+        { turn: 73, label: "Super RMJ", tip: "Pick one of three ramen for a huge 3-turn buff, then take friendship training every turn." },
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up." },
+        { turn: 71, label: "Unique skill check", tip: "120,000 fans by Late December (80,000 dirt-only) levels it up again." }
       ],
       hook: "ramen"
     },

@@ -41,6 +41,22 @@ A **Grand Concert songs** panel appears in this scenario:
 - Extra Stat Gain songs add their permanent bonus to the gain formula right away. Friendship Bonus songs start counting after the next live.
 - Key turns: lessons unlock on turn 5, Promo Lives on turns 24/36/48/60, the lyrics event in Early November of Senior year (16+ songs), and the Grand Live on turn 72 (18+ songs for the special Girls' Legend U).
 
+## Scenario-specific rules
+
+Each scenario's rules come from GameTora's scenario articles:
+
+- **URA Finale**: Happy Meek duel rewards; Akikawa's +30 energy snack at the end of Late July (years 2 and 3), counted in camp rest decisions; the Early March mood event; fan milestones.
+- **Unity Cup**: Special Training by white-flame count, exact Spirit Burst and Extreme Spirit Burst values (Wit bursts +5 energy, Extreme sets failure to 0%), a burst counter for Team Zenith's Senior Late November event, facility levels from team rank, URA Finals at the end.
+- **Trackblazer**: Grade Points by race grade, expected shop coins, a steep penalty for a 4th race in a row, and shop items. Energy drinks are weighed against resting, cupcakes against outings; also the Reset Whistle on weak turns, Cleat Hammers on races, Megaphones, Ankle Weights and Charms. Umamusume of the Year bond checks.
+- **Grand Concert**: songs panel (see above).
+- **Grand Masters**: correct Goddess Wisdom effects (Red: +50 energy, max mood, past level 5; Blue: a hint per card; Yellow: every card counts as friendship), each tried on every training. Year-end races don't use a turn; the Grand Masters race comes after 5 extra training turns, with no URA Finals.
+- **Project L'Arc**: the fixed goal races (Japan Derby, Prix Niel, both Arcs, Takarazuka Kinen, Prix Foy) are marked automatically; no SS Matches or Star gauge during the France expeditions; the Expectation gauge raises facility levels at 20/60/100%.
+- **U.A.F.**: genre per training for Link Training, per-genre base values, Wit costing 15 energy, Consultation advice, tournament dates.
+- **Great Food Festival**: names the right dish (Sandwich, Curry, single-stat dishes, G1 Plate) for the training it picks.
+- **Mecha / Legends / Island / Onsen / Beyond Dreams / Trecen-ken**: exam, Dream Fest, assembly, bathing party and review dates; URA Finals where the scenario has them; Onsen's party level-ups; DREAMS trainings saved for strong turns but used before each half-year ends.
+
+Facility levels are counted from your logged trainings (every 4 raise one level), with skipped turns estimated from your training mix. Unity Cup uses team rank and U.A.F. uses sport level instead. You can always pick the real level shown in the game.
+
 ## How the coach decides
 
 Every option is scored in value points: stats, skill points, bond building, hints, scenario bonuses, energy, mood and failure risk. A score of 100 means a typical training for that point in the career.
@@ -84,6 +100,8 @@ python3 tools/build_data.py
 ```
 
 The generated file is committed, so the coach works offline.
+
+When releasing a change to the site, bump the `?v=` number on the file links in `index.html` so browsers fetch the new files instead of cached ones.
 
 ## Files
 

@@ -145,6 +145,7 @@
               </div>
               <div id="traineeInfo" class="trainee-info"></div>
               <div class="slots" id="slots"></div>
+              <div class="row-wrap"><button type="button" class="btn ghost small" id="allBond">All cards +5 bond</button><span class="mini">For events or items that raise every card's bond (e.g. Trackblazer's Grilled Carrots).</span></div>
               <p class="mini">Bonds start at each card's initial value. Pressing Done adds 7 for every card you trained with, plus about 5 for a card that had a hint (!). Card events also raise bond: tap <b>+5</b> or <b>+10</b> when one happens, or tap the gauge color the game shows (orange = 80+, friendship unlocked). For Friend and Group cards like Light Hello, tick <b>Outings unlocked</b> once the game offers outings with her and the coach will weigh them against training.</p>
             </div>
           </details>
@@ -356,6 +357,11 @@
           renderFacilities();
           commit();
         }
+      });
+      $("#allBond").addEventListener("click", () => {
+        state.deck.slots.forEach((sl) => { if (sl) sl.bond = Math.min(100, slotBond(sl) + 5); });
+        commit(true);
+        flash("Every card: bond +5");
       });
       $("#slots").addEventListener("click", (e) => {
         const b = e.target.closest("[data-slot-clear]");
@@ -588,6 +594,7 @@
         ${pipsHTML("rainbows", f.rainbows, "Rainbow", "r")}
         ${pipsHTML("unbonded", f.unbonded, "Bond<80", "b")}`}
         ${deckOn() ? "" : `<label class="chk ${f.hint ? "on" : ""}"><input type="checkbox" data-k="hint" ${f.hint ? "checked" : ""}> Hint !</label>`}
+        ${levelPicker(f)}
         ${facInputs.map((i) => extraField(i, f.extras)).join("")}
       </fieldset>`;
   }
@@ -680,11 +687,19 @@
       const rb = D.isRainbow(c, bond, f.stat);
       return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}${hint ? " hint" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""} · tap again to mark a hint (!)">${hint ? '<b class="bang">!</b>' : ""}${esc(shortName(c))}${bond < 80 ? `<small>${Math.round(bond)}</small>` : ""}</button>`;
     }).join("");
+    return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>
+      ${pipsHTML("extra", f.extra || 0, "Others (not in deck)", "c")}`;
+  }
+
+  // "Auto" follows the scenario's rule; the title explains where the number comes from.
+  function levelPicker(f) {
+    const sc = scenario();
     const auto = E.facLevelFor(Object.assign({}, state, { facLevels: {} }), sc, f.stat);
     const cur = state.facLevels[f.stat] || 0;
-    return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>
-      ${pipsHTML("extra", f.extra || 0, "Others (not in deck)", "c")}
-      <label class="nf lv"><span>Facility level</span><select data-lv="1"><option value="0">Auto (${auto})</option>${[1, 2, 3, 4, 5].map((l) => `<option value="${l}" ${cur === l ? "selected" : ""}>Lv ${l}</option>`).join("")}</select></label>`;
+    const why = sc.levelRule === "rank" ? "Unity Cup: follows your team rank for this stat (F/G 1, D/E 2, B/C 3, A 4, S 5); pick it from your team screen"
+      : sc.levelRule === "discipline" ? "U.A.F.: follows the sport's level (1-19 Lv1, 20s Lv2, 30s Lv3, 40s Lv4, 50+ Lv5)"
+      : "Counted from your logged trainings (every 4 raise it), with skipped turns estimated. The game shows the real level on the training button.";
+    return `<label class="nf lv" title="${esc(why)}"><span>Facility level</span><select data-lv="1"><option value="0">Auto (${auto})</option>${[1, 2, 3, 4, 5].map((l) => `<option value="${l}" ${cur === l ? "selected" : ""}>Lv ${l}</option>`).join("")}</select></label>`;
   }
 
   function keyEffects(c, level) {

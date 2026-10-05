@@ -277,3 +277,90 @@ test("hint cards add value and extra bond; Friend outings become an option", () 
   assert.strictEqual(after.deck.slots[1].dates.done, 1);
   assert.strictEqual(after.deck.slots[1].bond, 35);
 });
+
+// ---- Scenario audit (GameTora articles) ----
+test("facility levels: start at 1, count logged trainings, fill unlogged turns", () => {
+  const ura = sc("ura");
+  assert.strictEqual(E.facLevelFor(base({ turn: 1 }), ura, "speed"), 1);
+  const log = [];
+  for (let t = 1; t <= 8; t++) log.push({ turn: t, kind: "train", stat: t <= 4 ? "speed" : "wit" });
+  assert.strictEqual(E.facLevelFor(base({ turn: 9, log }), ura, "speed"), 2);
+  assert.strictEqual(E.facLevelFor(base({ turn: 9, log }), ura, "stamina"), 1);
+  assert.ok(E.facLevelFor(base({ turn: 30 }), ura, "speed") >= 2); // nothing logged: estimated
+  assert.strictEqual(E.facLevelFor(base({ turn: 38 }), ura, "guts"), 5); // camp
+  assert.strictEqual(E.facLevelFor(base({ turn: 30, facLevels: { speed: 4 } }), ura, "speed"), 4);
+  // L'Arc: Expectation gauge thresholds add levels; Onsen: bathing parties add levels
+  assert.strictEqual(E.facLevelFor(base({ turn: 2, extras: { expect: 60 } }), sc("larc"), "speed"), 3);
+  assert.strictEqual(E.facLevelFor(base({ turn: 26 }), sc("onsen"), "stamina") >= 2, true);
+});
+
+test("URA: Akikawa's summer snack restores 30 energy after Late July", () => {
+  const s = base({ turn: 38, energy: 40, facilities: facs({ wit: { cards: 1 } }) });
+  const wit = pick(s).ranked.find((o) => o.stat === "wit");
+  const next = E.advance(s, sc("ura"), wit);
+  assert.ok(next.energy >= 40 + 5 + 30 - 1);
+  const meek = pick(base({ facilities: facs({ speed: { cards: 1, extras: { meek: true } } }) })).ranked.find((o) => o.stat === "speed");
+  assert.ok(meek.parts.scenario > 0.5 * E.typAt(30, sc("ura"), 1));
+});
+
+test("Unity Cup: Special Training, Spirit Bursts and the burst counter", () => {
+  const u = sc("unity");
+  assert.deepStrictEqual(u.finale.turns, [74, 76, 78]);
+  const s = base({ facilities: facs({ speed: { cards: 2, extras: { flames: 3, burst: 1 } }, power: { cards: 2 } }) });
+  const r = pick(s, "unity");
+  assert.strictEqual(r.action.stat, "speed");
+  assert.match(r.action.notes.join(" "), /Special Training with 3 flames/);
+  const next = E.advance(s, u, r.action);
+  assert.strictEqual(next.extras.bursts, 1);
+});
+
+test("Trackblazer: a Vita beats resting, cupcakes fix mood, a 4th race in a row is avoided", () => {
+  const strong = facs({ speed: { cards: 3, rainbows: 2, fail: 30 } });
+  const low = base({ energy: 25, extras: { vita: "40" }, facilities: strong });
+  assert.match(pick(low, "trackblazer").headline, /Drink Vita 40/);
+  const sad = base({ mood: 1, extras: { cupcake: "1" }, facilities: facs({ speed: { cards: 3, rainbows: 2, fail: 0 } }) });
+  assert.match(pick(sad, "trackblazer").headline, /Cupcake/);
+  const tired = base({ race: "g1", extras: { consec: 3 }, facilities: facs({ speed: { cards: 2, rainbows: 1 } }) });
+  assert.notStrictEqual(pick(tired, "trackblazer").action.kind, "race");
+  const hammer = base({ race: "g1", extras: { hammer: "35" } });
+  assert.match(pick(hammer, "trackblazer").headline, /Cleat Hammer/);
+});
+
+test("Grand Masters: correct Wisdom effects and the Grand Masters finale", () => {
+  const gm = sc("grandmasters");
+  assert.deepStrictEqual(gm.finale.turns, [78]);
+  const r = pick(base({ energy: 20, extras: { wisdom: "red" }, facilities: facs({ speed: { cards: 3, rainbows: 1, fail: 35 } }) }), "grandmasters");
+  assert.match(r.headline, /Red Wisdom/);
+  assert.ok(r.action.fail < 35);
+  const y = pick(base({ extras: { wisdom: "yellow" }, facilities: facs({ speed: { cards: 1, rainbows: 1 }, power: { cards: 4, rainbows: 0 } }) }), "grandmasters");
+  assert.match(y.headline, /Yellow Wisdom/);
+  assert.strictEqual(y.action.stat, "power");
+});
+
+test("L'Arc: fixed goal races, no SS Matches in France", () => {
+  assert.strictEqual(pick(base({ turn: 34 }), "larc").action.kind, "race");
+  assert.ok(pick(base({ turn: 30, extras: { ss: 5 } }), "larc").ranked.some((o) => /SS Match/.test(o.label)));
+  assert.ok(!pick(base({ turn: 38, extras: { ss: 5 } }), "larc").ranked.some((o) => /SS Match/.test(o.label)));
+});
+
+test("U.A.F.: Wit costs energy, linked genres score higher", () => {
+  const r = pick(base({ facilities: facs({ wit: { cards: 1 } }) }), "uaf");
+  assert.ok(r.ranked.find((o) => o.stat === "wit").energyDelta < 0);
+  const g = (genre) => ({ cards: 1, extras: { genre } });
+  const linked = pick(base({ facilities: facs({ speed: g("sphere"), stamina: g("sphere"), power: g("sphere"), guts: g("fight"), wit: g("free") }) }), "uaf");
+  const sp = linked.ranked.find((o) => o.stat === "speed");
+  const gu = linked.ranked.find((o) => o.stat === "guts");
+  assert.ok(sp.parts.scenario > gu.parts.scenario);
+  assert.match(linked.action.notes.join(" "), /consult Elfie/);
+});
+
+test("Great Food Festival: names the dish that matches the training", () => {
+  const r = pick(base({ turn: 30, extras: { dish: "2" }, facilities: facs({ power: { cards: 3, rainbows: 2 } }) }), "cooking");
+  assert.match(r.headline, /Cook Potato Garlic Pizza/);
+  assert.deepStrictEqual(sc("cooking").finale.turns, [74, 76, 78]);
+});
+
+test("Beyond Dreams: use DREAMS training before the half year ends", () => {
+  const r = pick(base({ turn: 47, energy: 70, extras: { dreamsLeft: 2 }, facilities: facs({ speed: { cards: 2, rainbows: 1 } }) }), "dreams");
+  assert.match(r.action.label, /DREAMS/);
+});
