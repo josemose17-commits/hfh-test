@@ -235,3 +235,45 @@ test("deck mode drives the recommendation and tracks bond", () => {
   const next = E.advance(s2, sc("ura"), r2.ranked.find((o) => o.stat === "guts"));
   assert.strictEqual(next.deck.slots[1].bond, 27);
 });
+
+// ---- Grand Concert, hints and outings ----
+test("Grand Concert songs add extra stat gains and a delayed friendship bonus", () => {
+  const gl = sc("grandlive");
+  const s = base({ turn: 30, gl: { songs: { tachiichi: 10, bluebird: 26, zensoku: 20 }, tokens: [0, 0, 0, 0, 0] } });
+  const b = E.songBonuses(s, gl);
+  assert.strictEqual(b.extra.speed, 3);
+  assert.strictEqual(b.fb, 5); // zensoku learned turn 20, live on 24 already happened
+  const pending = E.songBonuses(base({ turn: 30, gl: { songs: { runrun: 28 } } }), gl);
+  assert.strictEqual(pending.fb, 0);
+  assert.strictEqual(pending.pendingFb, 5);
+  const h = E.hypeStatus(base({ turn: 30, gl: { songs: { bluebird: 26 } } }), gl);
+  assert.strictEqual(h.next, 36);
+  assert.strictEqual(h.since, 1);
+  assert.strictEqual(h.need, 2);
+});
+
+test("Grand Concert recommends an affordable song before acting", () => {
+  const s = base({ turn: 10, gl: { songs: {}, tokens: [40, 0, 0, 30, 0] } });
+  const r = pick(s, "grandlive");
+  assert.match(r.headline, /Learn .* \(no turn used\)/);
+  const adv = E.songAdvice(s, sc("grandlive"));
+  assert.ok(adv[0].affordable);
+});
+
+test("hint cards add value and extra bond; Friend outings become an option", () => {
+  const deck = { slots: [{ id: 30028, lb: 4, bond: 40 }, { id: 30052, lb: 4, bond: 30, dates: { unlocked: true, done: 0 } }] };
+  const f = facs();
+  f[0].members = [0];
+  f[0].hints = [0];
+  const s = base({ turn: 20, mood: 2, deck, facilities: f });
+  const r = pick(s);
+  const sp = r.ranked.find((o) => o.stat === "speed");
+  assert.ok(sp.parts.hint > 0);
+  const outing = r.ranked.find((o) => o.outing === 1);
+  assert.ok(outing, "Light Hello outing offered");
+  const next = E.advance(s, sc("ura"), sp);
+  assert.strictEqual(next.deck.slots[0].bond, 52); // 40 + 7 training + 5 hint
+  const after = E.advance(s, sc("ura"), outing);
+  assert.strictEqual(after.deck.slots[1].dates.done, 1);
+  assert.strictEqual(after.deck.slots[1].bond, 35);
+});

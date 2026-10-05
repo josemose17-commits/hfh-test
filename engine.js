@@ -180,6 +180,7 @@
       typ: typAt(state.turn, sc, calib)
     };
     ctx.deck = deckInfo(state);
+    ctx.songs = songBonuses(state, sc);
     ctx.boost = sc.train ? scenarioBoost(state, sc) : 1;
     ctx.V = continuation(state, sc, calib);
     ctx.gainValue = (stat, g) => gainValue(stat, g, ctx);
@@ -312,6 +313,86 @@
     return b;
   }
 
+  // ---- Grand Concert songs ----
+  // Extra Stat Gain songs add a permanent flat bonus right away; Friendship Bonus songs start
+  // working after the next live (lessons bought on a live turn count for that live).
+  function songBonuses(state, sc) {
+    const out = { extra: { speed: 0, stamina: 0, power: 0, guts: 0, wit: 0, sp: 0 }, fb: 0, pendingFb: 0 };
+    if (!sc.songs) return out;
+    const learned = (state.gl && state.gl.songs) || {};
+    sc.songs.forEach((song) => {
+      const t = learned[song.id];
+      if (t == null) return;
+      Object.entries(song.extra || {}).forEach(([k, v]) => { out.extra[k] += v; });
+      if (song.fb) {
+        const live = sc.lives.find((l) => l >= t);
+        if (live != null && state.turn > live) out.fb += song.fb; else out.pendingFb += song.fb;
+      }
+    });
+    return out;
+  }
+
+  // Songs learned since the last live (3 fill the Hype gauge) and the next live turn.
+  function hypeStatus(state, sc) {
+    if (!sc.songs) return null;
+    const learned = (state.gl && state.gl.songs) || {};
+    const next = sc.lives.find((l) => l >= state.turn);
+    const prev = sc.lives.filter((l) => l < state.turn).pop() || 0;
+    const since = Object.values(learned).filter((t) => t > prev && t <= (next || 99)).length;
+    return { next, prev, since, need: Math.max(0, 3 - since), turnsToLive: next != null ? next - state.turn : null };
+  }
+
+  // Ranks songs you can learn now: value of the bonus over the rest of the run per token spent,
+  // with a big push for songs that are still needed to fill the Hype gauge before the next live.
+  function songAdvice(state, sc) {
+    if (!sc.songs) return [];
+    const learned = (state.gl && state.gl.songs) || {};
+    const tokens = (state.gl && state.gl.tokens) || [0, 0, 0, 0, 0];
+    const build = BUILDS[state.build] || BUILDS.medium;
+    const left = Math.max(0, sc.totalTurns - state.turn);
+    const hype = hypeStatus(state, sc);
+    return sc.songs.filter((song) => learned[song.id] == null && song.from <= state.turn).map((song) => {
+      let v = 0;
+      Object.entries(song.extra || {}).forEach(([k, n]) => { v += k === "sp" ? n * SP_VALUE * left * 0.75 : n * build.w[k] * left * 0.2; });
+      Object.entries(song.once || {}).forEach(([k, n]) => { v += k === "sp" ? n * SP_VALUE : n * build.w[k]; });
+      // Friendship %: about 45% of the remaining turns are friendship trainings worth ~30 weighted stats.
+      if (song.fb) v += (song.fb / 100) * 0.45 * left * 30 * build.w.speed * 0.75;
+      if (hype && hype.need > 0) v += 25;
+      const cost = song.cost.reduce((a, b) => a + b, 0);
+      const short = song.cost.map((c, i) => Math.max(0, c - (tokens[i] || 0)));
+      return { song, value: v, perToken: v / Math.max(1, cost), affordable: short.every((x) => x === 0), short };
+    }).sort((a, b) => (b.affordable - a.affordable) || (b.perToken - a.perToken));
+  }
+
+  // ---- Friend / Group card outings ----
+  // Outings with Pal-type cards (e.g. Light Hello) beat a normal outing: energy, mood, stats, bond.
+  // Values are approximate until exact event data is loaded.
+  function outingOptions(ctx) {
+    const { state, deck, typ } = ctx;
+    if (!deck || ctx.camp || state.goalRace) return [];
+    return deck.used.filter((sl) => (sl.card.ty === "friend" || sl.card.ty === "group")).map((sl) => {
+      const raw = state.deck.slots[sl.idx] || {};
+      const d = raw.dates || {};
+      if (!d.unlocked) return null;
+      const n = (d.done || 0) + 1;
+      const last = n >= 5;
+      const energy = 20;
+      const parts = {
+        energy: ctx.energyValue(energy),
+        mood: ctx.moodStep(state.mood),
+        stats: (last ? 25 : 12) * ctx.avgW,
+        bond: 0.04 * typ
+      };
+      return {
+        kind: "recreation", outing: sl.idx,
+        label: "Outing with " + sl.card.n,
+        energyDelta: energy, moodDelta: state.mood < 4 ? 1 : 0, prefix: [], consume: {},
+        notes: ["outing " + n + " with " + sl.card.n + ": energy, mood, stats and bond (approximate until event data is loaded)"].concat(state.mood >= 4 ? ["mood is already Great, but the outing still pays stats and energy"] : []),
+        parts, value: sumParts(parts)
+      };
+    }).filter(Boolean);
+  }
+
   function deckGain(f, ctx) {
     const { state, sc, deck } = ctx;
     if (!deck || !sc.train || !Array.isArray(f.members)) return null;
@@ -319,7 +400,8 @@
     const L = facLevelFor(state, sc, f.stat);
     const r = Deck.trainingGain(sc.train[f.stat], f.stat, members, {
       facilityLevel: L, extra: f.extra || 0, mood: state.mood, growth: deck.growth,
-      energy: ctx.E, maxEnergy: ctx.maxE, deckTypes: deck.deckTypes, totalBond: deck.totalBond
+      energy: ctx.E, maxEnergy: ctx.maxE, deckTypes: deck.deckTypes, totalBond: deck.totalBond,
+      flat: { main: ctx.songs.extra[f.stat] || 0, sp: ctx.songs.extra.sp || 0 }, fbBonus: ctx.songs.fb
     });
     const boost = ctx.boost;
     r.level = L;
@@ -357,10 +439,10 @@
       energyDelta = dg.energy;
       fail = failBlank ? Math.round(estimateFail(f.stat, ctx.E) * dg.failMult) : clamp(+f.fail, 0, 100);
     } else {
-      gain = est ? estimateGain(f, state, sc, ctx.calib) : +f.gain;
-      Object.keys(FACILITY[f.stat].split).forEach((st) => { statGains[st] = gain * FACILITY[f.stat].split[st]; });
       cards = f.cards || 0;
       rainbows = Math.min(f.rainbows || 0, cards);
+      gain = est ? estimateGain(f, state, sc, ctx.calib) * (rainbows && ctx.songs.fb ? 1 + ctx.songs.fb / 100 : 1) + (ctx.songs.extra[f.stat] || 0) : +f.gain;
+      Object.keys(FACILITY[f.stat].split).forEach((st) => { statGains[st] = gain * FACILITY[f.stat].split[st]; });
       unbonded = Math.min(f.unbonded || 0, cards - rainbows);
       spPts = gain * SP_RATE[f.stat];
       energyDelta = f.stat === "wit" ? 5 + 2 * rainbows : -energyCost(f.stat, state.turn, sc);
@@ -383,7 +465,7 @@
         stats,
         sp: spPts * SP_VALUE,
         bond: unbonded * bondK(state.turn) * typ,
-        hint: f.hint ? 0.12 * typ : 0,
+        hint: (dg ? (f.hints || []).filter((i) => (f.members || []).indexOf(i) !== -1).length : f.hint ? 1 : 0) * 0.12 * typ,
         scenario: 0
       }
     };
@@ -394,7 +476,7 @@
     if (rainbows >= 2) o.notes.push(rainbows + " friendship cards stacked");
     else if (rainbows === 1) o.notes.push("1 friendship card");
     if (o.parts.bond >= 0.1 * typ) o.notes.push(unbonded + " card(s) still building bond");
-    if (f.hint) o.notes.push("skill hint");
+    if (o.parts.hint > 0) o.notes.push(dg ? (f.hints || []).filter((i) => (f.members || []).indexOf(i) !== -1).length + " skill hint(s), with extra bond" : "skill hint");
     if (hook.facility) {
       const r = hook.facility(f, ctx, o) || {};
       o.parts.scenario += r.add || 0;
@@ -468,6 +550,7 @@
           parts: recParts, value: sumParts(recParts)
         });
       }
+      outingOptions(ctx).forEach((o) => options.push(o));
       if (state.badCondition) {
         const p = { condition: 0.7 * typ * Math.min(1, ctx.turnsLeft / 10), energy: ctx.energyValue(20) };
         options.push({
@@ -588,8 +671,17 @@
         if (!sl || !sl.id) return;
         const c = Deck && Deck.card(sl.id);
         const start = sl.bond != null ? sl.bond : (c ? Deck.initialBond(c, Deck.levelFor(c, sl.lb)) : 0);
-        sl.bond = Math.min(100, start + (Deck ? Deck.BOND_PER_TRAINING : 7));
+        const hinted = (fac.hints || []).indexOf(i) !== -1;
+        sl.bond = Math.min(100, start + (Deck ? Deck.BOND_PER_TRAINING : 7) + (hinted ? (Deck ? Deck.BOND_PER_HINT : 5) : 0));
       });
+    }
+    if (option.outing != null && s.deck && s.deck.slots[option.outing]) {
+      const sl = s.deck.slots[option.outing];
+      const c = Deck && Deck.card(sl.id);
+      const start = sl.bond != null ? sl.bond : (c ? Deck.initialBond(c, Deck.levelFor(c, sl.lb)) : 0);
+      sl.bond = Math.min(100, start + (Deck ? Deck.BOND_PER_DATE : 5));
+      sl.dates = Object.assign({ unlocked: true, done: 0 }, sl.dates);
+      sl.dates.done += 1;
     }
     // Learn deck strength (and the formula's scenario multiplier) from real or formula gains.
     const entered = s.facilities.filter((f) => f.gain > 0);
@@ -616,7 +708,7 @@
       snapshot: JSON.stringify(Object.assign({}, state, { log: undefined }))
     }]).slice(-90);
     s.turn = Math.min(scenario.totalTurns, s.turn + 1);
-    s.facilities = s.facilities.map((f) => ({ stat: f.stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], extra: 0 }));
+    s.facilities = s.facilities.map((f) => ({ stat: f.stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 }));
     s.goalRace = (s.goals || []).indexOf(s.turn) !== -1;
     s.race = "";
     return s;
@@ -711,10 +803,17 @@
 
     grandlive: {
       items(ctx, options) {
-        if (ctx.state.extras && ctx.state.extras.lesson) {
-          const best = options[0];
-          if (best && !best.forced) useOn(best, ctx, "Buy songs (no turn used)", 0, "songs pay off more the earlier you buy them", { lesson: false });
-          else if (best) best.notes.push("Buy songs first; lessons don't use a turn.");
+        const best = options[0];
+        if (!best || ctx.state.turn < 5) return;
+        const adv = songAdvice(ctx.state, ctx.sc);
+        const buy = adv.find((a) => a.affordable);
+        const hype = hypeStatus(ctx.state, ctx.sc);
+        if (buy) {
+          best.prefix.unshift("Learn " + buy.song.name + " (no turn used)");
+          best.notes.push("you can afford a song now; lessons don't use a turn");
+        }
+        if (hype && hype.next != null && hype.need > 0 && hype.turnsToLive <= 4) {
+          best.notes.push(hype.need + " more song(s) needed before the live on turn " + hype.next + " for a guaranteed Great Success");
         }
       }
     },
@@ -896,7 +995,8 @@
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
     turnInfo, phaseFor, eventsFor, isCamp, campTurns, recommend, evaluate, advance, undo,
-    estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost
+    estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
+    songBonuses, hypeStatus, songAdvice
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;

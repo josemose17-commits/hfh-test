@@ -8,6 +8,8 @@
   const MOOD_COEF = [-0.2, -0.1, 0, 0.1, 0.2];
   const BOND_FRIENDSHIP = 80;
   const BOND_PER_TRAINING = 7;
+  const BOND_PER_HINT = 5; // extra bond from a hint (!) event, approximate
+  const BOND_PER_DATE = 5; // bond from a Friend/Group card outing, approximate
 
   const byId = new Map();
   const traineeById = new Map();
@@ -204,15 +206,18 @@
     });
     const moodCoef = MOOD_COEF[o.mood != null ? o.mood : 2];
     const moodMult = 1 + (moodCoef > 0 ? moodCoef * (1 + me / 100) : moodCoef);
+    // Scenario friendship bonus (e.g. Grand Concert live bonus) only applies to friendship trainings.
+    if (rainbowCards.length && o.fbBonus) fm *= 1 + o.fbBonus / 100;
     const common = fm * moodMult * (1 + te / 100) * (1 + 0.05 * n);
     const mainIdx = STATS.indexOf(facStat);
+    const flat = o.flat || {};
     const growth = o.growth || [0, 0, 0, 0, 0];
     const gains = row.slice(0, 5).map((b, i) => {
       if (!(b > 0)) return 0;
       const lvAdd = i === mainIdx ? L - 1 : Math.floor((L - 1) / 2);
-      return Math.min(100, Math.floor((b + lvAdd + bonus[i] + all) * common * (1 + (growth[i] || 0) / 100)));
+      return Math.min(100, Math.floor((b + lvAdd + bonus[i] + all) * common * (1 + (growth[i] || 0) / 100))) + (i === mainIdx ? flat.main || 0 : 0);
     });
-    const skill = Math.floor((row[5] + sp) * common);
+    const skill = Math.floor((row[5] + sp) * common) + (flat.sp || 0);
     const baseEnergy = row[6];
     const energy = baseEnergy < 0 ? (baseEnergy - 1.5 * (L - 1)) * costMult : baseEnergy + witRecovery;
     return {
@@ -238,7 +243,7 @@
   }
 
   const api = {
-    DATA, STATS, RARITY, BOND_FRIENDSHIP, BOND_PER_TRAINING,
+    DATA, STATS, RARITY, BOND_FRIENDSHIP, BOND_PER_TRAINING, BOND_PER_HINT, BOND_PER_DATE,
     card, trainee, levelFor, effectTable, baseEffects, effectsIn, conditionalUniques, effectName, formatEffect, uniqueText,
     onGlobal, label, typeLabel, initialBond, isRainbow, trainingGain, suggestBuild
   };

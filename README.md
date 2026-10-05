@@ -20,7 +20,9 @@ Shortcuts: ← and → change turns.
 Open **Trainee and deck** and type your trainee and up to 6 support cards. Names autocomplete from the full database. Then set each card's limit break. From then on:
 
 - each training shows your cards as chips. Tap the ones that appear there, and add **Others** for characters not in your deck;
-- friendship (rainbow) is detected from each card's type and bond, and bonds go up by 7 each time you train together and press Done;
+- tap a card once for "here" and twice for "here with a hint (!)". Friendship (rainbow) is detected from each card's type and bond;
+- bonds go up by 7 for each training together and about 5 more for a hint. Card events are logged with the **+5** / **+10** buttons, or by tapping the gauge color the game shows (Blue, Green, Orange 80+, Max);
+- Friend and Group cards (Light Hello and others) track outings. Once **Outings unlocked** is ticked, "Outing with ..." is weighed against training as its own option;
 - gains, skill points, energy cost and failure come from the game's training formula with your cards' real effects at their level: stat bonus, friendship, mood effect, training effectiveness, card count, your trainee's growth bonuses, plus energy cost reduction, failure protection and conditional unique effects such as bond-gated bonuses;
 - your race bonus is added up from your cards automatically.
 
@@ -29,6 +31,15 @@ Scenario-specific boosts that the formula doesn't cover (Unity training, island 
 **Support cards** and **Trainees** tabs browse the whole database:
 - **Support cards**: filter by type, rarity, Global availability and limit break, and sort by any effect. Tap a card for its effects at every limit break, its unique effect, hint skills, event skills and release dates.
 - **Trainees**: aptitudes, growth bonuses and unique skill.
+
+## Grand Concert
+
+A **Grand Concert songs** panel appears in this scenario:
+- Type your tokens from the lesson screen and tick songs as you learn them.
+- It tracks Hype progress (3 songs since the last live guarantee a Great Success) and ranks the songs you can learn next by value per token.
+- The coach puts "Learn ..." in front of its recommendation when you can afford a good song.
+- Extra Stat Gain songs add their permanent bonus to the gain formula right away. Friendship Bonus songs start counting after the next live.
+- Key turns: lessons unlock on turn 5, Promo Lives on turns 24/36/48/60, the lyrics event in Early November of Senior year (16+ songs), and the Grand Live on turn 72 (18+ songs for the special Girls' Legend U).
 
 ## How the coach decides
 
@@ -85,4 +96,4 @@ The generated file is committed, so the coach works offline.
 
 ## Limits
 
-These are estimates, not a game simulator. Card effects and level-1 base training values come from GameTora's data. The increase per facility level, rest amounts, race rewards and scenario-specific bonuses are approximations. Real gains and failure rates from your screen always beat the built-in estimates. Turns marked "approx." are best-effort, so trust the in-game goal list when they disagree. The newest JP scenarios are based on launch-period guides.
+These are estimates, not a game simulator. Support card event effects and Friend/Group outing rewards use approximate values (bond +5 per hint or outing, outings about +20 energy, +1 mood and a few stats). Exact per-event values need GameTora's training event data. Card effects and level-1 base training values come from GameTora's data. The increase per facility level, rest amounts, race rewards and scenario-specific bonuses are approximations. Real gains and failure rates from your screen always beat the built-in estimates. Turns marked "approx." are best-effort, so trust the in-game goal list when they disagree. The newest JP scenarios are based on launch-period guides.

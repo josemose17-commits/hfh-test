@@ -10,9 +10,11 @@
   const TODAY = new Date().toISOString().slice(0, 10);
   const APT = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
   const FX_SHORT = { 1: "Friendship", 8: "Training", 2: "Mood", 15: "Race", 19: "Specialty", 14: "Init. bond", 30: "SP bonus", 3: "Spd bonus", 4: "Sta bonus", 5: "Pow bonus", 6: "Gut bonus", 7: "Wit bonus", 27: "Fail prot.", 28: "Energy cut", 31: "Wit recovery", 41: "All stats", 18: "Hint rate", 17: "Hint Lv" };
-  const blankFacility = (stat) => ({ stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], extra: 0 });
+  const blankFacility = (stat) => ({ stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 });
+  const blankGl = () => ({ songs: {}, tokens: [0, 0, 0, 0, 0] });
+  const GAUGE = [["Blue", 40, "g-blue"], ["Green", 60, "g-green"], ["Orange", 80, "g-orange"], ["Max", 100, "g-max"]];
   const blankDeck = () => ({ trainee: null, slots: [null, null, null, null, null, null], globalOnly: true });
-  const resetBonds = (d) => Object.assign({}, d, { slots: d.slots.map((sl) => (sl ? { id: sl.id, lb: sl.lb, bond: null } : null)) });
+  const resetBonds = (d) => Object.assign({}, d, { slots: d.slots.map((sl) => (sl ? { id: sl.id, lb: sl.lb, bond: null, dates: { unlocked: false, done: 0 } } : null)) });
 
   function freshState(keep) {
     const k = keep || {};
@@ -28,6 +30,7 @@
       fcal: k.fcal || [],
       caps: k.caps || {},
       deck: k.deck ? resetBonds(k.deck) : blankDeck(),
+      gl: blankGl(),
       facLevels: {},
       db: k.db || null,
       turn: 1,
@@ -65,7 +68,8 @@
       if (s && s.v === 2 && s.facilities && s.facilities.length === 5) {
         s.deck = s.deck || blankDeck();
         s.facLevels = s.facLevels || {};
-        s.facilities.forEach((f) => { f.members = f.members || []; f.extra = f.extra || 0; });
+        s.facilities.forEach((f) => { f.members = f.members || []; f.hints = f.hints || []; f.extra = f.extra || 0; });
+        s.gl = s.gl || blankGl();
         return s;
       }
     } catch (e) { /* storage unavailable */ }
@@ -141,7 +145,7 @@
               </div>
               <div id="traineeInfo" class="trainee-info"></div>
               <div class="slots" id="slots"></div>
-              <p class="mini">With a deck set, tap which of your cards are on each training. Friendship is detected from each card's type and bond. Bonds start at the card's initial value and go up by 7 each time you train together and press Done. Fix them here if they drift from the game.</p>
+              <p class="mini">Bonds start at each card's initial value. Pressing Done adds 7 for every card you trained with, plus about 5 for a card that had a hint (!). Card events also raise bond: tap <b>+5</b> or <b>+10</b> when one happens, or tap the gauge color the game shows (orange = 80+, friendship unlocked). For Friend and Group cards like Light Hello, tick <b>Outings unlocked</b> once the game offers outings with her and the coach will weigh them against training.</p>
             </div>
           </details>
           <datalist id="traineeList"></datalist><datalist id="cardList"></datalist>
@@ -167,6 +171,11 @@
             </div>
             <div id="turnExtras" class="extras"></div>
           </div>
+
+          <details class="panel songs" id="songsPanel" hidden>
+            <summary><h2>Grand Concert songs</h2><span class="mini" id="songSummary"></span></summary>
+            <div class="songs-body" id="songsBody"></div>
+          </details>
 
           <div class="fac-head">
             <h2>Trainings</h2>
@@ -255,11 +264,17 @@
       const mc = e.target.closest("[data-member]");
       if (mc) {
         // A card shows up on one training per turn, so tapping it here removes it elsewhere.
+        // Each tap cycles: not here → here → here with a hint (!) → not here.
         const f = state.facilities[+mc.closest("[data-idx]").dataset.idx];
         const si = +mc.dataset.member;
         const on = f.members.indexOf(si) !== -1;
-        state.facilities.forEach((x) => { x.members = (x.members || []).filter((m) => m !== si); });
+        const hinted = (f.hints || []).indexOf(si) !== -1;
+        state.facilities.forEach((x) => {
+          x.members = (x.members || []).filter((m) => m !== si);
+          x.hints = (x.hints || []).filter((m) => m !== si);
+        });
         if (!on) f.members.push(si);
+        else if (!hinted) { f.members.push(si); f.hints.push(si); }
         renderFacilities();
         commit();
         return;
@@ -342,12 +357,57 @@
           commit();
         }
       });
-      $("#slots").addEventListener("click", (e) => { const b = e.target.closest("[data-slot-clear]"); if (b) clearSlot(+b.dataset.slotClear); });
+      $("#slots").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-slot-clear]");
+        if (b) { clearSlot(+b.dataset.slotClear); return; }
+        const set = e.target.closest("[data-bondset]");
+        const add = e.target.closest("[data-bondadd]");
+        const adj = e.target.closest("[data-date-adj]");
+        if (set || add) {
+          const i = +(set || add).dataset[set ? "bondset" : "bondadd"];
+          const sl = state.deck.slots[i];
+          const v = +(set || add).dataset.v;
+          sl.bond = Math.max(0, Math.min(100, set ? v : slotBond(sl) + v));
+          commit(true);
+          flash(D.card(sl.id).n + ": bond " + Math.round(sl.bond));
+        }
+        if (adj) {
+          const sl = state.deck.slots[+adj.dataset.dateAdj];
+          sl.dates = Object.assign({ unlocked: true, done: 0 }, sl.dates);
+          sl.dates.done = Math.max(0, sl.dates.done + +adj.dataset.v);
+          commit(true);
+        }
+      });
+      $("#slots").addEventListener("change", (e) => {
+        const u = e.target.dataset.dateUnlock;
+        if (u == null) return;
+        const sl = state.deck.slots[+u];
+        sl.dates = Object.assign({ done: 0 }, sl.dates, { unlocked: e.target.checked });
+        commit(true);
+      });
     } else {
       $("#deckPanel").hidden = true;
       $("#tabCards").hidden = true;
       $("#tabTrainees").hidden = true;
     }
+
+    $("#songsBody").addEventListener("input", (e) => {
+      const i = e.target.dataset.tok;
+      if (i == null) return;
+      state.gl.tokens[+i] = Math.max(0, +e.target.value || 0);
+      commit();
+      renderSongsLight();
+    });
+    $("#songsBody").addEventListener("change", (e) => {
+      const id = e.target.dataset.song;
+      if (!id) return;
+      const song = scenario().songs.find((x) => x.id === id);
+      const sign = e.target.checked ? -1 : 1;
+      if (e.target.checked) state.gl.songs[id] = state.turn; else delete state.gl.songs[id];
+      state.gl.tokens = state.gl.tokens.map((t, i) => Math.max(0, (t || 0) + sign * song.cost[i]));
+      commit(true);
+      flash((e.target.checked ? "Learned " : "Removed ") + song.name);
+    });
 
     $("#options").addEventListener("click", (e) => {
       const did = e.target.closest("[data-did]");
@@ -527,7 +587,7 @@
         ${deckOn() ? memberChips(f) : `${pipsHTML("cards", f.cards, "Cards", "c")}
         ${pipsHTML("rainbows", f.rainbows, "Rainbow", "r")}
         ${pipsHTML("unbonded", f.unbonded, "Bond<80", "b")}`}
-        <label class="chk ${f.hint ? "on" : ""}"><input type="checkbox" data-k="hint" ${f.hint ? "checked" : ""}> Hint !</label>
+        ${deckOn() ? "" : `<label class="chk ${f.hint ? "on" : ""}"><input type="checkbox" data-k="hint" ${f.hint ? "checked" : ""}> Hint !</label>`}
         ${facInputs.map((i) => extraField(i, f.extras)).join("")}
       </fieldset>`;
   }
@@ -549,10 +609,63 @@
     return sl.bond != null ? sl.bond : D.initialBond(c, D.levelFor(c, sl.lb));
   }
 
+  function bondBucket(b) {
+    return b >= 100 ? 100 : b >= 80 ? 80 : b >= 60 ? 60 : 40;
+  }
+
+  // ---- Grand Concert songs panel ----
+  function renderSongs() {
+    const sc = scenario();
+    const panel = $("#songsPanel");
+    panel.hidden = !sc.songs;
+    if (!sc.songs) return;
+    const gl = state.gl;
+    const hype = E.hypeStatus(state, sc);
+    const bon = E.songBonuses(state, sc);
+    const adv = E.songAdvice(state, sc);
+    const learnedN = Object.keys(gl.songs).length;
+    const extras = Object.entries(bon.extra).filter(([, v]) => v).map(([k, v]) => "+" + v + " " + (k === "sp" ? "SP" : E.STAT_LABELS[k])).join(", ");
+    $("#songSummary").textContent = learnedN + " of 21 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
+    const tok = (cost) => cost.map((c, i) => (c ? `<span class="tok t${i}">${sc.tokens[i].slice(0, 2)} ${c}</span>` : "")).join("");
+    const effect = (song) => [
+      ...Object.entries(song.extra || {}).map(([k, v]) => "+" + v + " " + (k === "sp" ? "SP" : E.STAT_LABELS[k]) + " on every " + (k === "sp" ? "training" : E.STAT_LABELS[k] + " training")),
+      ...Object.entries(song.once || {}).map(([k, v]) => "+" + v + " " + (k === "sp" ? "skill points" : E.STAT_LABELS[k]) + " once"),
+      song.fb ? "Friendship +" + song.fb + "% after the next live" : "",
+      song.live || ""
+    ].filter(Boolean).join(" · ");
+    const groups = [[5, "Available from the start"], [25, "After the 1st Promo Live"], [37, "After the 2nd Promo Live"], [49, "After the 3rd Promo Live"]];
+    const top = adv.slice(0, 3);
+    $("#songsBody").innerHTML = `
+      <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
+      <p class="mini">Type your tokens from the lesson screen. Ticking a song records the turn and takes its cost off your tokens.</p>
+      <div class="song-status">
+        ${hype && hype.next != null ? `<div><b>${hype.since}/3</b> songs since the last live. Next live: turn ${hype.next} (${esc(E.turnInfo(hype.next, sc).text)})${hype.need ? `, ${hype.need} more for a guaranteed Great Success.` : ", Hype gauge full."}</div>` : ""}
+        <div>Active now: ${extras || "no extra stat gains yet"}${bon.fb ? ` · Friendship +${bon.fb}%` : ""}${bon.pendingFb ? ` · +${bon.pendingFb}% Friendship waiting for the next live` : ""}</div>
+        <div>${learnedN >= 18 ? "18+ songs: special Girls' Legend U unlocked." : (18 - learnedN) + " more song(s) by Senior Late Dec for the special Girls' Legend U (16 by Senior Early Nov for the lyrics event)."}</div>
+      </div>
+      ${top.length ? `<div class="song-advice"><b>Best next:</b> ${top.map((a) => `${esc(a.song.name)} ${a.affordable ? '<span class="pill c-clear-pick">affordable</span>' : `<span class="mini">(need ${a.short.map((x, i) => (x ? sc.tokens[i].slice(0, 2) + " " + x : "")).filter(Boolean).join(", ")})</span>`}`).join(" · ")}</div>` : ""}
+      ${groups.map(([from, label]) => `<div class="song-group"><h3>${label}</h3>${sc.songs.filter((x) => x.from === from).map((song) => {
+        const t = gl.songs[song.id];
+        const locked = song.from > state.turn && t == null;
+        return `<label class="song${t != null ? " on" : ""}${locked ? " locked" : ""}"><input type="checkbox" data-song="${song.id}" ${t != null ? "checked" : ""} ${locked ? "disabled" : ""}>
+          <span class="song-name">${esc(song.name)}${t != null ? ` <span class="mini">turn ${t}</span>` : ""}</span>
+          <span class="song-cost">${tok(song.cost)}</span>
+          <span class="mini song-fx">${esc(effect(song))}</span></label>`;
+      }).join("")}</div>`).join("")}`;
+  }
+
+  // Token typing only refreshes the advice line, so the box keeps focus.
+  function renderSongsLight() {
+    const sc = scenario();
+    const adv = E.songAdvice(state, sc).slice(0, 3);
+    const el = $("#songsBody .song-advice");
+    if (el) el.innerHTML = `<b>Best next:</b> ${adv.map((a) => `${esc(a.song.name)} ${a.affordable ? '<span class="pill c-clear-pick">affordable</span>' : `<span class="mini">(need ${a.short.map((x, i) => (x ? sc.tokens[i].slice(0, 2) + " " + x : "")).filter(Boolean).join(", ")})</span>`}`).join(" · ")}`;
+  }
+
   function renderFacilities() {
     $("#facilities").innerHTML = state.facilities.map(facilityHTML).join("");
     $("#facHelp").innerHTML = deckOn()
-      ? "Tap your cards on each training (a gold ring means friendship there) and add <b>Others</b> for characters not in your deck. Gains come from your cards' real effects. Typing the real total gain still wins, and teaches the coach this scenario's extra bonuses."
+      ? "Tap your cards on each training: once = here, twice = here with a hint <b>!</b>, three times = gone. A gold ring means friendship there. Add <b>Others</b> for characters not in your deck. Gains come from your cards' real effects. Typing the real total gain still wins, and teaches the coach this scenario's extra bonuses."
       : "Tap the dots to set <b>Cards</b> on the training, <b>Rainbow</b> (friendship) cards and cards with <b>Bond under 80</b>. Leave <b>Gain</b> and <b>Fail</b> blank and the coach estimates them. Typing the real total gain (the green numbers added up) makes the call much sharper. For exact gains, set your deck under <b>Trainee and deck</b>.";
   }
 
@@ -563,8 +676,9 @@
       const c = D.card(sl.id);
       const bond = slotBond(sl);
       const on = (f.members || []).indexOf(si) !== -1;
+      const hint = on && (f.hints || []).indexOf(si) !== -1;
       const rb = D.isRainbow(c, bond, f.stat);
-      return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""}">${esc(shortName(c))}${bond < 80 ? `<small>${Math.round(bond)}</small>` : ""}</button>`;
+      return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}${hint ? " hint" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""} · tap again to mark a hint (!)">${hint ? '<b class="bang">!</b>' : ""}${esc(shortName(c))}${bond < 80 ? `<small>${Math.round(bond)}</small>` : ""}</button>`;
     }).join("");
     const auto = E.facLevelFor(Object.assign({}, state, { facLevels: {} }), sc, f.stat);
     const cur = state.facLevels[f.stat] || 0;
@@ -639,6 +753,19 @@
           <label class="bond${bond >= 80 ? " full" : ""}"><span>Bond</span><input type="number" inputmode="numeric" data-slot-bond="${i}" min="0" max="100" value="${Math.round(bond)}"></label>
           <button type="button" class="btn ghost small square" data-slot-clear="${i}" aria-label="Remove card">✕</button>
         </div>
+        <div class="slot-bond" role="group" aria-label="Set bond">
+          <span class="mini">Gauge</span>
+          ${GAUGE.map(([n, v, cls]) => `<button type="button" class="gauge ${cls}${bondBucket(bond) === v ? " on" : ""}" data-bondset="${i}" data-v="${v}" title="Set bond to ${v}${v < 100 ? "+" : ""}">${n}</button>`).join("")}
+          <span class="mini">Event</span>
+          <button type="button" class="btn ghost small" data-bondadd="${i}" data-v="5">+5</button>
+          <button type="button" class="btn ghost small" data-bondadd="${i}" data-v="10">+10</button>
+        </div>
+        ${c.ty === "friend" || c.ty === "group" ? `<div class="slot-dates">
+          <label class="chip-toggle small"><input type="checkbox" data-date-unlock="${i}" ${sl.dates && sl.dates.unlocked ? "checked" : ""}> Outings unlocked</label>
+          <span class="mini">Outings done: <b>${(sl.dates && sl.dates.done) || 0}</b></span>
+          <button type="button" class="btn ghost small square" data-date-adj="${i}" data-v="-1" aria-label="One fewer outing">−</button>
+          <button type="button" class="btn ghost small square" data-date-adj="${i}" data-v="1" aria-label="One more outing">+</button>
+        </div>` : ""}
         <div class="slot-fx">${keyEffects(c, lvl)}</div>
       </div>`;
     }).join("");
@@ -780,6 +907,7 @@
     $("#turnExtras").hidden = !turnInputs.length;
     renderFacilities();
     renderDeck();
+    renderSongs();
 
     const build = E.BUILDS[state.build];
     $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th>Cap</th><th>Enough at</th></tr></thead><tbody>${E.STATS.map((s, i) => `

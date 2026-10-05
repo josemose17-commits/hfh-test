@@ -43,7 +43,10 @@
       ],
       events: [
         { turn: 12, label: "Make Debut", tip: "Goal race. Have mood at Good or better." },
-        { turn: 73, label: "Finale prep", tip: "Training turns sit between the finale races. Use them on the best friendship training." }
+        { turn: 73, label: "Finale prep", tip: "Training turns sit between the finale races. Use them on the best friendship training." },
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
+        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
       ],
       hook: "ura"
     },
@@ -136,27 +139,63 @@
       totalTurns: 78,
       caps: [1600, 1300, 1300, 1500, 1300],
       gainScale: 1.15,
+      // Grand Concert songs (GameTora). cost: tokens [Dance, Passion, Vocal, Visual, Mental].
+      // extra: permanent +N to that training's main stat (sp = skill points on every training).
+      // once: one-time stat gain. fb: Friendship live bonus %, active after the next live.
+      // from: first turn the song can appear (after which Promo Live).
+      songs: [
+        { id: "kiseki", name: "Kiseki wo Shinjite!", from: 5, cost: [0, 21, 0, 0, 21], extra: { wit: 1 }, live: "Specialty Rate Up +5" },
+        { id: "tachiichi", name: "Tachiichi zero-ban! Juni wa Ichiban!", from: 5, cost: [21, 0, 0, 21, 0], extra: { speed: 1 }, live: "Support Event Chance Up +1" },
+        { id: "nigekiri", name: "Nigekiri! Fallin' Love", from: 5, cost: [21, 0, 0, 21, 0], extra: { guts: 1 }, live: "Support Event Chance Up +1" },
+        { id: "gothisway", name: "Go This Way", from: 5, cost: [0, 0, 21, 0, 21], extra: { power: 1 }, live: "Support Event Chance Up +1" },
+        { id: "ringring", name: "Ring Ring Diary", from: 5, cost: [0, 21, 0, 21, 0], extra: { stamina: 1 }, live: "Support Event Chance Up +1" },
+        { id: "seishun", name: "Seishun ga Matteru", from: 5, cost: [0, 0, 32, 0, 12], once: { power: 22 }, fb: 5 },
+        { id: "runrun", name: "RUN×RUN!", from: 5, cost: [14, 0, 0, 16, 14], once: { sp: 22 }, fb: 5 },
+        { id: "zensoku", name: "Zensoku! Zenshin! Umadol Power☆", from: 5, cost: [32, 0, 0, 12, 0], once: { speed: 22 }, fb: 5 },
+        { id: "yumewo", name: "Yume wo Kakeru!", from: 25, cost: [0, 21, 0, 21, 0], extra: { sp: 2 }, live: "Specialty Rate Up +5" },
+        { id: "anone", name: "A・NO・NE", from: 25, cost: [42, 0, 0, 21, 0], extra: { guts: 2 }, live: "Specialty Rate Up +5" },
+        { id: "bluebird", name: "Bokura no Bluebird Days", from: 25, cost: [21, 0, 0, 42, 0], extra: { speed: 2 }, live: "Specialty Rate Up +5" },
+        { id: "growup", name: "Grow Up, Shine!", from: 37, cost: [21, 0, 21, 0, 21], extra: { sp: 3 }, live: "Support Event Chance Up +1" },
+        { id: "komorebi", name: "Komorebi no Yell", from: 37, cost: [0, 42, 0, 0, 21], extra: { wit: 2 }, live: "Support Event Chance Up +1" },
+        { id: "pyoitto", name: "Pyoitto ♪ Hallelujah!", from: 37, cost: [0, 42, 21, 0, 0], extra: { stamina: 2 }, live: "Specialty Rate Up +5" },
+        { id: "nanairo", name: "Nanairo no Keshiki", from: 37, cost: [0, 0, 21, 0, 42], extra: { power: 2 }, live: "Specialty Rate Up +5" },
+        { id: "yumezora", name: "Yumezora", from: 49, cost: [0, 22, 0, 0, 22], once: { wit: 22 }, fb: 5 },
+        { id: "present", name: "PRESENT MARCH♪", from: 49, cost: [0, 0, 22, 0, 22], once: { power: 22 }, fb: 5 },
+        { id: "daisuki", name: "Daisuki no Takarabako", from: 49, cost: [42, 0, 0, 26, 0], once: { speed: 26 }, fb: 10 },
+        { id: "sekai", name: "Sekai wa Bokura no Iinari Sa", from: 49, cost: [0, 32, 12, 0, 0], once: { stamina: 22 }, fb: 5 },
+        { id: "harusora", name: "Harusora BLUE", from: 49, cost: [12, 0, 0, 32, 0], once: { guts: 22 }, fb: 5 },
+        { id: "fanfare", name: "Fanfare for Future!", from: 49, cost: [26, 0, 0, 42, 0], once: { guts: 26 }, fb: 10 }
+      ],
+      lives: [24, 36, 48, 60, 72],
+      tokens: ["Dance", "Passion", "Vocal", "Visual", "Mental"],
+      // Main and second token each training gives (about 60% / 30% of the time).
+      tokenOf: { speed: [0, 3], stamina: [1, 2], power: [2, 4], guts: [3, 0], wit: [4, 1] },
+      linkChars: ["Light Hello", "Smart Falcon", "Silence Suzuka", "Agnes Tachyon", "Mihono Bourbon"],
       train: { speed: [8, 0, 4, 0, 0, 4, -19], stamina: [0, 8, 0, 6, 0, 4, -20], power: [0, 4, 9, 0, 0, 4, -20], guts: [2, 0, 2, 7, 0, 4, -20], wit: [2, 0, 0, 0, 6, 5, 5] },
       finale: { name: "Grand Concert", turns: [], forced: false, note: "The career builds to the Grand Concert. Mark goal races as your game shows them." },
       summary: "Training earns performance points (Dance, Passion, Vocal, Visual, Mental; 200 each at first). You spend them on song lessons, which take no turn. Promo concerts run every six months from Late December of Junior year.",
       coreLoop: [
-        "Lessons don't use a turn, so buy songs as soon as you can afford them. They give an immediate bonus plus one that lasts after the concert.",
+        "Lessons don't use a turn, so buy songs as soon as you can afford them. Extra Stat Gain songs add a permanent bonus to that training; Friendship Bonus songs boost every friendship training after the next live.",
+        "Each training gives a main and second token: Speed gives Dance/Visual, Stamina Passion/Vocal, Power Vocal/Mental, Guts Visual/Dance, Wit Mental/Passion. Friendship trainings give two token types, and scenario-link cards (Light Hello, Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon) give more.",
         "Pace yourself at about 4 songs per half year. Three songs fill the Hype gauge for each concert.",
         "Friendship trainings give the most performance points, so they stay your priority.",
         "Finish with at least 3 songs before Girls' Legend U in Early December of Senior year.",
         "Stats above 1200 count half in races, but Speed (1600) and Guts (1500) can go past it here."
       ],
-      deck: "A normal stat deck works. The scenario friend card (Light Hello) is a strong pick.",
-      keyCards: ["Light Hello (Friend)"],
-      inputs: [
-        { id: "lesson", label: "Can afford a song", scope: "turn", type: "check" }
-      ],
+      deck: "A normal stat deck works. The scenario friend card Light Hello is a strong pick: her outings are better than normal ones, and her unique effect cuts energy cost on friendship trainings.",
+      keyCards: ["Light Hello [From the Ground Up] (SSR Friend)", "Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon (scenario links)"],
+      inputs: [],
       events: [
-        { turn: 24, label: "Promo concert", tip: "Fill the Hype gauge with 3 songs before this." },
-        { turn: 36, label: "Promo concert", tip: "approx." },
-        { turn: 48, label: "Promo concert", tip: "approx." },
-        { turn: 60, label: "Promo concert", tip: "approx." },
-        { turn: 71, label: "Girls' Legend U", tip: "Have at least 3 more songs by now." }
+        { turn: 5, label: "Lessons unlock", tip: "The Grand Live plan starts. Buy lessons whenever you can afford them; they don't use a turn." },
+        { turn: 24, label: "1st Promo Live", tip: "3 songs since the last live fill the Hype gauge and guarantee a Great Success (stat caps up). Lives pay 5 SP per technique and 25 SP per song learned since the last one." },
+        { turn: 36, label: "2nd Promo Live", tip: "3 songs since the last live guarantee a Great Success." },
+        { turn: 48, label: "3rd Promo Live", tip: "3 songs since the last live guarantee a Great Success." },
+        { turn: 60, label: "4th Promo Live", tip: "3 songs since the last live guarantee a Great Success." },
+        { turn: 69, label: "Lyrics event", tip: "With 16+ songs learned, pick the line for a scenario-link character you're using for a gold skill hint." },
+        { turn: 72, label: "Grand Live", tip: "18+ songs before now unlocks the special Girls' Legend U and a better skill hint." },
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
+        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
       ],
       hook: "grandlive"
     },
@@ -187,7 +226,10 @@
         { id: "wisdom", label: "Wisdom ready", scope: "turn", type: "select", options: [["", "None"], ["red", "Red (training)"], ["blue", "Blue (hints)"], ["yellow", "Yellow (energy)"]] }
       ],
       events: [
-        { turn: 3, label: "Fragments start", tip: "Every action can drop fragments from now on." }
+        { turn: 3, label: "Fragments start", tip: "Every action can drop fragments from now on." },
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
+        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
       ],
       hook: "grandmasters"
     },
@@ -282,7 +324,11 @@
       inputs: [
         { id: "dish", label: "Dish ready", scope: "turn", type: "select", options: [["0", "None"], ["25", "+25% dish"], ["50", "+50% dish"]] }
       ],
-      events: [],
+      events: [
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
+        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
+      ],
       hook: "cooking"
     },
     {
@@ -310,7 +356,11 @@
         { id: "gear", label: "Mecha Gear here", scope: "facility", type: "check" },
         { id: "overdrive", label: "Overdrive ready", scope: "turn", type: "check" }
       ],
-      events: [],
+      events: [
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
+        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
+      ],
       hook: "mecha"
     },
     {
@@ -375,7 +425,10 @@
         { turn: 24, label: "Evaluation", tip: "A new building plan follows." },
         { turn: 36, label: "Evaluation", tip: "A new building plan follows." },
         { turn: 48, label: "Evaluation", tip: "A new building plan follows." },
-        { turn: 60, label: "Evaluation", tip: "Carry up to 3 tickets into the final half year." }
+        { turn: 60, label: "Evaluation", tip: "Carry up to 3 tickets into the final half year." },
+        { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
+        { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
+        { turn: 72, label: "Unique skill check", tip: "120,000 fans by now (80,000 dirt-only) levels it up again." }
       ],
       hook: "island"
     },
