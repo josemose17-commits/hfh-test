@@ -80,14 +80,20 @@
     });
     list.sort((a, b) => b.surplus * b.p - a.surplus * a.p);
     let value = 0;
-    list.forEach((s, i) => { if (s.surplus > 0) value += s.p * s.surplus * (i < 8 ? 1 : 0.4); });
+    // A race build only has the skill points for so many skills; a parent wants every skill it
+    // can get, since each one learned can become a skill spark to pass down.
+    list.forEach((s, i) => { if (s.surplus > 0) value += s.p * s.surplus * (ctx.parent || i < 8 ? 1 : 0.4); });
     return { value, list };
   }
 
   function makeCtx(opts) {
     const t = opts.trainee ? D.trainee(opts.trainee) : null;
+    const parent = opts.parent || null;
     return {
-      skills: opts.skills || {}, costs: opts.costs || {}, skillWeight: opts.skillWeight != null ? opts.skillWeight : 1,
+      parent: !!parent,
+      // Parent decks value target skills by weight (in lengths) instead of race skill values.
+      skills: parent ? parent.targets : opts.skills || {}, costs: opts.costs || {},
+      skillWeight: parent ? 1 : opts.skillWeight != null ? opts.skillWeight : 1,
       known: new Set((t ? [].concat(t.us || [], t.is || [], t.as || []) : []).map(String)),
       traineeChar: t ? t.cid : null,
     };
@@ -115,8 +121,9 @@
       const b = baseBy.get(c.id + ":" + c.lb);
       const sv = skillValue(deck.concat([c]), ctx);
       const skill = (sv.value - before) * ctx.skillWeight;
+      const base = b.score * (opts.parent ? opts.parent.statsWeight : 1);
       return {
-        id: c.id, lb: c.lb, base: b.score, skill, score: b.score + skill, info: b.info,
+        id: c.id, lb: c.lb, base, skill, score: base + skill, info: b.info,
         skills: sv.list.filter((s) => s.src.indexOf(c.id) !== -1 && s.surplus > 0).slice(0, 3).map((s) => ({ id: s.id, L: s.L, p: s.p }))
       };
     }).sort((a, b) => b.score - a.score);
@@ -193,11 +200,36 @@
     const ctx = makeCtx(opts);
     ctx.spWeight = 1;
     ctx.speedWeight = 1;
+    if (opts.parent) {
+      const sum = skillValue(deck, ctx).list.filter((s) => s.surplus > 0);
+      return { cards, skills: sum, expected: sum.reduce((a, s) => a + s.p, 0) };
+    }
     ctx.races = 0;
     return { cards, skills: skillValue(deck, ctx).list.filter((s) => s.surplus > 0 && s.p >= 0.15).slice(0, 10) };
   }
 
-  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, skillValue, entry };
+  // Target skills for a parent deck, as { skill id: weight in lengths }.
+  //   ace: skills that are good on the race (median L for the running style), white and gold;
+  //   debuff: debuff skills that can trigger on the race's distance/surface with your style
+  //   (white = 1 L, gold = 2 L).
+  const STYLE_NO = { Nige: 1, Senkou: 2, Sasi: 3, Oikomi: 4 };
+  const DIST_NO = { Sprint: 1, Mile: 2, Medium: 3, Long: 4 };
+  function parentTargets(mode, preset, style, raceSkills, debuffs, minL) {
+    const out = {};
+    if (mode === "debuff") {
+      Object.entries(debuffs || {}).forEach(([id, d]) => {
+        if (d.dist.length && d.dist.indexOf(DIST_NO[preset.course.dist]) === -1) return;
+        if (d.ground.length && d.ground.indexOf(preset.course.surface === "Dirt" ? 2 : 1) === -1) return;
+        if (d.style.length && d.style.indexOf(STYLE_NO[style]) === -1) return;
+        out[id] = d.r === 2 ? 2 : 1; // a debuffer lives on these: count each like a strong race skill
+      });
+      return out;
+    }
+    Object.entries(raceSkills || {}).forEach(([id, L]) => { if (L >= (minL || 0.1)) out[id] = L; });
+    return out;
+  }
+
+  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, skillValue, entry, parentTargets };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaTiers = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

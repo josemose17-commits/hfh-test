@@ -44,6 +44,15 @@ Pick any Champions Meeting or League of Heroes:
 - **Skills for this race**: every skill's median and mean length gain (L) on that course for the running style you pick, plus its SP cost, L per 100 SP, and which of your cards can give it. The numbers come from alpha123's Umalator skill chart. To use your own uma's results, run the Umalator's Skill chart, copy the table and paste it under **Use your own Umalator results**.
 - **Deck optimizer**: builds the deck the way you'd use Euophrys' list: the best card, then the best card given that one, and so on, with Euophrys' scoring plus the skill score for the race, then rechecks each slot with the other five fixed. It searches the cards you own (at your limit breaks) or every Global SSR and SR at LB4. Options: **Deck makeup** (how many of each card type, borrowed card included), borrow one friend card, lock cards in, how much skills count, and the Euophrys settings. It shows each card's score, the next-best card for each slot, the best skills the deck can hint, a rough career estimate from the coach's simulation, and **Which cards would improve it?**. **Use this deck in the coach** fills your deck slots.
 
+## Parent decks
+
+The deck optimizer's **Build a deck for** switch has two parent modes, for training parents to inherit from for a Champions Meeting or League of Heroes:
+
+- **Ace parent**: picks the cards whose hints and events give the most skills that are strong on that race for your running style (each weighted by its median length gain), white and gold, so the parent can learn them and pass them down as skill sparks.
+- **Debuffer parent**: picks the cards that give the most debuffs that work on that race: distance-locked ones (Stamina Eater for Long, Intimidate for Sprint...), surface-locked ones (Dust Cloud on dirt) and style-locked ones (Intense Gaze for End Closers) only when they fit. Gold debuffs count double. The debuff list comes from the Umalator's skill data (`tools/build_debuffs.js`).
+
+Unlike a racing deck, every target skill counts (not just the best 8), and **Stats still count** sets how much Euophrys' stat score matters. The result lists how many target skills to expect and each one's chance. Deck makeup, owned cards, borrowing and locked cards work the same way.
+
 ## Tier list
 
 [Euophrys' tier list](https://euophrys.github.io/uma-tiers/), with skills added. The base score is Euophrys' own code, card data and scenario presets (URA, Unity Cup, Trackblazer, Grand Concert, Grand Masters), bundled unchanged (MIT): the extra weighted stats a card adds to the deck you have so far. With skills set to "Not at all" the ranking is exactly Euophrys'. On top comes a **skill score**: each skill the card can hint or give through its events, valued by its median length gain (L) on the race you pick for your running style (1 L counts like 60 Speed in Euophrys' weights) plus the SP the hint discount saves, only for skills your deck and trainee don't already cover. The total is Euophrys' score plus this skill score.
@@ -124,6 +133,8 @@ python3 tools/build_data.py
 ```
 
 The generated file is committed, so the coach works offline.
+
+**Automatic updates:** `.github/workflows/update-data.yml` runs every day (and on demand from the Actions tab). It rebuilds the GameTora and Euophrys data, and when there are new cards, trainees, Global release dates or event values and the tests pass, it commits them to `main`, bumps the `?v=` cache version and asks GitHub Pages to rebuild. Cards and trainees also switch to "on Global" by themselves on their Global release date. Champions Meeting dates and skill values still need a manual rebuild (see below), since they depend on the Umalator's files.
 
 Champions Meeting and League of Heroes presets (`data/presets.js`) come from GameTora's event lists plus alpha123's Umalator preset lists:
 

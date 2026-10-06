@@ -68,3 +68,30 @@ test("the trainee's own character is never picked", () => {
   const r = T.buildDeck({ scenario: "URA", trainee: tr.id, comp: { speed: 4 } }, pool, []);
   assert.ok(r.cards.every((c) => D.card(c.id).cid !== tr.cid));
 });
+
+test("parent decks: debuff targets follow the race's distance and the runner's style", () => {
+  const X = require("../data/debuffs.js");
+  const P = require("../data/presets.js");
+  const long = P.list.find((p) => p.course.dist === "Long" && p.course.surface === "Turf");
+  const sprint = P.list.find((p) => p.course.dist === "Sprint");
+  const name = (t) => Object.keys(t).map((id) => X[id].n);
+  const tl = T.parentTargets("debuff", long, "Senkou", {}, X);
+  const ts = T.parentTargets("debuff", sprint, "Oikomi", {}, X);
+  assert.ok(name(tl).includes("Stamina Eater") && !name(tl).includes("Intimidate"));
+  assert.ok(name(ts).includes("Intimidate") && !name(ts).includes("Stamina Eater"));
+  assert.ok(name(ts).includes("Intense Gaze") && !name(tl).includes("Intense Gaze"), "End Closer-only debuffs follow the style");
+  assert.ok(!name(tl).includes("Dust Cloud"), "dirt-only debuffs are left out on turf");
+});
+
+test("parent decks collect more target skills than a racing deck", () => {
+  const X = require("../data/debuffs.js");
+  const P = require("../data/presets.js");
+  const pr = P.list.find((p) => p.course.dist === "Long");
+  const targets = T.parentTargets("debuff", pr, "Senkou", {}, X);
+  const pool = glob.filter((c) => c.r >= 2).map((c) => ({ id: c.id, lb: 4 }));
+  const parent = T.buildDeck({ scenario: "GL", parent: { targets, statsWeight: 0.1 } }, pool, []);
+  const race = T.buildDeck({ scenario: "GL", skillWeight: 0 }, pool, []);
+  const covered = (cards) => new Set(cards.flatMap((c) => (D.card(c.id).hs || []).concat(D.card(c.id).es || [])).filter((id) => targets[id])).size;
+  assert.ok(parent.expected > 3);
+  assert.ok(covered(parent.cards) > covered(race.cards));
+});

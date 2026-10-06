@@ -1,0 +1,72 @@
+# Daily data refresh: new support cards, trainees, Global release dates and event data from
+# GameTora and Euophrys' tier list. If anything changed and the tests pass, it commits to main
+# (bumping the ?v= cache version in index.html) and asks GitHub Pages to rebuild the site.
+name: Update game data
+
+on:
+  schedule:
+    - cron: "17 6 * * *" # every day at 06:17 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Rebuild card and trainee data (GameTora)
+        run: python3 tools/build_data.py
+
+      - name: Rebuild Euophrys tier list data
+        run: node tools/build_euophrys.mjs
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet -- data vendor; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No new data."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat -- data vendor
+          fi
+
+      - name: Run tests
+        if: steps.diff.outputs.changed == 'true'
+        run: node --test test/*.test.js
+
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          v="$(date -u +%Y%m%d)auto"
+          sed -i -E "s/\?v=[0-9A-Za-z]+/?v=${v}/g" index.html
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data vendor index.html
+          git commit -m "Update game data ($(date -u +%Y-%m-%d))"
+          git push origin HEAD:main
+
+      # Pushes made with the workflow token don't start the usual Pages build, so request one.
+      - name: Rebuild GitHub Pages
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || echo "Pages rebuild request failed; the site updates on the next push."

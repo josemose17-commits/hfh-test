@@ -22,7 +22,7 @@ const cardsText = gl.replace(/^export default cards;?\s*$/m, "").replace(/^const
 const cards = JSON.parse(cardsText);
 
 const out = `// Euophrys' Uma Musume support card tier list, bundled by tools/build_euophrys.mjs. Do not edit.
-// Source: https://github.com/Euophrys/umamusume-tierlist (built ${new Date().toISOString().slice(0, 10)})
+// Source: https://github.com/Euophrys/umamusume-tierlist
 /*
 ${license.trim()}
 */
