@@ -149,3 +149,12 @@ test("event rewards: listed cards use the event table, others the rarity fallbac
   const missing = D.DATA.supports.find((c) => !c.ev && c.r === 3);
   assert.deepStrictEqual(D.eventRewards(missing), { stats: [9, 9, 9, 9, 9], sp: 0, energy: 0, bond: 5, known: false });
 });
+
+test("skills the trainee already has (unique, innate, awakening) add no value from card hints", () => {
+  const t = D.DATA.trainees.find((x) => x.en && x.is.length && D.DATA.supports.some((c) => (c.hs || []).includes(x.is[0]) && c.cid !== x.cid));
+  const sk = t.is[0];
+  const card = D.DATA.supports.find((c) => (c.hs || []).includes(sk) && c.cid !== t.cid);
+  const ctx = (tr) => O.buildCtx({ scenario: ura, build: "medium", runs: 4, trainee: tr, skills: { [sk]: 2 } });
+  assert.ok(O.simulate(ctx(null), [{ card, lb: 4 }]).skills.some((s) => +s.id === sk));
+  assert.ok(!O.simulate(ctx(t.id), [{ card, lb: 4 }]).skills.some((s) => +s.id === sk));
+});

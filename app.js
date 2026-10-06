@@ -503,6 +503,19 @@
       }
       if (e.target.dataset.cm != null) { cmInput(e.target); return; }
       if (e.target.dataset.tier != null) { tierInput(e.target); return; }
+      if (e.target.dataset.pickTrainee != null) {
+        const v = e.target.value.trim();
+        const tr = traineeByLabel.get(v);
+        if ((tr && tr.id !== state.deck.trainee) || (!v && state.deck.trainee)) {
+          state.deck.trainee = tr ? tr.id : null;
+          if (tr) tier().deck = tier().deck.filter((x) => D.card(x.id).cid !== tr.cid);
+          save();
+          renderDeck();
+          renderTab();
+          flash(tr ? tr.n + " set as trainee" : "Trainee cleared");
+        }
+        return;
+      }
       const k = e.target.dataset.db; if (!k) return;
       const d = db();
       d[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -1351,7 +1364,8 @@
     const nSkills = Object.keys(skillMap(p.id, c.style).map).length;
     return `<section class="panel cm-opt">
       <h3>Deck optimizer</h3>
-      <p class="mini">Plays simulated <b>${esc(sc.name)}</b> careers (change the scenario at the top) with each candidate deck, using your cards' real effects at your limit breaks, and values every skill the deck can hint by its median length gain here as a ${STYLE_LABEL[c.style]} runner. ${t ? "Trainee: <b>" + esc(t.n) + "</b>, growth bonuses included." : "Set your trainee under <b>Trainee and deck</b> to include her growth bonuses."}</p>
+      <p class="mini">Plays simulated <b>${esc(sc.name)}</b> careers (change the scenario at the top) with each candidate deck, using your cards' real effects at your limit breaks, and values every skill the deck can hint by its median length gain here as a ${STYLE_LABEL[c.style]} runner.</p>
+      ${traineePickerHTML(p, "data-cm-style")}
       ${nSkills ? "" : `<p class="mini warn">No skill values for this race yet${svCache[p.id] === "loading" ? " (loading…)" : ""}, so skills won't count. Paste your own Umalator results below to add them.</p>`}
       <div class="row-wrap">
         <label class="chip-toggle"><input type="checkbox" data-cm="ownedOnly" ${c.ownedOnly ? "checked" : ""}> Only cards I own (${n})</label>
@@ -1411,6 +1425,8 @@
     let rows = skillRows(p.id, c.style);
     const src = skillSources(c);
     const deckIds = new Set(state.deck.slots.filter(Boolean).map((sl) => sl.id));
+    const trn = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    const known = new Set(trn ? trn.us.concat(trn.is, trn.as) : []);
     const q = (c.sq || "").trim().toLowerCase();
     rows = rows.filter((r) => {
       const info = skillInfo(r.id);
@@ -1439,7 +1455,7 @@
           const info = skillInfo(r.id);
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
-          return `<tr class="sk-${kind}"><td><b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${info[1] || "–"}</td><td class="num">${info[1] ? (r.L / info[1] * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          return `<tr class="sk-${kind}"><td><b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}${known.has(r.id) ? ' <span class="pill" title="Your trainee already has this skill (unique, innate or awakening)">she has it</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${info[1] || "–"}</td><td class="num">${info[1] ? (r.L / info[1] * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       <details class="paste">
@@ -1558,9 +1574,38 @@
     return out;
   }
 
+  // One trainee for the coach, the deck optimizer and the tier list.
+  const tierTrainee = () => state.deck.trainee;
+
+  function stylesFor(tr) {
+    const rank = (g) => "GFEDCBAS".indexOf(g);
+    return STYLES.map(([k, l], i) => [k, l, tr.apt[6 + i]]).sort((a, b) => rank(b[2]) - rank(a[2]));
+  }
+
+  function traineePickerHTML(p, styleAttr) {
+    const tr = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    const label = tr ? traineeLabel(tr) : "";
+    let info = '<span class="mini">No trainee: cards are ranked without growth bonuses.</span>';
+    if (tr) {
+      const distIdx = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.course.dist];
+      const surf = tr.apt[p.course.surface === "Dirt" ? 1 : 0];
+      const dist = tr.apt[distIdx];
+      const best = stylesFor(tr)[0];
+      const weak = "GFEDCB".indexOf(surf) !== -1 || "GFEDCB".indexOf(dist) !== -1;
+      info = `<span class="mini">Growth: <b>${growthText(tr)}</b> · ${esc(p.course.surface)} <b>${surf}</b> · ${esc(p.course.dist)} <b>${dist}</b> · best style ${esc(best[1])} <b>${best[2]}</b>. Her own character's cards are left out.</span>
+        <span class="mini">Not counted from card hints (she already has them): ${esc(tr.us.concat(tr.is).map((id) => D.DATA.skills[id] || "#" + id).join(", "))}${tr.as.length ? "; awakening skills: " + esc(tr.as.map((id) => D.DATA.skills[id] || "#" + id).join(", ")) : ""}.</span>
+        ${cm().style !== best[0] ? `<button type="button" class="btn ghost small" ${styleAttr}="${best[0]}">Use her best style: ${esc(best[1])}</button>` : ""}
+        ${weak ? `<span class="mini warn">Her aptitude for this race is below A, so she'll race at a penalty.</span>` : ""}`;
+    }
+    return `<div class="row-wrap tier-trainee">
+      <label class="field grow"><span>Trainee (shared with the coach)</span><input data-pick-trainee="1" list="traineeList" value="${esc(label)}" placeholder="Type a trainee name" autocomplete="off"></label>
+      ${info}
+    </div>`;
+  }
+
   function tierKey(t) {
     const c = cm();
-    return [t.type, t.lbs, t.global, t.ownedOnly, t.rarity, t.deck.map((x) => x.id + ":" + x.lb).join("."), state.scenario, state.deck.trainee, c.preset, c.style, c.skillW, svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0, t.ownedOnly || t.lbs === "own" ? ownedCode() : ""].join("|");
+    return [t.type, t.lbs, t.global, t.ownedOnly, t.rarity, t.deck.map((x) => x.id + ":" + x.lb).join("."), state.scenario, tierTrainee(), c.preset, c.style, c.skillW, svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0, t.ownedOnly || t.lbs === "own" ? ownedCode() : ""].join("|");
   }
 
   function runTiers() {
@@ -1573,7 +1618,7 @@
     const sv = skillMap(p.id, c.style);
     const msg = {
       job: "tiers",
-      opts: { scenario: state.scenario, build: p.build, trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, runs: 30, seed: 20261006 },
+      opts: { scenario: state.scenario, build: p.build, trainee: tierTrainee(), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, runs: 30, seed: 20261006 },
       deck: t.deck, candidates: tierCandidates(t)
     };
     tierRun = { key, f: 0 };
@@ -1671,6 +1716,7 @@
           <label class="field"><span>Show</span><select data-tier="show1">${opt(TIER_SHOW, t.show1)}</select></label>
           <label class="field"><span>and</span><select data-tier="show2">${opt(TIER_SHOW, t.show2)}</select></label>
         </div>
+        ${traineePickerHTML(p, "data-tier-style")}
         <div class="tier-deck">
           <span class="mini"><b>Your deck so far</b> (${t.deck.length}/6):</span>
           ${t.deck.map((x, i) => `<span class="chip lockchip ty-${D.card(x.id).ty}"><span class="tydot"></span>${esc(D.card(x.id).n)} LB${x.lb} <button type="button" class="linkish" data-tier-remove="${i}" aria-label="Remove">✕</button></span>`).join("") || '<span class="mini">empty: this ranks your first card</span>'}
