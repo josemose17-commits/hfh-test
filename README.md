@@ -44,6 +44,10 @@ Pick any Champions Meeting or League of Heroes:
 - **Skills for this race**: every skill's median and mean length gain (L) on that course for the running style you pick, plus its SP cost, L per 100 SP, and which of your cards can give it. The numbers come from alpha123's Umalator skill chart. To use your own uma's results, run the Umalator's Skill chart, copy the table and paste it under **Use your own Umalator results**.
 - **Deck optimizer**: finds the best 6 cards among the cards you own, or every Global SSR and SR at max limit break. It plays simulated careers in the scenario picked at the top, with the same card formula as the coach: specialty priority, friendship training, bond, facility levels, energy, rests, failure and optional races with your race bonus. Every skill the deck can hint is valued by its median L on the chosen course minus its SP cost. Options: borrow one friend card, lock cards in, and choose how much skills count. It never puts the same character in twice or uses your trainee's own character. Results show what each card adds, the expected final stats and SP, the best skills the deck can hint, close alternatives, and **Which cards would improve it?**, a list of cards to pull or limit break next. **Use this deck in the coach** fills your deck slots.
 
+## Tier list
+
+Like [Euophrys' tier list](https://euophrys.github.io/uma-tiers/): every card at every limit break (or LB4 only, or your own limit breaks), ranked S to F by what it adds to the deck you have so far. Tap a card to add it and the list re-ranks for your next pick; **Load my coach deck** starts from your current deck and **Use in the coach** sends it back. On top of Euophrys' approach, each score comes from simulated careers in your scenario, and adds the skills the card can hint, valued by their median length gain on the race you pick (and running style). Under each card you can show its best skills there, event bond, initial bond, race bonus, friendship, training effectiveness, specialty, mood effect, or the stats and SP it adds. Owned cards are ringed.
+
 ## Grand Concert
 
 A **Grand Concert songs** panel appears in this scenario:
@@ -102,6 +106,8 @@ Every option is scored in value points: stats, skill points, bond building, hint
 Inheritance can raise caps. Override them under **Stats and caps**.
 
 ## Data
+
+Card event rewards (stats, skill points, energy and **bond** each card's events give over a career) come from the event table in [Euophrys' tier list](https://github.com/Euophrys/umamusume-tierlist) (MIT). Cards it doesn't list yet use its fallback (+5 bond, +7/+9 to every stat for SR/SSR) and are marked as estimates. Each deck slot shows its card's total event bond.
 
 `data/gametora.js` holds 563 support cards (effects at every level, unique effects, hint and event skills, JP and Global release dates), 270 trainees (aptitudes, growth bonuses, skills) and the skill names they reference. It comes from [GameTora](https://gametora.com/umamusume). Effect values at each level use a port of GameTora's own interpolation, so they match its card pages. Base training values per scenario come from GameTora's scenario pages. Onsen, Beyond Dreams and Trecen-ken haven't been published yet, so they use Island's values as a stand-in.
 

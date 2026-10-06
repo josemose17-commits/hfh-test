@@ -216,6 +216,7 @@
         <button type="button" role="tab" data-tab="guide">Scenario guide</button>
         <button type="button" role="tab" data-tab="all">All scenarios</button>
         <button type="button" role="tab" data-tab="cm" id="tabCM">CM &amp; decks</button>
+        <button type="button" role="tab" data-tab="tiers" id="tabTiers">Tier list</button>
         <button type="button" role="tab" data-tab="cards" id="tabCards">Support cards</button>
         <button type="button" role="tab" data-tab="trainees" id="tabTrainees">Trainees</button>
       </nav>
@@ -414,6 +415,7 @@
       $("#deckPanel").hidden = true;
       $("#tabCards").hidden = true;
       $("#tabCM").hidden = true;
+      $("#tabTiers").hidden = true;
       $("#tabTrainees").hidden = true;
     }
 
@@ -481,6 +483,7 @@
         return;
       }
       if (cmClick(e)) return;
+      if (tierClick(e)) return;
       const add = e.target.closest("[data-add-card]");
       if (add) { addToDeck(+add.dataset.addCard); return; }
       const use = e.target.closest("[data-use-trainee]");
@@ -499,6 +502,7 @@
         return;
       }
       if (e.target.dataset.cm != null) { cmInput(e.target); return; }
+      if (e.target.dataset.tier != null) { tierInput(e.target); return; }
       const k = e.target.dataset.db; if (!k) return;
       const d = db();
       d[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -835,6 +839,7 @@
           <span class="mini">Event</span>
           <button type="button" class="btn ghost small" data-bondadd="${i}" data-v="5">+5</button>
           <button type="button" class="btn ghost small" data-bondadd="${i}" data-v="10">+10</button>
+          <span class="mini" title="Total bond from this card's events in a career${D.eventRewards(c).known ? "" : " (estimate: this card isn't in the event table yet)"}">Events: +${D.eventRewards(c).bond} bond total${D.eventRewards(c).known ? "" : " (est.)"}</span>
         </div>
         ${c.ty === "friend" || c.ty === "group" ? `<div class="slot-dates">
           <label class="chip-toggle small"><input type="checkbox" data-date-unlock="${i}" ${sl.dates && sl.dates.unlocked ? "checked" : ""}> Outings unlocked</label>
@@ -873,7 +878,7 @@
     return state.db;
   }
 
-  const SORTS = [["1", "Friendship"], ["8", "Training effectiveness"], ["2", "Mood effect"], ["19", "Specialty priority"], ["15", "Race bonus"], ["14", "Initial bond"], ["30", "Skill point bonus"], ["stat", "Stat bonuses"], ["new", "Newest"]];
+  const SORTS = [["1", "Friendship"], ["8", "Training effectiveness"], ["2", "Mood effect"], ["19", "Specialty priority"], ["15", "Race bonus"], ["14", "Initial bond"], ["30", "Skill point bonus"], ["stat", "Stat bonuses"], ["evbond", "Event bond"], ["new", "Newest"]];
 
   function dbControls() {
     const d = db();
@@ -911,6 +916,7 @@
         const fx = D.baseEffects(c, lvOf(c));
         if (d.sort === "stat") return [3, 4, 5, 6, 7, 41].reduce((a, id) => a + (fx[id] || 0), 0);
         if (d.sort === "new") return (d.global ? c.en : c.jp) || "";
+        if (d.sort === "evbond") return D.eventRewards(c).bond;
         return fx[+d.sort] || 0;
       };
       list = list.map((c) => [c, key(c)]).sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : b[0].r - a[0].r)).map((x) => x[0]);
@@ -967,6 +973,15 @@
     if (state.deck.ownedOnly) fillLists();
   }
 
+  function eventText(c) {
+    const ev = D.eventRewards(c);
+    const parts = E.STATS.map((st, i) => (ev.stats[i] ? E.STAT_LABELS[st] + " " + (ev.stats[i] > 0 ? "+" : "") + ev.stats[i] : "")).filter(Boolean);
+    if (ev.sp) parts.push((ev.sp > 0 ? "+" : "") + ev.sp + " SP");
+    if (ev.energy) parts.push((ev.energy > 0 ? "+" : "") + ev.energy + " energy");
+    parts.push("<b>bond +" + ev.bond + "</b>");
+    return parts.join(", ") + (ev.known ? "" : " (estimate: not in the event table yet)");
+  }
+
   function cardRow(c, level, open) {
     const inDeck = state.deck.slots.some((sl) => sl && sl.id === c.id);
     let detail = "";
@@ -979,6 +994,7 @@
       detail = `<div class="card-detail">
         <div class="table-wrap"><table class="lbtable"><thead><tr><th>Effect</th>${[0, 1, 2, 3, 4].map((lb) => `<th>LB${lb}<br><span class="mini">Lv${D.levelFor(c, lb)}</span></th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
         ${uq}
+        <p class="mini"><b>Events over a career:</b> ${eventText(c)}</p>
         <p class="mini"><b>Hint skills:</b> ${sk(c.hs)}</p>
         <p class="mini"><b>Event skills:</b> ${sk(c.es)}</p>
         <p class="mini">Released JP ${esc(c.jp || "?")}${c.en ? ", Global " + esc(c.en) : ", not on Global yet"} · ${esc(c.src || "")}</p>
@@ -1176,7 +1192,7 @@
     svCache[id] = "loading";
     fetch("data/skillvalues/" + id + ".json?v=" + ASSET_V)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
-      .then((j) => { svCache[id] = j; if (state.tab === "cm") renderCM(); })
+      .then((j) => { svCache[id] = j; if (state.tab === "cm") renderCM(); if (state.tab === "tiers") renderTiers(); })
       .catch(() => { svCache[id] = "error"; if (state.tab === "cm") renderCM(); });
   }
 
@@ -1511,10 +1527,216 @@
     return false;
   }
 
+  // ---- Tier list: rank cards by what they add to your deck so far ----
+  const TIER_NAMES = ["S", "A", "B", "C", "D", "E", "F"];
+  const TIER_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"], ["", "All types"]];
+  const TIER_SHOW = [
+    ["", "Nothing"], ["score", "Score"], ["skills", "Best skills (L)"], ["evbond", "Event bond"], ["bond", "Initial bond"], ["race", "Race bonus"],
+    ["fs", "Friendship bonus"], ["te", "Training effectiveness"], ["spec", "Specialty priority"], ["mood", "Mood effect"], ["statgain", "Stats it adds"], ["sp", "SP it adds"]
+  ];
+  let tierRun = null; // { key, worker, f }
+  let tierResult = null; // { key, list }
+
+  function tier() {
+    if (!state.tier) state.tier = {};
+    const t = state.tier;
+    const d = { type: "speed", lbs: "all", global: true, ownedOnly: false, rarity: "2", deck: [], show1: "skills", show2: "evbond" };
+    Object.keys(d).forEach((k) => { if (t[k] == null) t[k] = d[k]; });
+    return t;
+  }
+
+  function tierCandidates(t) {
+    let cards = D.DATA.supports.filter((c) => (!t.global || D.onGlobal(c, TODAY) || owned[c.id] != null) && (!t.type || c.ty === t.type) && c.r >= +t.rarity);
+    if (t.ownedOnly) cards = cards.filter((c) => owned[c.id] != null);
+    const out = [];
+    cards.forEach((c) => {
+      const mine = owned[c.id];
+      if (t.ownedOnly || (t.lbs === "own" && mine != null)) out.push({ id: c.id, lb: mine });
+      else if (t.lbs === "own" || t.lbs === "4") out.push({ id: c.id, lb: 4 });
+      else for (let lb = 0; lb <= 4; lb++) out.push({ id: c.id, lb });
+    });
+    return out;
+  }
+
+  function tierKey(t) {
+    const c = cm();
+    return [t.type, t.lbs, t.global, t.ownedOnly, t.rarity, t.deck.map((x) => x.id + ":" + x.lb).join("."), state.scenario, state.deck.trainee, c.preset, c.style, c.skillW, svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0, t.ownedOnly || t.lbs === "own" ? ownedCode() : ""].join("|");
+  }
+
+  function runTiers() {
+    const t = tier();
+    const c = cm();
+    const p = presetById(c.preset);
+    const key = tierKey(t);
+    if (tierRun && tierRun.key === key) return;
+    if (tierRun && tierRun.worker) tierRun.worker.terminate();
+    const sv = skillMap(p.id, c.style);
+    const msg = {
+      job: "tiers",
+      opts: { scenario: state.scenario, build: p.build, trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, runs: 30, seed: 20261006 },
+      deck: t.deck, candidates: tierCandidates(t)
+    };
+    tierRun = { key, f: 0 };
+    const finish = (m) => {
+      if (!tierRun || tierRun.key !== key) return;
+      tierRun = null;
+      if (m.type === "error") flash("The tier list hit an error: " + m.message);
+      else tierResult = { key, list: m.list };
+      if (state.tab === "tiers") renderTiers();
+    };
+    let w = null;
+    try { w = new Worker("optimizer.worker.js?v=" + ASSET_V); } catch (err) { w = null; }
+    const inline = () => setTimeout(() => { try { finish(OPT.runJob(msg, () => {})); } catch (err) { finish({ type: "error", message: String(err.message || err) }); } }, 30);
+    if (!w) { inline(); return; }
+    tierRun.worker = w;
+    w.onmessage = (e) => {
+      if (e.data.type === "progress") { if (tierRun) tierRun.f = e.data.f; const bar = $("#tierProg"); if (bar) bar.style.width = Math.round(e.data.f * 100) + "%"; return; }
+      w.terminate();
+      finish(e.data);
+    };
+    w.onerror = (err) => { err.preventDefault(); w.terminate(); inline(); };
+    w.postMessage(msg);
+  }
+
+  function tierInfo(x, card, what) {
+    const lv = D.levelFor(card, x.lb);
+    const fx = D.baseEffects(card, lv);
+    switch (what) {
+      case "score": return Math.round(x.score) + " pts";
+      case "skills": return x.topSkills.length ? x.topSkills.map((s) => esc(skillInfo(s.id)[0]) + " " + s.L.toFixed(2) + "L").join(", ") : "no strong skills here";
+      case "evbond": { const ev = D.eventRewards(card); return "Event bond +" + ev.bond + (ev.known ? "" : " (est.)"); }
+      case "bond": return "Initial bond " + (fx[14] || 0);
+      case "race": return "Race bonus " + (fx[15] || 0) + "%";
+      case "fs": return "Friendship " + (fx[1] || 0) + "%";
+      case "te": return "Training eff. " + (fx[8] || 0) + "%";
+      case "spec": return "Specialty " + (fx[19] || 0);
+      case "mood": return "Mood effect " + (fx[2] || 0) + "%";
+      case "statgain": return E.STATS.map((s, i) => (Math.abs(x.stats[i]) >= 5 ? E.STAT_LABELS[s].slice(0, 3) + " " + (x.stats[i] > 0 ? "+" : "") + x.stats[i] : "")).filter(Boolean).join(" ") || "–";
+      case "sp": return (x.sp > 0 ? "+" : "") + x.sp + " SP";
+      default: return "";
+    }
+  }
+
+  function renderTiers() {
+    const body = $("#tabBody");
+    const t = tier();
+    const c = cm();
+    const p = presetById(c.preset);
+    loadSkillValues(p.id);
+    const key = tierKey(t);
+    if ((!tierResult || tierResult.key !== key) && !(tierRun && tierRun.key === key)) runTiers();
+    const opt = (pairs, v) => pairs.map(([k, l]) => `<option value="${k}" ${String(v) === k ? "selected" : ""}>${esc(l)}</option>`).join("");
+    const presetOpts = P.list.filter((x) => x.global.end >= TODAY || x.kind === "loh").concat(P.list.filter((x) => x.global.end < TODAY).reverse())
+      .map((x) => `<option value="${x.id}" ${x.id === p.id ? "selected" : ""}>${esc(presetLabel(x))}</option>`).join("");
+    const nType = t.deck.filter((x) => !t.type || D.card(x.id).ty === t.type).length;
+    const ord = ["1st", "2nd", "3rd", "4th", "5th", "6th"][Math.min(5, t.type ? nType : t.deck.length)];
+    const typeName = (TIER_TYPES.find((x) => x[0] === t.type) || [])[1];
+    const res = tierResult && tierResult.key === key ? tierResult.list : null;
+    let tiersHTML = "";
+    if (res && res.length) {
+      const top = res[0].score;
+      const bottom = res[res.length - 1].score;
+      const step = Math.max(1e-6, (top - bottom) / 7);
+      const rows = TIER_NAMES.map(() => []);
+      res.forEach((x) => { rows[Math.min(6, Math.floor((top - x.score) / step))].push(x); });
+      const inDeck = new Set(t.deck.map((x) => x.id));
+      tiersHTML = `<div class="tiers">${rows.map((r, i) => `<div class="tier-row"><div class="tier-name t${i}">${TIER_NAMES[i]}</div><div class="tier-cards">${r.map((x) => {
+        const card = D.card(x.id);
+        const own = owned[x.id];
+        return `<button type="button" class="tcard ty-${card.ty}${own != null && own >= x.lb ? " owned" : ""}${inDeck.has(x.id) ? " indeck" : ""}" data-tier-add="${x.id}" data-lb="${x.lb}" title="${esc(D.label(card))} LB${x.lb}: ${Math.round(x.score)} points (training ${Math.round(x.train)}, skills ${Math.round(x.skill)}). Tap to add to the deck.">
+          <span class="tc-top"><span class="tydot" aria-hidden="true"></span><b>${esc(card.n)}</b><span class="tc-lb">LB${x.lb}</span></span>
+          <span class="tc-title">${esc(card.t)} · ${D.RARITY[card.r]}${own != null ? ` · <span class="tc-own">owned LB${own}</span>` : ""}</span>
+          ${t.show1 ? `<span class="tc-info">${tierInfo(x, card, t.show1)}</span>` : ""}
+          ${t.show2 ? `<span class="tc-info">${tierInfo(x, card, t.show2)}</span>` : ""}
+        </button>`;
+      }).join("")}</div></div>`).join("")}</div>`;
+    } else if (res) {
+      tiersHTML = `<div class="empty">No cards match these filters${t.ownedOnly ? " (mark your cards in the Support cards tab)" : ""}.</div>`;
+    }
+    body.innerHTML = `<div class="cm">
+      <section class="panel tier-ctl">
+        <h2>Tier list</h2>
+        <p class="mini">Like <a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>: every card at every limit break, ranked by what it adds to the deck you have so far. Tap a card to add it, and the list re-ranks for your next pick. Each score comes from simulated <b>${esc(scenario().name)}</b> careers (scenario set at the top) for the race below: a <b>${esc(E.BUILDS[p.build].label)}</b> build, plus the skills each card can hint, valued by their length gain on that course. Event bond and event stats come from Euophrys' event table.</p>
+        <div class="db-controls">
+          <label class="field"><span>Card type</span><select data-tier="type">${opt(TIER_TYPES, t.type)}</select></label>
+          <label class="field"><span>Rarity</span><select data-tier="rarity">${opt([["1", "SSR, SR and R"], ["2", "SSR and SR"], ["3", "SSR only"]], t.rarity)}</select></label>
+          <label class="field"><span>Limit breaks</span><select data-tier="lbs">${opt([["all", "Every limit break"], ["4", "LB4 only"], ["own", "Mine (LB4 if not owned)"]], t.lbs)}</select></label>
+          <label class="chip-toggle"><input type="checkbox" data-tier="global" ${t.global ? "checked" : ""}> Global only</label>
+          <label class="chip-toggle"><input type="checkbox" data-tier="ownedOnly" ${t.ownedOnly ? "checked" : ""}> Cards I own</label>
+        </div>
+        <div class="db-controls">
+          <label class="field grow"><span>Race for skill values</span><select data-tier="preset">${presetOpts}</select></label>
+          <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-tier-style="${k}">${l}</button>`).join("")}</div></div>
+          <label class="field"><span>Skill hints count</span><select data-tier="skillW">${opt([["0", "Not at all"], ["0.5", "A little"], ["1", "Normal"], ["1.5", "A lot"]], c.skillW)}</select></label>
+          <label class="field"><span>Show</span><select data-tier="show1">${opt(TIER_SHOW, t.show1)}</select></label>
+          <label class="field"><span>and</span><select data-tier="show2">${opt(TIER_SHOW, t.show2)}</select></label>
+        </div>
+        <div class="tier-deck">
+          <span class="mini"><b>Your deck so far</b> (${t.deck.length}/6):</span>
+          ${t.deck.map((x, i) => `<span class="chip lockchip ty-${D.card(x.id).ty}"><span class="tydot"></span>${esc(D.card(x.id).n)} LB${x.lb} <button type="button" class="linkish" data-tier-remove="${i}" aria-label="Remove">✕</button></span>`).join("") || '<span class="mini">empty: this ranks your first card</span>'}
+          <button type="button" class="btn ghost small" id="tierFromCoach">Load my coach deck</button>
+          ${t.deck.length ? '<button type="button" class="btn ghost small" id="tierClear">Clear</button><button type="button" class="btn ghost small" id="tierToCoach">Use in the coach</button>' : ""}
+        </div>
+      </section>
+      <section class="panel">
+        <div class="row-wrap run-row"><h3>Ranking for your ${ord} ${typeName === "All types" ? "card" : esc(typeName) + " card"}</h3>
+          <div class="progress" ${tierRun ? "" : "hidden"}><i id="tierProg" style="width:${Math.round(((tierRun && tierRun.f) || 0) * 100)}%"></i></div></div>
+        ${tiersHTML || '<div class="empty">Ranking…</div>'}
+        <p class="mini">Tiers split the score range into 7 equal bands, like Euophrys' list. A green ring means you own the card at that limit break or higher.</p>
+      </section>
+    </div>`;
+  }
+
+  function tierInput(el) {
+    const t = tier();
+    const c = cm();
+    const k = el.dataset.tier;
+    const v = el.type === "checkbox" ? el.checked : el.value;
+    if (k === "preset") c.preset = v;
+    else if (k === "skillW") c.skillW = v;
+    else t[k] = v;
+    save();
+    renderTiers();
+  }
+
+  function tierClick(e) {
+    if (state.tab !== "tiers") return false;
+    const t = tier();
+    const el = e.target;
+    const add = el.closest("[data-tier-add]");
+    if (add) {
+      if (t.deck.length >= 6) { flash("The deck is full. Remove a card first."); return true; }
+      const card = D.card(+add.dataset.tierAdd);
+      t.deck.push({ id: card.id, lb: +add.dataset.lb });
+      save();
+      flash(card.n + " LB" + add.dataset.lb + " added");
+      renderTiers();
+      return true;
+    }
+    const rm = el.closest("[data-tier-remove]");
+    if (rm) { t.deck.splice(+rm.dataset.tierRemove, 1); save(); renderTiers(); return true; }
+    const st = el.closest("[data-tier-style]");
+    if (st) { cm().style = st.dataset.tierStyle; save(); renderTiers(); return true; }
+    if (el.closest("#tierFromCoach")) { t.deck = state.deck.slots.filter(Boolean).map((sl) => ({ id: sl.id, lb: sl.lb })); save(); renderTiers(); return true; }
+    if (el.closest("#tierClear")) { t.deck = []; save(); renderTiers(); return true; }
+    if (el.closest("#tierToCoach")) {
+      state.deck.slots = [0, 1, 2, 3, 4, 5].map((i) => (t.deck[i] ? { id: t.deck[i].id, lb: t.deck[i].lb, bond: null } : null));
+      state.facilities.forEach((f) => { f.members = []; f.hints = []; });
+      commit(true);
+      flash("Deck set in Trainee and deck");
+      return true;
+    }
+    return false;
+  }
+
   function renderTab() {
     const sc = scenario();
     $$(".tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
     const body = $("#tabBody");
+    if (state.tab === "tiers" && HAS_DATA) {
+      renderTiers();
+      return;
+    }
     if (state.tab === "cm" && HAS_DATA) {
       renderCM();
       return;

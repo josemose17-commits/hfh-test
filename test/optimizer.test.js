@@ -127,3 +127,25 @@ test("pasted Umalator charts are read by median, including names on their own li
   assert.strictEqual(r.values[900681], 1.96);
   assert.strictEqual(r.unknown, 1);
 });
+
+test("tier list ranks every limit break, never lower for a higher LB, and skips characters already in the deck", () => {
+  const speed = globalCards(3).filter((c) => c.ty === "speed").slice(0, 8);
+  const candidates = [];
+  speed.forEach((c) => { for (let lb = 0; lb <= 4; lb++) candidates.push({ id: c.id, lb }); });
+  const deck = [{ id: speed[0].id, lb: 4 }];
+  const r = O.runJob({ job: "tiers", opts: { scenario: "ura", build: "mile", runs: 6 }, deck, candidates });
+  assert.ok(!r.list.some((x) => D.card(x.id).cid === speed[0].cid), "a card of a character already in the deck was ranked");
+  assert.strictEqual(r.list.length, (speed.length - 1) * 5);
+  const by = {};
+  r.list.forEach((x) => { (by[x.id] = by[x.id] || [])[x.lb] = x.score; });
+  Object.values(by).forEach((a) => { for (let i = 1; i < 5; i++) assert.ok(a[i] >= a[i - 1]); });
+  for (let i = 1; i < r.list.length; i++) assert.ok(r.list[i].score <= r.list[i - 1].score);
+});
+
+test("event rewards: listed cards use the event table, others the rarity fallback", () => {
+  const listed = D.DATA.supports.find((c) => c.ev);
+  const ev = D.eventRewards(listed);
+  assert.ok(ev.known && ev.bond === listed.ev[7] && ev.sp === listed.ev[5] && ev.energy === listed.ev[6]);
+  const missing = D.DATA.supports.find((c) => !c.ev && c.r === 3);
+  assert.deepStrictEqual(D.eventRewards(missing), { stats: [9, 9, 9, 9, 9], sp: 0, energy: 0, bond: 5, known: false });
+});

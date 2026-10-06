@@ -8,6 +8,7 @@ Data source: GameTora (https://gametora.com/umamusume). Game data © Cygames, In
 import datetime
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -51,6 +52,20 @@ def fetch(path):
         return json.load(r)
 
 
+# Card event rewards from Euophrys' tier list (MIT, github.com/Euophrys/umamusume-tierlist):
+# per card [Speed, Stamina, Power, Guts, Wit, skill points, energy, bond] over a career,
+# best reasonable choices, taking the chain to its gold skill.
+EVENTS_URL = "https://raw.githubusercontent.com/Euophrys/umamusume-tierlist/main/src/card-events.js"
+
+
+def fetch_events():
+    req = urllib.request.Request(EVENTS_URL, headers={"User-Agent": "uma-turn-coach data build"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        text = r.read().decode("utf-8")
+    return {int(k): [float(x) if "." in x else int(x) for x in v.replace(" ", "").split(",")]
+            for k, v in re.findall(r"(\d+):\s*\[([^\]]+)\]", text)}
+
+
 def main():
     manifest = fetch("/data/manifests/umamusume.json")
     get = lambda key: fetch("/data/umamusume/%s.%s.json" % (key, manifest[key]))
@@ -58,6 +73,7 @@ def main():
     effects = get("support_effects")
     trainees = get("character-cards")
     skills = get("skills")
+    events = fetch_events()
 
     effect_meta = {}
     for e in effects:
@@ -87,6 +103,8 @@ def main():
         }
         if u:
             card["u"] = {"lv": u["level"], "e": u["effects"]}
+        if c["support_id"] in events:
+            card["ev"] = events[c["support_id"]]
         want_skills.update(card["hs"])
         want_skills.update(card["es"])
         out_cards.append(card)

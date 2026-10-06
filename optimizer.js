@@ -23,7 +23,6 @@
   const RACE_SHARE = 0.1; // share of turns spent on optional races
   const RACE_SHARE_BY_SCENARIO = { trackblazer: 0.35 }; // race-driven scenarios
   const RACE_REWARD = { stats: 8, sp: 40 }; // per race; scaled by the deck's Race Bonus
-  const BOND_EVENTS = { 3: 25, 2: 20, 1: 15 }; // bond from a card's events over a career, approx.
   const EVENT_STATS = 120; // stats per stat from random events over a career, about the same for any deck
 
   function rng(seed) {
@@ -131,7 +130,7 @@
       const level = D.levelFor(c.card, c.lb);
       const base = D.baseEffects(c.card, level);
       const spec = c.card.ty === "friend" || c.card.ty === "group" ? 0 : (base[19] || 0);
-      return { card: c.card, level, base, spec, init: D.initialBond(c.card, level), hintRate: HINT_CHANCE * (1 + (base[18] || 0) / 100), hintLv: 1 + (base[17] || 0) };
+      return { card: c.card, level, base, spec, init: D.initialBond(c.card, level), ev: D.eventRewards(c.card), hintRate: HINT_CHANCE * (1 + (base[18] || 0) / 100), hintLv: 1 + (base[17] || 0) };
     });
     ctx.deckTypes = new Set(deck.map((d) => d.card.ty)).size;
     const raceBonus = deck.reduce((a, d) => a + (d.base[15] || 0), 0);
@@ -150,11 +149,23 @@
       let typ = 0;
       const bond = deck.map((d) => d.init);
       const count = [0, 0, 0, 0, 0];
-      const eventBond = deck.map((d) => BOND_EVENTS[d.card.r] / Math.max(1, ctx.turns.length * 0.6));
+      // Card events: bond arrives over the first ~60% of the career; stats, SP and energy
+      // are spread over the whole run. Effect size up (effect 26) scales event stats.
+      const eventBond = deck.map((d) => d.ev.bond / Math.max(1, ctx.turns.length * 0.6));
+      const evStats = [0, 0, 0, 0, 0];
+      let evSp = 0, evEnergy = 0;
+      deck.forEach((d) => {
+        const up = 1 + (d.base[26] || 0) / 100;
+        for (let i = 0; i < 5; i++) evStats[i] += d.ev.stats[i] * up;
+        evSp += d.ev.sp * up;
+        evEnergy += d.ev.energy * (1 + (d.base[25] || 0) / 100);
+      });
       for (let ti = 0; ti < ctx.turns.length; ti++) {
         const turn = ctx.turns[ti];
         deck.forEach((d, k) => { bond[k] = Math.min(100, bond[k] + eventBond[k]); });
-        for (let i = 0; i < 5; i++) x[i] += EVENT_STATS / ctx.turns.length;
+        for (let i = 0; i < 5; i++) x[i] += (EVENT_STATS + evStats[i]) / ctx.turns.length;
+        sp += evSp / ctx.turns.length;
+        energy = Math.min(100, energy + evEnergy / ctx.turns.length);
         // Optional races: stats and SP, raised by the deck's race bonus, for some energy.
         if (turn > 12 && rand() < ctx.raceShare) {
           for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + RACE_REWARD.stats / 5 * (1 + raceBonus / 100));
@@ -405,6 +416,41 @@
     return { values, unknown };
   }
 
+  // Tier list: how much each candidate (card at a limit break) adds to the deck so far, like
+  // Euophrys' tier list but from full simulated careers, with skills valued on the chosen race.
+  // Candidates whose character is already in the deck are skipped.
+  function tierScores(opts, deck, candidates, onProgress) {
+    const ctx = buildCtx(opts);
+    const tchar = opts.trainee ? (D.trainee(opts.trainee) || {}).cid : null;
+    const sim = (cards) => simulate(Object.assign({}, ctx), cards);
+    const base = sim(deck);
+    const out = [];
+    candidates.forEach((c, i) => {
+      if (onProgress && i % 10 === 0) onProgress(i / candidates.length);
+      if (!compatible(deck, c, tchar)) return;
+      const r = sim(deck.concat([c]));
+      out.push({
+        id: c.card.id, lb: c.lb,
+        score: r.value - base.value,
+        train: r.trainValue - base.trainValue,
+        skill: (r.skillValue - base.skillValue) * ctx.skillWeight,
+        stats: r.stats.map((x, k) => x - base.stats[k]),
+        sp: r.sp - base.sp,
+        rainbows: r.rainbows - base.rainbows,
+        topSkills: r.skills.filter((x) => x.src.indexOf(c.card.id) !== -1 && x.surplus > 0).slice(0, 3).map((x) => ({ id: x.id, L: x.L, p: x.p })),
+      });
+    });
+    // A higher limit break is never worse in the game, so smooth out simulation noise.
+    const byCard = {};
+    out.forEach((x) => { (byCard[x.id] = byCard[x.id] || []).push(x); });
+    Object.values(byCard).forEach((xs) => {
+      xs.sort((a, b) => a.lb - b.lb);
+      for (let k = 1; k < xs.length; k++) if (xs[k].score < xs[k - 1].score) xs[k].score = xs[k - 1].score;
+    });
+    if (onProgress) onProgress(1);
+    return out.sort((a, b) => b.score - a.score);
+  }
+
   // One request from the page (or its worker): card ids in, card ids out.
   //   { job: "optimize" | "wishlist", opts, pool, borrowPool, deck, candidates, swapSlots }
   function runJob(data, onProgress) {
@@ -413,6 +459,9 @@
     const resolve = (list) => (list || []).map((c) => ({ card: D.card(c.id), lb: c.lb, borrowed: !!c.borrowed })).filter((c) => c.card);
     const ids = (list) => list.map((c) => ({ id: c.card.id, lb: c.lb, borrowed: !!c.borrowed }));
     const o = Object.assign({}, data.opts, { scenario: sc, pool: resolve(data.pool), borrowPool: resolve(data.borrowPool) });
+    if (data.job === "tiers") {
+      return { type: "tiers", list: tierScores(o, resolve(data.deck), resolve(data.candidates), onProgress) };
+    }
     if (data.job === "wishlist") {
       const list = wishlist(o, resolve(data.deck), resolve(data.candidates), 10, data.swapSlots);
       return { type: "wishlist", list: list.map((w) => ({ id: w.card.id, lb: w.lb, gain: w.gain, share: w.share, replaces: w.replaces.id })) };
@@ -425,7 +474,7 @@
     };
   }
 
-  const api = { optimize, simulate, wishlist, runJob, parseChart, buildCtx, statsValue, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { optimize, simulate, wishlist, runJob, parseChart, tierScores, buildCtx, statsValue, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

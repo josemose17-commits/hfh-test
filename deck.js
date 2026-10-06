@@ -246,6 +246,15 @@
     return dists[0][0];
   }
 
+  // What a card's events give over a career (Euophrys' tier list data): stats, skill points,
+  // energy and bond. Cards it doesn't list get its fallback: +7 (SR) / +9 (SSR) to every stat
+  // and +5 bond.
+  function eventRewards(c) {
+    if (c.ev) return { stats: c.ev.slice(0, 5), sp: c.ev[5], energy: c.ev[6], bond: c.ev[7], known: true };
+    const all = c.r === 3 ? 9 : c.r === 2 ? 7 : 0;
+    return { stats: [all, all, all, all, all], sp: 0, energy: 0, bond: 5, known: false };
+  }
+
   // Backup code for the cards you own: "UMA1:" then base-36 card id + limit break digit per card.
   function encodeOwned(owned) {
     return "UMA1:" + Object.keys(owned).map(Number).filter((id) => byId.has(id)).sort((a, b) => a - b).map((id) => id.toString(36) + owned[id]).join(".");
@@ -265,7 +274,7 @@
   const api = {
     DATA, STATS, RARITY, BOND_FRIENDSHIP, BOND_PER_TRAINING, BOND_PER_HINT, BOND_PER_DATE,
     card, trainee, skillCost, addSkillCosts, levelFor, effectTable, baseEffects, effectsIn, conditionalUniques, effectName, formatEffect, uniqueText,
-    onGlobal, label, typeLabel, encodeOwned, decodeOwned, initialBond, isRainbow, trainingGain, suggestBuild
+    onGlobal, label, typeLabel, encodeOwned, decodeOwned, eventRewards, initialBond, isRainbow, trainingGain, suggestBuild
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaDeck = api;
