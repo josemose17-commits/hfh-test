@@ -1,0 +1,154 @@
+// Computes every skill's median/mean length gain (L) for each CM/LoH preset and running style,
+// by running alpha123's Umalator simulator (tools/umalator_run.js) in parallel worker processes.
+// Results are cached per job, so the run can be stopped and resumed.
+//
+// Usage: node tools/build_skillvalues.js <presets.json> <umalator-global dir> <umalator jp dir>
+//        <cache dir> [--workers=4] [--only=cm20,cm21]
+//   Then write data/skillvalues.js from whatever is cached so far:
+//        node tools/build_skillvalues.js <same args> --compose=data/skillvalues --skills=<GameTora skills.json>
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
+
+const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const flags = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => a.slice(2).split('=')));
+const [presetsFile, dirGlobal, dirJp, cacheDir] = args;
+const WORKERS = +(flags.workers || 4);
+const STRATEGIES = ['Nige', 'Senkou', 'Sasi', 'Oikomi'];
+const DEBUFF_FREE = (meta, id) => !(meta[id] && String(meta[id].iconId).endsWith('4'));
+
+fs.mkdirSync(cacheDir, { recursive: true });
+const presets = JSON.parse(fs.readFileSync(presetsFile, 'utf8'));
+const today = new Date().toISOString().slice(0, 10);
+
+function skillList(dir) {
+  const data = JSON.parse(fs.readFileSync(path.join(dir, 'skill_data.json'), 'utf8'));
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, 'skill_meta.json'), 'utf8'));
+  // Same pool as the Umalator's "all skills" chart: normal and gold skills, inherited uniques,
+  // and no debuffs.
+  return Object.keys(data).filter((id) =>
+    (data[id].rarity < 3 || id[0] === '4' || (id[0] === '9' && id.length > 6)) &&
+    DEBUFF_FREE(meta, id) && id !== '1400011' && id !== '1400021');
+}
+const SKILLS = { global: skillList(dirGlobal), jp: skillList(dirJp) };
+const DIRS = { global: dirGlobal, jp: dirJp };
+
+// Priority: Global cups from this week on, then League of Heroes, then the rest newest first.
+const rank = (p) => (p.global.start >= addDays(today, -7) ? 0 : p.kind === 'loh' ? 1 : 2);
+function addDays(s, n) { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+if (flags.compose) { compose(); process.exit(0); }
+
+function specKey(spec) { return crypto.createHash('sha1').update(JSON.stringify(spec)).digest('hex').slice(0, 12); }
+
+// Packs cached results for the browser: data/skillvalues/index.js holds skill names and costs
+// and which presets are ready; data/skillvalues/<preset>.json holds, per running style, a list
+// of [skill id, median L x100, mean L x100], loaded when that preset is picked.
+function compose() {
+  const outDir = flags.compose;
+  fs.mkdirSync(outDir, { recursive: true });
+  const gt = JSON.parse(fs.readFileSync(flags.skills, 'utf8'));
+  const info = new Map(gt.map((s) => [String(s.id), s]));
+  // Fallback names and costs for skills GameTora lists under other IDs (inherited uniques).
+  const names = {};
+  const metas = {};
+  [dirGlobal, dirJp].forEach((dir) => {
+    const f = path.join(dir, 'skillnames.json');
+    if (fs.existsSync(f)) Object.entries(JSON.parse(fs.readFileSync(f, 'utf8'))).forEach(([id, v]) => { if (!names[id]) names[id] = v[v.length - 1] || v[0]; });
+    Object.assign(metas, JSON.parse(fs.readFileSync(path.join(dir, 'skill_meta.json'), 'utf8')), metas);
+  });
+  const ready = [];
+  const used = new Set();
+  let missing = 0;
+  for (const p of presets) {
+    const per = {};
+    for (const strategy of STRATEGIES) {
+      const f = path.join(cacheDir, specKey({ sim: p.sim, courseId: p.course.id, racedef: p.racedef, stats: p.stats, strategy }) + '.json');
+      if (!fs.existsSync(f)) { missing++; continue; }
+      const r = JSON.parse(fs.readFileSync(f, 'utf8'));
+      per[strategy] = Object.entries(r.values)
+        .filter(([, v]) => v[0] >= 0.05 || v[1] >= 0.05)
+        .map(([id, v]) => { used.add(id); return [+id, Math.round(v[0] * 100), Math.round(v[1] * 100)]; })
+        .sort((a, b) => b[1] - a[1]);
+    }
+    if (Object.keys(per).length === STRATEGIES.length) {
+      fs.writeFileSync(path.join(outDir, p.id + '.json'), JSON.stringify(per));
+      ready.push(p.id);
+    }
+  }
+  const skills = {};
+  used.forEach((id) => {
+    const m = metas[id] || {};
+    // Inherited uniques (9xxxxx) share their name and Global release with the unique (1xxxxx).
+    const base = id[0] === '9' ? info.get('1' + id.slice(1)) : null;
+    if (base) {
+      skills[id] = [(base.name_en || base.enname || base.jpname) + ' (inherited)', m.baseCost || 200, 9, base.name_en ? 1 : 0];
+      return;
+    }
+    const s = info.get(id);
+    // [name, skill point cost, rarity (1 white, 2 gold, 9 inherited unique), on Global (1/0)]
+    const inherited = id[0] === '9';
+    skills[id] = s
+      ? [s.name_en || s.enname || s.jpname, s.cost || m.baseCost || 0, inherited ? 9 : s.rarity || 1, s.name_en ? 1 : 0]
+      : [names[id] || '#' + id, m.baseCost || 0, inherited ? 9 : 1, 0];
+  });
+  const meta = {
+    built: today,
+    source: "alpha123's Umalator (alpha123.github.io/uma-tools), skill chart mode: up to 200 simulated races per skill, position keep and spot struggle on",
+    strategies: STRATEGIES,
+  };
+  const body = JSON.stringify({ meta, ready, skills });
+  fs.writeFileSync(path.join(outDir, 'index.js'), "// Generated by tools/build_skillvalues.js from alpha123's Umalator. Do not edit.\n" +
+    '(function (root) {\n  const SKILL_VALUES = ' + body + ';\n' +
+    '  if (typeof module !== "undefined" && module.exports) module.exports = SKILL_VALUES;\n  else root.UmaSkillValues = SKILL_VALUES;\n' +
+    '})(typeof window !== "undefined" ? window : globalThis);\n');
+  console.log('wrote', outDir, body.length, 'bytes index;', ready.length, 'presets ready,', Object.keys(skills).length, 'skills,', missing, 'jobs not computed yet');
+}
+
+let list = presets.slice().sort((a, b) => rank(a) - rank(b) || (rank(a) === 0 ? (a.global.start < b.global.start ? -1 : 1) : (a.global.start > b.global.start ? -1 : 1)));
+if (flags.only) list = list.filter((p) => flags.only.split(',').includes(p.id));
+
+const jobs = [];
+const seen = new Set();
+for (const p of list) {
+  for (const strategy of STRATEGIES) {
+    const spec = { sim: p.sim, courseId: p.course.id, racedef: p.racedef, stats: p.stats, strategy };
+    const key = specKey(spec);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const out = path.join(cacheDir, key + '.json');
+    if (fs.existsSync(out)) continue;
+    jobs.push({ p, spec, key, out });
+  }
+}
+console.log(`${jobs.length} jobs to run (${seen.size - jobs.length} cached) on ${WORKERS} workers`);
+
+let running = 0;
+let doneCount = 0;
+const t0 = Date.now();
+function next() {
+  if (!jobs.length) { if (!running) console.log('all done in', Math.round((Date.now() - t0) / 60000), 'min'); return; }
+  const j = jobs.shift();
+  const jobFile = j.out.replace(/\.json$/, '.job.json');
+  fs.writeFileSync(jobFile, JSON.stringify({
+    courseId: j.spec.courseId, racedef: j.spec.racedef, stats: j.spec.stats,
+    strategies: [j.spec.strategy], skills: SKILLS[j.spec.sim],
+  }));
+  running++;
+  const tmp = j.out + '.part';
+  const child = spawn(process.execPath, [path.join(__dirname, 'umalator_run.js'), DIRS[j.spec.sim], jobFile, tmp], { stdio: 'inherit' });
+  child.on('exit', (code) => {
+    running--;
+    doneCount++;
+    if (code === 0) {
+      const r = JSON.parse(fs.readFileSync(tmp, 'utf8'));
+      fs.writeFileSync(j.out, JSON.stringify({ spec: j.spec, ms: r.ms, values: r.values[j.spec.strategy] }));
+      fs.unlinkSync(tmp);
+    }
+    fs.unlinkSync(jobFile);
+    console.log(`[${new Date().toISOString().slice(11, 19)}] ${code === 0 ? 'ok ' : 'ERR'} ${j.p.id} ${j.spec.strategy} (${doneCount} done, ${jobs.length} left)`);
+    next();
+  });
+}
+for (let i = 0; i < WORKERS; i++) next();

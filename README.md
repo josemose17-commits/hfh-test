@@ -29,8 +29,20 @@ Open **Trainee and deck** and type your trainee and up to 6 support cards. Names
 Scenario-specific boosts that the formula doesn't cover (Unity training, island facilities, springs and so on) use an estimated multiplier. Type the real total gain on a few turns and the coach corrects it.
 
 **Support cards** and **Trainees** tabs browse the whole database:
-- **Support cards**: filter by type, rarity, Global availability and limit break, and sort by any effect. Tap a card for its effects at every limit break, its unique effect, hint skills, event skills and release dates.
+- **Support cards**: filter by type, rarity, Global availability, limit break and whether you own the card, and sort by any effect. Tap a card for its effects at every limit break, its unique effect, hint skills, event skills and release dates.
 - **Trainees**: aptitudes, growth bonuses and unique skill.
+
+## My cards
+
+Mark the support cards you own and their limit break, with the **Owned** picker on any card or **Quick add** under **My cards** in the Support cards tab. They're saved in your browser. **Copy backup code** gives a short code (`UMA1:...`) you can keep or paste into **Restore** on another device. When you add a card you own to your deck, it starts at your limit break, and **Cards I own** limits the deck picker to your cards.
+
+## CM & decks
+
+Pick any Champions Meeting or League of Heroes:
+- **Dates**: Global dates come from GameTora, and from alpha123's Umalator for cups announced since. Global runs the cups in JP's order, so later cups get an estimated date (about every 3 weeks) marked as an estimate. League of Heroes has only run on JP so far. Its Global slot is estimated from where it fell between JP cups.
+- **Course**: track, distance, surface, direction, inner/outer layout, ground, weather and season. **Set the turn coach to ...** switches the coach's build to the race's distance.
+- **Skills for this race**: every skill's median and mean length gain (L) on that course for the running style you pick, plus its SP cost, L per 100 SP, and which of your cards can give it. The numbers come from alpha123's Umalator skill chart. To use your own uma's results, run the Umalator's Skill chart, copy the table and paste it under **Use your own Umalator results**.
+- **Deck optimizer**: finds the best 6 cards among the cards you own, or every Global SSR and SR at max limit break. It plays simulated careers in the scenario picked at the top, with the same card formula as the coach: specialty priority, friendship training, bond, facility levels, energy, rests, failure and optional races with your race bonus. Every skill the deck can hint is valued by its median L on the chosen course minus its SP cost. Options: borrow one friend card, lock cards in, and choose how much skills count. It never puts the same character in twice or uses your trainee's own character. Results show what each card adds, the expected final stats and SP, the best skills the deck can hint, close alternatives, and **Which cards would improve it?**, a list of cards to pull or limit break next. **Use this deck in the coach** fills your deck slots.
 
 ## Grand Concert
 
@@ -101,6 +113,19 @@ python3 tools/build_data.py
 
 The generated file is committed, so the coach works offline.
 
+Champions Meeting and League of Heroes presets (`data/presets.js`) come from GameTora's event lists plus alpha123's Umalator preset lists:
+
+```
+python3 tools/build_presets.py <GameTora cache dir> <umalator-global bundle.js> <umalator bundle.js> <umalator course_data.json> presets.json
+```
+
+Skill values (`data/skillvalues/`) come from running alpha123's [Umalator](https://alpha123.github.io/uma-tools/umalator-global/) headless: `tools/umalator_run.js` loads its `simulator.worker.js` in Node and runs the same skill chart as the site, for every skill, preset and running style, with a strong Global stat line for the distance. The values match the website's own skill chart exactly for the same setup. uma-tools is GPL-3.0 and none of its code is included here: the runner loads a downloaded copy at build time, and only the resulting numbers are committed. Cups Global has announced use the Global Umalator; later cups and League of Heroes use the JP one, which has every course. To rebuild (takes a few hours on 4 cores, and resumes if stopped):
+
+```
+node tools/build_skillvalues.js presets.json <umalator-global dir> <umalator dir> <cache dir> --workers=4
+node tools/build_skillvalues.js presets.json <umalator-global dir> <umalator dir> <cache dir> --compose=data/skillvalues --skills=<GameTora skills.json>
+```
+
 When releasing a change to the site, bump the `?v=` number on the file links in `index.html` so browsers fetch the new files instead of cached ones.
 
 ## Files
@@ -109,9 +134,14 @@ When releasing a change to the site, bump the `?v=` number on the file links in 
 - `data/gametora.js`: generated card, trainee and skill data. `tools/build_data.py` rebuilds it.
 - `deck.js`: card effects at any level, unique effects and the training gain formula.
 - `engine.js`: scoring, the energy lookahead, turn advance and undo. Pure functions, shared by the page and the tests.
+- `optimizer.js`: career simulation and deck search; `optimizer.worker.js` runs it off the main thread.
+- `data/presets.js`, `data/skillvalues/`: CM/LoH presets and per-race skill values (generated, see Data).
+- `tools/`: data builders, including the headless Umalator runner.
 - `app.js`, `style.css`, `index.html`: the page.
-- `test/engine.test.js`: run with `node --test test/*.test.js`.
+- `test/`: run with `node --test test/*.test.js`.
 
 ## Limits
 
 These are estimates, not a game simulator. Support card event effects and Friend/Group outing rewards use approximate values (bond +5 per hint or outing, outings about +20 energy, +1 mood and a few stats). Exact per-event values need GameTora's training event data. Card effects and level-1 base training values come from GameTora's data. The increase per facility level, rest amounts, race rewards and scenario-specific bonuses are approximations. Real gains and failure rates from your screen always beat the built-in estimates. Turns marked "approx." are best-effort, so trust the in-game goal list when they disagree. The newest JP scenarios are based on launch-period guides.
+
+The deck optimizer ranks decks with a simplified career simulation, not a full game simulator: card events, outings and scenario-specific mechanics are approximate, so treat close results (a few percent apart) as ties. Skill values are for one fixed stat line per distance with no other skills, like the Umalator's default chart. Your own uma's numbers can differ, which is what the paste box is for. Global dates past the announced cups are estimates.

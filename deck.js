@@ -144,6 +144,10 @@
   }
 
   function card(id) { return byId.get(+id) || null; }
+  // Skill point cost before hint discounts. Other tables (the skill values file) can add costs.
+  const extraCost = {};
+  function skillCost(id) { return (DATA && DATA.skillCost && DATA.skillCost[id]) || extraCost[id] || 0; }
+  function addSkillCosts(map) { Object.assign(extraCost, map); }
   function trainee(id) { return traineeById.get(+id) || null; }
 
   function onGlobal(item, today) {
@@ -242,10 +246,26 @@
     return dists[0][0];
   }
 
+  // Backup code for the cards you own: "UMA1:" then base-36 card id + limit break digit per card.
+  function encodeOwned(owned) {
+    return "UMA1:" + Object.keys(owned).map(Number).filter((id) => byId.has(id)).sort((a, b) => a - b).map((id) => id.toString(36) + owned[id]).join(".");
+  }
+  function decodeOwned(text) {
+    const m = String(text || "").trim().match(/^UMA1:([0-9a-z.]*)$/i);
+    if (!m) return null;
+    const out = {};
+    m[1].split(".").filter(Boolean).forEach((t) => {
+      const id = parseInt(t.slice(0, -1), 36);
+      const lb = +t.slice(-1);
+      if (byId.has(id) && lb >= 0 && lb <= 4) out[id] = lb;
+    });
+    return out;
+  }
+
   const api = {
     DATA, STATS, RARITY, BOND_FRIENDSHIP, BOND_PER_TRAINING, BOND_PER_HINT, BOND_PER_DATE,
-    card, trainee, levelFor, effectTable, baseEffects, effectsIn, conditionalUniques, effectName, formatEffect, uniqueText,
-    onGlobal, label, typeLabel, initialBond, isRainbow, trainingGain, suggestBuild
+    card, trainee, skillCost, addSkillCosts, levelFor, effectTable, baseEffects, effectsIn, conditionalUniques, effectName, formatEffect, uniqueText,
+    onGlobal, label, typeLabel, encodeOwned, decodeOwned, initialBond, isRainbow, trainingGain, suggestBuild
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaDeck = api;

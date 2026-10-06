@@ -73,6 +73,7 @@ def main():
         u = c.get("unique")
         card = {
             "id": c["support_id"],
+            "cid": c.get("char_id"),
             "n": c["char_name"],
             "t": (c.get("title_en") or c.get("title_ja") or "").strip("[]"),
             "r": c["rarity"],
@@ -111,9 +112,12 @@ def main():
         out_trainees.append(tr)
 
     skill_names = {}
+    skill_cost = {}
     for s in skills:
         if s["id"] in want_skills:
             skill_names[s["id"]] = s.get("name_en") or s.get("enname") or s.get("jpname")
+            if s.get("cost"):
+                skill_cost[s["id"]] = s["cost"]
 
     data = {
         "meta": {"source": "GameTora (gametora.com)", "built": datetime.date.today().isoformat(), "cards": len(out_cards), "trainees": len(out_trainees)},
@@ -122,6 +126,7 @@ def main():
         "supports": out_cards,
         "trainees": out_trainees,
         "skills": skill_names,
+        "skillCost": skill_cost,
     }
     body = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     with open(OUT, "w", encoding="utf-8") as f:
