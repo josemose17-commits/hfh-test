@@ -48,8 +48,8 @@ Pick any Champions Meeting or League of Heroes:
 
 The deck optimizer's **Build a deck for** switch has two parent modes, for training parents to inherit from for a Champions Meeting or League of Heroes:
 
-- **Ace parent**: picks the cards whose hints and events give the most skills that are strong on that race for your running style (each weighted by its median length gain), white and gold, so the parent can learn them and pass them down as skill sparks.
-- **Debuffer parent**: picks the cards that give the most debuffs that work on that race: distance-locked ones (Stamina Eater for Long, Intimidate for Sprint...), surface-locked ones (Dust Cloud on dirt) and style-locked ones (Intense Gaze for End Closers) only when they fit. Gold debuffs count double. The debuff list comes from the Umalator's skill data (`tools/build_debuffs.js`).
+- **Ace parent**: picks the cards whose hints and events give the most white skills that are strong on that race for your running style (each weighted by its median length gain), so the parent can learn them and pass them down as skill sparks.
+- **Debuffer parent**: picks the cards that give the most debuffs that work on that race: distance-locked ones (Stamina Eater for Long, Intimidate for Sprint...), surface-locked ones (Dust Cloud on dirt) and style-locked ones (Intense Gaze for End Closers) only when they fit. Only white skills count in both modes, since gold skills don't become skill sparks. The debuff list comes from the Umalator's skill data (`tools/build_debuffs.js`).
 
 Unlike a racing deck, every target skill counts (not just the best 8), and **Stats still count** sets how much Euophrys' stat score matters. The result lists how many target skills to expect and each one's chance. Deck makeup, owned cards, borrowing and locked cards work the same way.
 

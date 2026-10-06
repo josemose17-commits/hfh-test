@@ -208,24 +208,30 @@
     return { cards, skills: skillValue(deck, ctx).list.filter((s) => s.surplus > 0 && s.p >= 0.15).slice(0, 10) };
   }
 
-  // Target skills for a parent deck, as { skill id: weight in lengths }.
-  //   ace: skills that are good on the race (median L for the running style), white and gold;
-  //   debuff: debuff skills that can trigger on the race's distance/surface with your style
-  //   (white = 1 L, gold = 2 L).
+  // Target skills for a parent deck, as { skill id: weight in lengths }. Only white skills
+  // become skill sparks, so gold skills (and inherited uniques) don't count.
+  //   ace: white skills that are good on the race (median L for the running style);
+  //   debuff: white debuffs that can trigger on the race's distance/surface with your style
+  //   (each counted like a 1 L skill). rarityOf(id): 1 white, 2 gold, 9 inherited unique.
   const STYLE_NO = { Nige: 1, Senkou: 2, Sasi: 3, Oikomi: 4 };
   const DIST_NO = { Sprint: 1, Mile: 2, Medium: 3, Long: 4 };
-  function parentTargets(mode, preset, style, raceSkills, debuffs, minL) {
+  function parentTargets(mode, preset, style, raceSkills, debuffs, minL, rarityOf) {
     const out = {};
     if (mode === "debuff") {
       Object.entries(debuffs || {}).forEach(([id, d]) => {
         if (d.dist.length && d.dist.indexOf(DIST_NO[preset.course.dist]) === -1) return;
         if (d.ground.length && d.ground.indexOf(preset.course.surface === "Dirt" ? 2 : 1) === -1) return;
         if (d.style.length && d.style.indexOf(STYLE_NO[style]) === -1) return;
-        out[id] = d.r === 2 ? 2 : 1; // a debuffer lives on these: count each like a strong race skill
+        if (d.r !== 1) return;
+        out[id] = 1; // a debuffer lives on these: count each like a strong race skill
       });
       return out;
     }
-    Object.entries(raceSkills || {}).forEach(([id, L]) => { if (L >= (minL || 0.1)) out[id] = L; });
+    Object.entries(raceSkills || {}).forEach(([id, L]) => {
+      if (L < (minL || 0.1) || id[0] === "9") return;
+      if (rarityOf && rarityOf(id) !== 1) return;
+      out[id] = L;
+    });
     return out;
   }
 
