@@ -1760,7 +1760,7 @@
     body.innerHTML = `<div class="cm">
       <section class="panel tier-ctl">
         <h2>Tier list</h2>
-        <p class="mini"><a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>, with skills added. The base score is Euophrys' own formula and scenario weights: the extra stats a card adds to the deck you have so far. On top comes a skill score: the skills the card can hint, valued by their median length gain on the race below (minus their SP cost), not counting skills your deck or trainee already cover. Tap a card to add it and the list re-ranks for your next pick.</p>
+        <p class="mini"><a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>, with skills added. The base score is Euophrys' own formula and scenario weights: the extra stats a card adds to the deck you have so far. On top comes a skill score: the skills the card can hint, valued by their median length gain on the race below (1 L counts like 60 Speed) plus the SP the hint discount saves, not counting skills your deck or trainee already cover. The total is Euophrys' score plus the skill score. Tap a card to add it and the list re-ranks for your next pick.</p>
         <div class="db-controls">
           <label class="field"><span>Card type</span><select data-tier="type">${opt(TIER_TYPES, t.type)}</select></label>
           <label class="field"><span>Rarity</span><select data-tier="rarity">${opt([["1", "SSR, SR and R"], ["2", "SSR and SR"], ["3", "SSR only"]], t.rarity)}</select></label>

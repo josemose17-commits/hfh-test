@@ -16,10 +16,10 @@
   // Euophrys' weight tabs: card type -> tab key and type number in its data.
   const TABS = { speed: ["speed", 0], stamina: ["stamina", 1], power: ["power", 2], guts: ["guts", 3], wit: ["wisdom", 4], friend: ["friend", 6], group: ["friend", 6] };
 
-  // Skill value in Euophrys' units: a length (L) is worth about as much as 171 skill points
-  // (60 Speed of race gain at the coach's 0.35 value per skill point), and skill points are
-  // weighted like any other gain (weights.stats[5]).
-  const SP_PER_L = 171;
+  // Skill value in Euophrys' units. A hint makes a skill available and cheaper, so a skill is
+  // worth its length gain (1 L counted like 60 Speed, at the Speed weight of the card's tab)
+  // plus the skill points the hint discount saves (at the skill point weight).
+  const SPEED_PER_L = 60;
   const HINT_DISCOUNT = [0, 0.1, 0.2, 0.3, 0.35, 0.4];
   const HINT_CHANCE = 0.075; // per turn trained with the card, before its hint frequency
   const TRAIN_SHARE = { type: 0.3, friend: 0.22 }; // share of training turns spent with the card
@@ -75,7 +75,7 @@
       const L = ctx.skills[id];
       if (L == null || ctx.known.has(id)) return;
       const cost = ctx.costs[id] || D.skillCost(id) || 150;
-      const surplus = (L * SP_PER_L - cost * (1 - HINT_DISCOUNT[Math.min(5, lv)])) * ctx.spWeight;
+      const surplus = L * SPEED_PER_L * ctx.speedWeight + cost * HINT_DISCOUNT[Math.min(5, lv)] * ctx.spWeight;
       list.push({ id, p: 1 - miss, L, cost, surplus, src });
     });
     list.sort((a, b) => b.surplus * b.p - a.surplus * a.p);
@@ -100,6 +100,7 @@
     const ov = opts.overrides || {};
     const w = weightsFor(opts.scenario, ty, Object.assign({}, ov.general, ov.tabs && ov.tabs[TABS[ty][0]]), opts.trainee);
     ctx.spWeight = w.stats[5];
+    ctx.speedWeight = w.stats[0];
     ctx.races = w.races.slice(0, 3).reduce((a, b) => a + b, 0);
     const selected = deck.map((c) => entry(c.id, c.lb)).filter(Boolean);
     const inDeck = new Set(deck.map((c) => D.card(c.id).cid));
@@ -191,6 +192,7 @@
     });
     const ctx = makeCtx(opts);
     ctx.spWeight = 1;
+    ctx.speedWeight = 1;
     ctx.races = 0;
     return { cards, skills: skillValue(deck, ctx).list.filter((s) => s.surplus > 0 && s.p >= 0.15).slice(0, 10) };
   }
