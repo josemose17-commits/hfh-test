@@ -1422,6 +1422,8 @@
     let rows = skillRows(p.id, c.style);
     const src = skillSources(c);
     const deckIds = new Set(state.deck.slots.filter(Boolean).map((sl) => sl.id));
+    const trn = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    const known = new Set(trn ? trn.us.concat(trn.is, trn.as) : []);
     const q = (c.sq || "").trim().toLowerCase();
     rows = rows.filter((r) => {
       const info = skillInfo(r.id);
@@ -1450,7 +1452,7 @@
           const info = skillInfo(r.id);
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
-          return `<tr class="sk-${kind}"><td><b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${info[1] || "–"}</td><td class="num">${info[1] ? (r.L / info[1] * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          return `<tr class="sk-${kind}"><td><b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}${known.has(r.id) ? ' <span class="pill" title="Your trainee already has this skill (unique, innate or awakening)">she has it</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${info[1] || "–"}</td><td class="num">${info[1] ? (r.L / info[1] * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       <details class="paste">
@@ -1588,6 +1590,7 @@
       const best = stylesFor(tr)[0];
       const weak = "GFEDCB".indexOf(surf) !== -1 || "GFEDCB".indexOf(dist) !== -1;
       info = `<span class="mini">Growth: <b>${growthText(tr)}</b> · ${esc(p.course.surface)} <b>${surf}</b> · ${esc(p.course.dist)} <b>${dist}</b> · best style ${esc(best[1])} <b>${best[2]}</b>. Her own character's cards are left out.</span>
+        <span class="mini">Not counted from card hints (she already has them): ${esc(tr.us.concat(tr.is).map((id) => D.DATA.skills[id] || "#" + id).join(", "))}${tr.as.length ? "; awakening skills: " + esc(tr.as.map((id) => D.DATA.skills[id] || "#" + id).join(", ")) : ""}.</span>
         ${cm().style !== best[0] ? `<button type="button" class="btn ghost small" data-tier-style="${best[0]}">Use her best style: ${esc(best[1])}</button>` : ""}
         ${weak ? `<span class="mini warn">Her aptitude for this race is below A, so she'll race at a penalty.</span>` : ""}`;
     }
