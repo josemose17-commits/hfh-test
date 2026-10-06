@@ -33,6 +33,7 @@
       gl: blankGl(),
       facLevels: {},
       db: k.db || null,
+      cm: k.cm || null,
       turn: 1,
       energy: 100,
       mood: 2,
@@ -77,6 +78,16 @@
   }
 
   let state = load();
+
+  // ---- Cards you own: { card id: limit break }, kept apart from careers ----
+  const OWN_KEY = "uma-owned-v1";
+  let owned = {};
+  try { owned = JSON.parse(localStorage.getItem(OWN_KEY)) || {}; } catch (e) { owned = {}; }
+  function saveOwned() { try { localStorage.setItem(OWN_KEY, JSON.stringify(owned)); } catch (e) { /* ignore */ } }
+  const ownedLb = (id) => (owned[id] != null ? +owned[id] : null);
+  const ownedIds = () => Object.keys(owned).map(Number).filter((id) => D && D.card(id));
+  const ownedCode = () => D.encodeOwned(owned);
+  const readOwnedCode = (text) => D.decodeOwned(text);
   let rec = null;
   let openRow = null;
   let resetArmed = null;
@@ -142,6 +153,7 @@
               <div class="row-wrap">
                 <label class="field grow"><span>Trainee</span><input id="traineeInput" list="traineeList" placeholder="Type a name, e.g. Special Week" autocomplete="off"></label>
                 <label class="chip-toggle"><input type="checkbox" id="globalOnly"> Global only</label>
+                <label class="chip-toggle"><input type="checkbox" id="ownedOnly"> Cards I own</label>
               </div>
               <div id="traineeInfo" class="trainee-info"></div>
               <div class="slots" id="slots"></div>
@@ -149,7 +161,7 @@
               <p class="mini">Bonds start at each card's initial value. Pressing Done adds 7 for every card you trained with, plus about 5 for a card that had a hint (!). Card events also raise bond: tap <b>+5</b> or <b>+10</b> when one happens, or tap the gauge color the game shows (orange = 80+, friendship unlocked). For Friend and Group cards like Light Hello, tick <b>Outings unlocked</b> once the game offers outings with her and the coach will weigh them against training.</p>
             </div>
           </details>
-          <datalist id="traineeList"></datalist><datalist id="cardList"></datalist>
+          <datalist id="traineeList"></datalist><datalist id="cardList"></datalist><datalist id="cardListAll"></datalist>
 
           <div class="panel status">
             <div class="row2">
@@ -203,11 +215,13 @@
         <button type="button" role="tab" data-tab="log">Career log</button>
         <button type="button" role="tab" data-tab="guide">Scenario guide</button>
         <button type="button" role="tab" data-tab="all">All scenarios</button>
+        <button type="button" role="tab" data-tab="cm" id="tabCM">CM &amp; decks</button>
+        <button type="button" role="tab" data-tab="tiers" id="tabTiers">Tier list</button>
         <button type="button" role="tab" data-tab="cards" id="tabCards">Support cards</button>
         <button type="button" role="tab" data-tab="trainees" id="tabTrainees">Trainees</button>
       </nav>
       <section id="tabBody" class="tab-body"></section>
-      <footer class="foot">Scenario notes are compiled from JP and Global guides as of October 2026 (Global after the July 2026 rebalance). Turns marked "approx." can shift, so the in-game goal list always wins. Scores are estimates: 100 means a typical training for this point in the career. Card and trainee data from <a href="https://gametora.com/umamusume" target="_blank" rel="noopener">GameTora</a>${HAS_DATA ? " (built " + D.DATA.meta.built + ")" : ""}. Fan-made tool, not affiliated with Cygames.</footer>
+      <footer class="foot">Scenario notes are compiled from JP and Global guides as of October 2026 (Global after the July 2026 rebalance). Turns marked "approx." can shift, so the in-game goal list always wins. Scores are estimates: 100 means a typical training for this point in the career. Card, trainee and CM data from <a href="https://gametora.com/umamusume" target="_blank" rel="noopener">GameTora</a>${HAS_DATA ? " (built " + D.DATA.meta.built + ")" : ""}. Skill length gains from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>. Fan-made tool, not affiliated with Cygames.</footer>
       <div class="dock" id="dock"><div class="dock-text" id="dockText"></div><button type="button" class="btn" id="dockDone">Done ▶</button></div>
     `;
 
@@ -323,6 +337,12 @@
 
     if (HAS_DATA) {
       $("#globalOnly").addEventListener("change", (e) => { state.deck.globalOnly = e.target.checked; fillLists(); commit(); });
+      $("#ownedOnly").addEventListener("change", (e) => {
+        state.deck.ownedOnly = e.target.checked;
+        fillLists();
+        commit();
+        if (e.target.checked && !ownedIds().length) flash("You haven't marked any cards as owned yet. Do it in the Support cards tab.");
+      });
       $("#traineeInput").addEventListener("change", (e) => {
         const v = e.target.value.trim();
         const t = traineeByLabel.get(v);
@@ -343,7 +363,7 @@
           const c = cardByLabel.get(v);
           const cur = state.deck.slots[i];
           if (c && cur && cur.id === c.id) return;
-          if (c) { state.deck.slots[i] = { id: c.id, lb: 4, bond: null }; commit(true); }
+          if (c) { state.deck.slots[i] = { id: c.id, lb: ownedLb(c.id) != null ? ownedLb(c.id) : 4, bond: null }; commit(true); }
           else if (!v) { clearSlot(i); }
           else flash("No card matches that name. Pick one from the list.");
         }
@@ -394,6 +414,8 @@
     } else {
       $("#deckPanel").hidden = true;
       $("#tabCards").hidden = true;
+      $("#tabCM").hidden = true;
+      $("#tabTiers").hidden = true;
       $("#tabTrainees").hidden = true;
     }
 
@@ -431,6 +453,37 @@
       const t = e.target.closest("[data-goto]"); if (t) { setTurn(+t.dataset.goto); window.scrollTo({ top: 0, behavior: "smooth" }); }
       const s = e.target.closest("[data-pick]"); if (s) { sel.value = s.dataset.pick; sel.dispatchEvent(new Event("change")); state.tab = "guide"; save(); renderTab(); }
       if (e.target.closest("[data-undo]")) undoTurn();
+      if (e.target.closest("#ownAddBtn")) {
+        const c = cardByLabel.get($("#ownAddName").value.trim());
+        if (!c) { flash("Pick a card from the list first."); return; }
+        setOwned(c.id, $("#ownAddLb").value);
+        $("#ownAddName").value = "";
+        flash(c.n + " [" + c.t + "] saved as LB" + owned[c.id]);
+        renderDbList();
+        $("#ownAddName").focus();
+        return;
+      }
+      if (e.target.closest("#ownExport")) {
+        const code = ownedCode();
+        const box = $("#ownCodeOut");
+        box.hidden = false;
+        box.value = code;
+        box.select();
+        try { navigator.clipboard.writeText(code).then(() => flash("Backup code copied"), () => flash("Select the code and copy it")); } catch (err) { flash("Select the code and copy it"); }
+        return;
+      }
+      if (e.target.closest("#ownImport")) {
+        const got = readOwnedCode($("#ownImportCode").value);
+        if (!got) { flash("That isn't a backup code. It starts with UMA1:"); return; }
+        owned = got;
+        saveOwned();
+        flash("Restored " + Object.keys(got).length + " cards");
+        renderTab();
+        fillLists();
+        return;
+      }
+      if (cmClick(e)) return;
+      if (tierClick(e)) return;
       const add = e.target.closest("[data-add-card]");
       if (add) { addToDeck(+add.dataset.addCard); return; }
       const use = e.target.closest("[data-use-trainee]");
@@ -441,6 +494,15 @@
       if (row) { const id = +row.dataset.dbRow; db().open = db().open === id ? null : id; renderDbList(); }
     });
     $("#tabBody").addEventListener("input", (e) => {
+      if (e.target.dataset.own != null) {
+        const id = +e.target.dataset.own;
+        setOwned(id, e.target.value);
+        const row = e.target.closest(".cardrow");
+        if (row) row.classList.toggle("owned", e.target.value !== "");
+        return;
+      }
+      if (e.target.dataset.cm != null) { cmInput(e.target); return; }
+      if (e.target.dataset.tier != null) { tierInput(e.target); return; }
       const k = e.target.dataset.db; if (!k) return;
       const d = db();
       d[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -714,8 +776,10 @@
   function fillLists() {
     if (!HAS_DATA) return;
     const g = state.deck.globalOnly;
-    const cards = D.DATA.supports.filter((c) => !g || D.onGlobal(c, TODAY)).sort((a, b) => b.r - a.r || a.n.localeCompare(b.n));
+    const own = state.deck.ownedOnly && ownedIds().length;
+    const cards = D.DATA.supports.filter((c) => (!g || D.onGlobal(c, TODAY)) && (!own || owned[c.id] != null)).sort((a, b) => b.r - a.r || a.n.localeCompare(b.n));
     $("#cardList").innerHTML = cards.map((c) => `<option value="${esc(D.label(c))}"></option>`).join("");
+    $("#cardListAll").innerHTML = D.DATA.supports.filter((c) => !g || D.onGlobal(c, TODAY)).sort((a, b) => b.r - a.r || a.n.localeCompare(b.n)).map((c) => `<option value="${esc(D.label(c))}"></option>`).join("");
     const ts = D.DATA.trainees.filter((t) => !g || D.onGlobal(t, TODAY)).sort((a, b) => a.n.localeCompare(b.n));
     $("#traineeList").innerHTML = ts.map((t) => `<option value="${esc(traineeLabel(t))}"></option>`).join("");
   }
@@ -745,6 +809,7 @@
   function renderDeckInner() {
     const dk = state.deck;
     $("#globalOnly").checked = !!dk.globalOnly;
+    $("#ownedOnly").checked = !!dk.ownedOnly;
     const t = dk.trainee ? D.trainee(dk.trainee) : null;
     $("#traineeInput").value = t ? traineeLabel(t) : "";
     if (t) {
@@ -774,6 +839,7 @@
           <span class="mini">Event</span>
           <button type="button" class="btn ghost small" data-bondadd="${i}" data-v="5">+5</button>
           <button type="button" class="btn ghost small" data-bondadd="${i}" data-v="10">+10</button>
+          <span class="mini" title="Total bond from this card's events in a career${D.eventRewards(c).known ? "" : " (estimate: this card isn't in the event table yet)"}">Events: +${D.eventRewards(c).bond} bond total${D.eventRewards(c).known ? "" : " (est.)"}</span>
         </div>
         ${c.ty === "friend" || c.ty === "group" ? `<div class="slot-dates">
           <label class="chip-toggle small"><input type="checkbox" data-date-unlock="${i}" ${sl.dates && sl.dates.unlocked ? "checked" : ""}> Outings unlocked</label>
@@ -799,28 +865,31 @@
   function addToDeck(id) {
     const i = state.deck.slots.findIndex((x) => !x);
     if (i < 0) { flash("Your deck is full. Remove a card first."); return; }
-    state.deck.slots[i] = { id, lb: 4, bond: null };
+    const lb = ownedLb(id) != null ? ownedLb(id) : 4;
+    state.deck.slots[i] = { id, lb, bond: null };
     commit(true);
-    flash(D.card(id).n + " added to slot " + (i + 1) + " (LB4; change it in Trainee and deck)");
+    flash(D.card(id).n + " added to slot " + (i + 1) + " (LB" + lb + "; change it in Trainee and deck)");
   }
 
   // ---- Support card and trainee browser ----
   function db() {
     if (!state.db) state.db = { q: "", type: "", rarity: "", lb: "4", sort: "1", global: true, open: null, limit: 60, tq: "", tsort: "name" };
+    if (state.db.own == null) state.db.own = "";
     return state.db;
   }
 
-  const SORTS = [["1", "Friendship"], ["8", "Training effectiveness"], ["2", "Mood effect"], ["19", "Specialty priority"], ["15", "Race bonus"], ["14", "Initial bond"], ["30", "Skill point bonus"], ["stat", "Stat bonuses"], ["new", "Newest"]];
+  const SORTS = [["1", "Friendship"], ["8", "Training effectiveness"], ["2", "Mood effect"], ["19", "Specialty priority"], ["15", "Race bonus"], ["14", "Initial bond"], ["30", "Skill point bonus"], ["stat", "Stat bonuses"], ["evbond", "Event bond"], ["new", "Newest"]];
 
   function dbControls() {
     const d = db();
     const opt = (pairs, v) => pairs.map(([k, l]) => `<option value="${k}" ${String(v) === k ? "selected" : ""}>${l}</option>`).join("");
     if (state.tab === "cards") {
-      return `<div class="db-controls">
+      return `${collectionPanel()}<div class="db-controls">
         <label class="field grow"><span>Search</span><input data-db="q" value="${esc(d.q)}" placeholder="Name or title" autocomplete="off"></label>
         <label class="field"><span>Type</span><select data-db="type">${opt([["", "All"], ["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"]], d.type)}</select></label>
         <label class="field"><span>Rarity</span><select data-db="rarity">${opt([["", "All"], ["3", "SSR"], ["2", "SR"], ["1", "R"]], d.rarity)}</select></label>
-        <label class="field"><span>Limit break</span><select data-db="lb">${opt([["0", "LB0"], ["1", "LB1"], ["2", "LB2"], ["3", "LB3"], ["4", "LB4 (max)"]], d.lb)}</select></label>
+        <label class="field"><span>Collection</span><select data-db="own">${opt([["", "All cards"], ["yes", "Cards I own"], ["no", "Cards I don't own"]], d.own)}</select></label>
+        <label class="field"><span>Limit break</span><select data-db="lb">${opt([["0", "LB0"], ["1", "LB1"], ["2", "LB2"], ["3", "LB3"], ["4", "LB4 (max)"], ["own", "Mine (owned LB)"]], d.lb)}</select></label>
         <label class="field"><span>Sort by</span><select data-db="sort">${opt(SORTS, d.sort)}</select></label>
         <label class="chip-toggle"><input type="checkbox" data-db="global" ${d.global ? "checked" : ""}> Global only</label>
       </div><div id="dbList"></div>`;
@@ -840,17 +909,19 @@
       const q = d.q.trim().toLowerCase();
       let list = D.DATA.supports.filter((c) =>
         (!d.global || D.onGlobal(c, TODAY)) && (!d.type || c.ty === d.type) && (!d.rarity || c.r === +d.rarity) &&
+        (!d.own || (d.own === "yes") === (owned[c.id] != null)) &&
         (!q || (c.n + " " + c.t).toLowerCase().indexOf(q) !== -1));
-      const lvOf = (c) => D.levelFor(c, +d.lb);
+      const lvOf = (c) => D.levelFor(c, d.lb === "own" ? (ownedLb(c.id) != null ? ownedLb(c.id) : 4) : +d.lb);
       const key = (c) => {
         const fx = D.baseEffects(c, lvOf(c));
         if (d.sort === "stat") return [3, 4, 5, 6, 7, 41].reduce((a, id) => a + (fx[id] || 0), 0);
         if (d.sort === "new") return (d.global ? c.en : c.jp) || "";
+        if (d.sort === "evbond") return D.eventRewards(c).bond;
         return fx[+d.sort] || 0;
       };
       list = list.map((c) => [c, key(c)]).sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : b[0].r - a[0].r)).map((x) => x[0]);
       const shown = list.slice(0, d.limit);
-      el.innerHTML = `<p class="mini">${list.length} card${list.length === 1 ? "" : "s"}. Values at ${["LB0", "LB1", "LB2", "LB3", "LB4"][+d.lb]}. Tap a card for every limit break, its skills and its unique effect.</p>
+      el.innerHTML = `<p class="mini">${list.length} card${list.length === 1 ? "" : "s"}. Values at ${d.lb === "own" ? "your limit break (LB4 for cards you don't own)" : ["LB0", "LB1", "LB2", "LB3", "LB4"][+d.lb]}. Tap a card for every limit break, its skills and its unique effect.</p>
         <div class="cardgrid">${shown.map((c) => cardRow(c, lvOf(c), d.open === c.id)).join("")}</div>
         ${list.length > shown.length ? `<button type="button" class="btn ghost" data-more="1">Show more (${list.length - shown.length} left)</button>` : ""}`;
     } else {
@@ -866,6 +937,51 @@
     }
   }
 
+  function ownedSummary() {
+    const ids = ownedIds();
+    if (!ids.length) return "No cards marked yet";
+    const ssr = ids.filter((id) => D.card(id).r === 3).length;
+    const mlb = ids.filter((id) => owned[id] === 4).length;
+    return ids.length + " owned · " + ssr + " SSR · " + mlb + " at max limit break";
+  }
+
+  function collectionPanel() {
+    return `<details class="panel collection" id="collPanel" ${ownedIds().length ? "" : "open"}>
+      <summary><h2>My cards</h2><span class="mini" id="collCount">${ownedSummary()}</span></summary>
+      <div class="coll-body">
+        <p class="mini">Mark the cards you own and their limit break. The deck optimizer uses them, and picking a card for your deck starts it at your limit break. Saved in this browser only, so keep a backup code if you switch devices.</p>
+        <div class="row-wrap">
+          <label class="field grow"><span>Quick add</span><input id="ownAddName" list="cardListAll" placeholder="Type a card name" autocomplete="off"></label>
+          <label class="field"><span>Limit break</span><select id="ownAddLb">${[0, 1, 2, 3, 4].map((lb) => `<option value="${lb}" ${lb === 4 ? "selected" : ""}>LB${lb}</option>`).join("")}</select></label>
+          <button type="button" class="btn small" id="ownAddBtn">Add</button>
+        </div>
+        <div class="row-wrap">
+          <button type="button" class="btn ghost small" id="ownExport">Copy backup code</button>
+          <label class="field grow"><span>Restore from a backup code</span><input id="ownImportCode" placeholder="UMA1:..." autocomplete="off"></label>
+          <button type="button" class="btn ghost small" id="ownImport">Restore</button>
+        </div>
+        <textarea id="ownCodeOut" class="codebox" readonly hidden aria-label="Backup code"></textarea>
+      </div>
+    </details>`;
+  }
+
+  function setOwned(id, lb) {
+    if (lb == null || lb === "") delete owned[id]; else owned[id] = +lb;
+    saveOwned();
+    const el = $("#collCount");
+    if (el) el.textContent = ownedSummary();
+    if (state.deck.ownedOnly) fillLists();
+  }
+
+  function eventText(c) {
+    const ev = D.eventRewards(c);
+    const parts = E.STATS.map((st, i) => (ev.stats[i] ? E.STAT_LABELS[st] + " " + (ev.stats[i] > 0 ? "+" : "") + ev.stats[i] : "")).filter(Boolean);
+    if (ev.sp) parts.push((ev.sp > 0 ? "+" : "") + ev.sp + " SP");
+    if (ev.energy) parts.push((ev.energy > 0 ? "+" : "") + ev.energy + " energy");
+    parts.push("<b>bond +" + ev.bond + "</b>");
+    return parts.join(", ") + (ev.known ? "" : " (estimate: not in the event table yet)");
+  }
+
   function cardRow(c, level, open) {
     const inDeck = state.deck.slots.some((sl) => sl && sl.id === c.id);
     let detail = "";
@@ -878,12 +994,14 @@
       detail = `<div class="card-detail">
         <div class="table-wrap"><table class="lbtable"><thead><tr><th>Effect</th>${[0, 1, 2, 3, 4].map((lb) => `<th>LB${lb}<br><span class="mini">Lv${D.levelFor(c, lb)}</span></th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>
         ${uq}
+        <p class="mini"><b>Events over a career:</b> ${eventText(c)}</p>
         <p class="mini"><b>Hint skills:</b> ${sk(c.hs)}</p>
         <p class="mini"><b>Event skills:</b> ${sk(c.es)}</p>
         <p class="mini">Released JP ${esc(c.jp || "?")}${c.en ? ", Global " + esc(c.en) : ", not on Global yet"} · ${esc(c.src || "")}</p>
       </div>`;
     }
-    return `<div class="cardrow ty-${c.ty}${open ? " open" : ""}">
+    const own = ownedLb(c.id);
+    return `<div class="cardrow ty-${c.ty}${open ? " open" : ""}${own != null ? " owned" : ""}">
       <button type="button" class="cardrow-head" data-db-row="${c.id}" aria-expanded="${open}">
         <span class="tydot" aria-hidden="true"></span>
         <span class="cardname"><b>${esc(c.n)}</b> <span class="mini">${esc(c.t)}</span></span>
@@ -891,7 +1009,10 @@
       </button>
       <div class="slot-fx">${keyEffects(c, level)}</div>
       ${detail}
-      <button type="button" class="btn ghost small" data-add-card="${c.id}" ${inDeck ? "disabled" : ""}>${inDeck ? "In deck" : "Add to deck"}</button>
+      <div class="cardrow-actions">
+        <label class="own"><span>Owned</span><select data-own="${c.id}" aria-label="Do you own ${esc(c.n)}?"><option value="">No</option>${[0, 1, 2, 3, 4].map((lb) => `<option value="${lb}" ${own === lb ? "selected" : ""}>LB${lb}${lb === 4 ? " (max)" : ""}</option>`).join("")}</select></label>
+        <button type="button" class="btn ghost small" data-add-card="${c.id}" ${inDeck ? "disabled" : ""}>${inDeck ? "In deck" : "Add to deck"}</button>
+      </div>
     </div>`;
   }
 
@@ -1007,10 +1128,619 @@
     }).join("")}</ol>`;
   }
 
+  // ---- Champions Meeting / League of Heroes planner: presets, deck optimizer, skills ----
+  const P = window.UmaPresets;
+  const SV = window.UmaSkillValues;
+  const OPT = window.UmaOptimizer;
+  const ASSET_V = ((document.currentScript && document.currentScript.src.match(/v=([\w-]+)/)) || [])[1] || "1";
+  const STYLES = [["Nige", "Front"], ["Senkou", "Pace"], ["Sasi", "Late"], ["Oikomi", "End"]];
+  const STYLE_LABEL = Object.fromEntries(STYLES);
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const PASTE_KEY = "uma-skillpaste-v1";
+  let pasted = {};
+  try { pasted = JSON.parse(localStorage.getItem(PASTE_KEY)) || {}; } catch (e) { pasted = {}; }
+  const savePasted = () => { try { localStorage.setItem(PASTE_KEY, JSON.stringify(pasted)); } catch (e) { /* ignore */ } };
+  const svCache = {}; // preset id -> { style: [[id, median x100, mean x100]] }, or "loading" / "missing" / "error"
+  let optRun = null; // the search in progress: { worker, f }
+  let optResult = null; // last result, with the settings it was found for
+  let wish = null; // cards worth getting for optResult
+  let skillLimit = 60;
+
+  const presetById = (id) => (P ? P.list.find((p) => p.id === id) : null);
+  const fmtDate = (s) => { const [y, m, d] = s.split("-").map(Number); return MONTHS[m - 1] + " " + d + ", " + y; };
+  const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+
+  function defaultPreset() {
+    const next = P.list.filter((p) => p.kind === "cm" && p.global.end >= TODAY);
+    return next[0] || P.list[P.list.length - 1];
+  }
+
+  // Running style the trainee is best at (Pace on ties), else Pace.
+  function defaultStyle() {
+    const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    if (!t) return "Senkou";
+    const rank = (g) => "GFEDCBAS".indexOf(g);
+    let best = 1;
+    [0, 1, 2, 3].forEach((i) => { if (rank(t.apt[6 + i]) > rank(t.apt[6 + best])) best = i; });
+    return STYLES[best][0];
+  }
+
+  function cm() {
+    if (!state.cm) state.cm = {};
+    const c = state.cm;
+    const defaults = { style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], sq: "", sfilter: "all", globalSkills: true };
+    Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
+    if (!presetById(c.preset)) c.preset = defaultPreset().id;
+    return c;
+  }
+
+  function presetStatus(p) {
+    const g = p.global;
+    if (g.end < TODAY) return ["ended", "Ended"];
+    if (g.start <= TODAY) return ["live", "Running now"];
+    const n = daysBetween(TODAY, g.start);
+    return ["soon", (g.est ? "About " : "") + (n === 1 ? "starts tomorrow" : "in " + n + " days")];
+  }
+
+  function presetLabel(p) {
+    return p.name + " · " + p.course.track + " " + p.course.distance + "m " + p.course.surface + " · " + (p.global.est ? "~" : "") + fmtDate(p.global.start);
+  }
+
+  function loadSkillValues(id) {
+    if (svCache[id]) return;
+    if (!SV || SV.ready.indexOf(id) === -1) { svCache[id] = "missing"; return; }
+    svCache[id] = "loading";
+    fetch("data/skillvalues/" + id + ".json?v=" + ASSET_V)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+      .then((j) => { svCache[id] = j; if (state.tab === "cm") renderCM(); if (state.tab === "tiers") renderTiers(); })
+      .catch(() => { svCache[id] = "error"; if (state.tab === "cm") renderCM(); });
+  }
+
+  const skillInfo = (id) => (SV && SV.skills[id]) || [D.DATA.skills[id] || "#" + id, D.skillCost(id) || 0, 1, 1];
+
+  // Skills ranked by median length gain for a preset and style. Your pasted Umalator results win.
+  function skillRows(pid, style) {
+    const mine = pasted[pid] && pasted[pid][style];
+    if (mine) {
+      return Object.entries(mine).map(([id, L]) => ({ id: +id, L, mean: null, mine: true })).sort((a, b) => b.L - a.L);
+    }
+    const data = svCache[pid];
+    if (!data || typeof data === "string" || !data[style]) return [];
+    return data[style].map(([id, med, mean]) => ({ id, L: med / 100, mean: mean / 100 }));
+  }
+
+  function skillMap(pid, style) {
+    const map = {};
+    const costs = {};
+    skillRows(pid, style).forEach((r) => { map[r.id] = r.L; costs[r.id] = skillInfo(r.id)[1]; });
+    return { map, costs };
+  }
+
+  // Which cards can give each skill (hint or event), among the cards the optimizer may use.
+  function skillSources(c) {
+    const out = {};
+    const ids = c.ownedOnly && ownedIds().length ? ownedIds() : D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).map((x) => x.id);
+    ids.forEach((id) => {
+      const card = D.card(id);
+      (card.hs || []).concat(card.es || []).forEach((sk) => { (out[sk] = out[sk] || []).push(card); });
+    });
+    return out;
+  }
+
+  function optPool(c) {
+    if (c.ownedOnly && ownedIds().length) return ownedIds().map((id) => ({ id, lb: owned[id] }));
+    return D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r >= 2).map((x) => ({ id: x.id, lb: 4 }));
+  }
+  const borrowPool = () => D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r === 3).map((x) => ({ id: x.id, lb: 4 }));
+
+  function optKey() {
+    const c = cm();
+    return [c.preset, c.style, state.scenario, state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.runs, c.locked.join("."), ownedCode()].join("|");
+  }
+
+  function startJob(msg, done) {
+    if (optRun && optRun.worker) optRun.worker.terminate();
+    optRun = { f: 0 };
+    const finish = (m) => {
+      optRun = null;
+      if (m.type === "error") flash("The optimizer hit an error: " + m.message);
+      else done(m);
+      if (state.tab === "cm") renderCM();
+    };
+    // Same work on the page itself, for browsers that can't start the worker (e.g. opened from a file).
+    const inline = () => setTimeout(() => {
+      try { finish(OPT.runJob(msg, () => {})); } catch (err) { finish({ type: "error", message: String(err.message || err) }); }
+    }, 30);
+    let w = null;
+    try { w = new Worker("optimizer.worker.js?v=" + ASSET_V); } catch (err) { w = null; }
+    if (!w) { inline(); return; }
+    optRun.worker = w;
+    w.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === "progress") {
+        optRun.f = m.f;
+        const bar = $("#cmProg");
+        if (bar) bar.style.width = Math.round(m.f * 100) + "%";
+        return;
+      }
+      w.terminate();
+      finish(m);
+    };
+    w.onerror = (err) => { err.preventDefault(); w.terminate(); optRun = { f: 0 }; inline(); };
+    w.postMessage(msg);
+  }
+
+  function optOpts(c, p) {
+    const sv = skillMap(p.id, c.style);
+    return {
+      scenario: state.scenario, build: p.build, trainee: state.deck.trainee, skills: sv.map, costs: sv.costs,
+      skillWeight: +c.skillW, runs: +c.runs, borrow: c.borrow, locked: c.locked.slice(), seed: 20261006
+    };
+  }
+
+  function runOptimizer() {
+    const c = cm();
+    const p = presetById(c.preset);
+    const pool = optPool(c);
+    if (pool.length < 6) { flash("The optimizer needs at least 6 cards. Mark more owned cards, or untick “Only cards I own”."); return; }
+    const meta = { key: optKey(), preset: p.id, style: c.style, scenario: state.scenario, skillsUsed: Object.keys(skillMap(p.id, c.style).map).length };
+    wish = null;
+    startJob({ job: "optimize", opts: optOpts(c, p), pool, borrowPool: c.borrow ? borrowPool() : [] }, (res) => { optResult = Object.assign(res, meta); });
+    renderCM();
+  }
+
+  function runWishlist() {
+    if (!optResult) return;
+    const c = cm();
+    const p = presetById(optResult.preset);
+    // Try each candidate in place of the deck's two weakest cards you own.
+    const order = optResult.cards.map((x, i) => [i, optResult.contrib[i], x]).filter((x) => !x[2].borrowed && c.locked.indexOf(x[2].id) === -1).sort((a, b) => a[1] - b[1]);
+    const swapSlots = order.slice(0, 2).map((x) => x[0]);
+    const inDeck = new Set(optResult.cards.map((x) => x.id));
+    const candidates = D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r >= 2 && (owned[x.id] == null || owned[x.id] < 4) && !(inDeck.has(x.id) && !c.ownedOnly))
+      .map((x) => ({ id: x.id, lb: 4 }));
+    wish = "loading";
+    startJob({ job: "wishlist", opts: optOpts(c, p), deck: optResult.cards, candidates, swapSlots }, (res) => { wish = res.list; });
+    renderCM();
+  }
+
+  function renderCM() {
+    const body = $("#tabBody");
+    if (!P || !OPT) { body.innerHTML = `<div class="empty">The CM data didn't load. Refresh the page.</div>`; return; }
+    const c = cm();
+    const p = presetById(c.preset);
+    loadSkillValues(p.id);
+    body.innerHTML = `<div class="cm">${cmHeader(p, c)}${cmOptimizer(p, c)}${cmSkills(p, c)}</div>`;
+  }
+
+  function cmHeader(p, c) {
+    const groups = [
+      ["Now and next on Global", P.list.filter((x) => x.kind === "cm" && x.global.end >= TODAY && !x.global.est)],
+      ["Later Champions Meetings (Global dates estimated)", P.list.filter((x) => x.kind === "cm" && x.global.est)],
+      ["League of Heroes (JP so far, Global dates estimated)", P.list.filter((x) => x.kind === "loh")],
+      ["Past Global Champions Meetings", P.list.filter((x) => x.kind === "cm" && x.global.end < TODAY).reverse()]
+    ];
+    const opts = groups.filter((g) => g[1].length).map(([lab, xs]) => `<optgroup label="${esc(lab)}">${xs.map((x) => `<option value="${x.id}" ${x.id === p.id ? "selected" : ""}>${esc(presetLabel(x))}</option>`).join("")}</optgroup>`).join("");
+    const [stCls, stText] = presetStatus(p);
+    const s = p.stats;
+    return `<section class="panel cm-head">
+      <label class="field grow"><span>Champions Meeting or League of Heroes</span><select data-cm="preset">${opts}</select></label>
+      <div class="cm-title"><h2>${esc(p.name)}</h2>
+        <span class="chip">${p.kind === "loh" ? "League of Heroes " + p.no : "Champions Meeting #" + p.no}</span>
+        <span class="chip cm-${stCls}">${stText}</span></div>
+      <div class="cm-facts">
+        <div class="cm-course"><b>${esc(p.course.track)} ${p.course.distance}m</b> · ${p.course.surface} · ${p.course.turn === "Straight" ? "straight course" : p.course.turn + "-handed"}${p.course.layout ? " (" + p.course.layout + ")" : ""} · ${p.course.dist}</div>
+        <div>${esc(p.conditions)}</div>
+        <div>Global: <b>${p.global.est ? "about " : ""}${fmtDate(p.global.start)} – ${fmtDate(p.global.end)}</b>${p.global.est ? ' <span class="pill">estimate</span>' : ""} · JP: ${fmtDate(p.jp.start)}</div>
+        ${p.global.note ? `<div class="mini">${esc(p.global.note)}</div>` : p.global.est ? `<div class="mini">Global runs Champions Meetings in JP's order, lately about every 3 weeks, so this date is an estimate.</div>` : ""}
+      </div>
+      <div class="row-wrap">
+        <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup" aria-label="Running style">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-cm-style="${k}">${l}</button>`).join("")}</div></div>
+        <button type="button" class="btn ghost small" data-cm-build="${p.build}" ${state.build === p.build ? "disabled" : ""}>${state.build === p.build ? "Turn coach build: " + esc(E.BUILDS[p.build].label) : "Set the turn coach to " + esc(E.BUILDS[p.build].label)}</button>
+      </div>
+      <p class="mini">Skill values on this course were simulated with Speed ${s.speed}, Stamina ${s.stamina}, Power ${s.power}, Guts ${s.guts}, Wit ${s.wisdom}, S distance and A surface aptitude, Great mood.</p>
+    </section>`;
+  }
+
+  function cmOptimizer(p, c) {
+    const sc = scenario();
+    const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    const n = ownedIds().length;
+    const running = !!optRun;
+    const opt = (pairs, v) => pairs.map(([k, l]) => `<option value="${k}" ${String(v) === k ? "selected" : ""}>${l}</option>`).join("");
+    const nSkills = Object.keys(skillMap(p.id, c.style).map).length;
+    return `<section class="panel cm-opt">
+      <h3>Deck optimizer</h3>
+      <p class="mini">Plays simulated <b>${esc(sc.name)}</b> careers (change the scenario at the top) with each candidate deck, using your cards' real effects at your limit breaks, and values every skill the deck can hint by its median length gain here as a ${STYLE_LABEL[c.style]} runner. ${t ? "Trainee: <b>" + esc(t.n) + "</b>, growth bonuses included." : "Set your trainee under <b>Trainee and deck</b> to include her growth bonuses."}</p>
+      ${nSkills ? "" : `<p class="mini warn">No skill values for this race yet${svCache[p.id] === "loading" ? " (loading…)" : ""}, so skills won't count. Paste your own Umalator results below to add them.</p>`}
+      <div class="row-wrap">
+        <label class="chip-toggle"><input type="checkbox" data-cm="ownedOnly" ${c.ownedOnly ? "checked" : ""}> Only cards I own (${n})</label>
+        <label class="chip-toggle"><input type="checkbox" data-cm="borrow" ${c.borrow ? "checked" : ""}> Borrow 1 card from a friend</label>
+        <label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt([["0", "Not at all"], ["0.5", "A little"], ["1", "Normal"], ["1.5", "A lot"]], c.skillW)}</select></label>
+        <label class="field"><span>Search</span><select data-cm="runs">${opt([["6", "Quick"], ["10", "Normal"], ["20", "Thorough (slow)"]], c.runs)}</select></label>
+      </div>
+      <div class="row-wrap">
+        <label class="field grow"><span>Must include (optional)</span><input id="cmLock" list="cardListAll" placeholder="A card that must be in the deck" autocomplete="off"></label>
+        <button type="button" class="btn ghost small" id="cmLockAdd">Add</button>
+      </div>
+      ${c.locked.length ? `<div class="row-wrap">${c.locked.map((id) => `<span class="chip lockchip">${esc(D.card(id).n)} <button type="button" class="linkish" data-cm-unlock="${id}" aria-label="Remove ${esc(D.card(id).n)}">✕</button></span>`).join("")}</div>` : ""}
+      ${c.ownedOnly && n < 6 ? `<p class="mini warn">You've marked ${n} owned card${n === 1 ? "" : "s"}. Mark yours in the <button type="button" class="linkish" data-goto-tab="cards">Support cards</button> tab, or untick “Only cards I own” to search every Global SSR and SR at max limit break.</p>` : ""}
+      <div class="row-wrap run-row">
+        <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? "Searching…" : "Find my best deck"}</button>
+        <div class="progress" ${running ? "" : "hidden"}><i id="cmProg" style="width:${Math.round(((optRun && optRun.f) || 0) * 100)}%"></i></div>
+      </div>
+      <div id="cmOut">${optResult ? optResultHTML(optResult, c) : ""}</div>
+    </section>`;
+  }
+
+  function optResultHTML(r, c) {
+    const p = presetById(r.preset);
+    const total = Math.max(1, r.result.value);
+    const pct = (x) => (x >= 0 ? "+" : "−") + Math.abs(Math.round(x * 1000) / 10) + "%";
+    const cards = r.cards.map((x, i) => Object.assign({ card: D.card(x.id), add: r.contrib[i] }, x));
+    const stale = r.key !== optKey();
+    const sk = r.result.skills.filter((x) => x.surplus > 0 && x.p >= 0.15).slice(0, 10);
+    const w = wish;
+    return `<div class="opt-result">
+      <h4>Best deck for ${esc(p.name)} · ${STYLE_LABEL[r.style]} · ${esc((SCENARIOS.find((x) => x.id === r.scenario) || {}).name || "")}</h4>
+      ${stale ? `<p class="mini warn">Settings or cards changed since this search. Press <b>Find my best deck</b> again to update it.</p>` : ""}
+      <div class="opt-cards">${cards.map((x) => `<div class="opt-card ty-${x.card.ty}">
+        <span class="tydot" aria-hidden="true"></span>
+        <div class="opt-name"><b>${esc(x.card.n)}</b> <span class="mini">${esc(x.card.t)}</span>
+          <div class="mini">${D.RARITY[x.card.r]} ${D.typeLabel(x.card.ty)} · LB${x.lb}${x.borrowed ? ' · <b>borrow this</b>' : ""}${c.locked.indexOf(x.id) !== -1 ? " · locked" : ""}</div></div>
+        <div class="num" title="How much the deck loses without this card">${pct(x.add / total)}</div>
+      </div>`).join("")}</div>
+      <p class="mini">Expected after a career: ${E.STATS.map((s, i) => `${E.STAT_LABELS[s]} <b>${r.result.stats[i]}</b>`).join(" · ")} · <b>${r.result.sp}</b> SP · about <b>${Math.round(r.result.rainbows)}</b> friendship trainings · race bonus ${r.result.raceBonus}%. The percentage on each card is how much the deck's score drops without it.</p>
+      ${sk.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${sk.map((x) => `<span class="skillpill">${esc(skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
+      <div class="row-wrap">
+        <button type="button" class="btn" data-use-opt="1">Use this deck in the coach</button>
+        <button type="button" class="btn ghost" id="cmWish" ${w === "loading" ? "disabled" : ""}>${w === "loading" ? "Checking cards…" : "Which cards would improve it?"}</button>
+      </div>
+      ${r.runnersUp.length ? `<details class="alts"><summary>Close alternatives</summary><ul>${r.runnersUp.map((a) => `<li>Swap <b>${esc(D.card(a.out).n)}</b> for <b>${esc(D.card(a.in).n)}</b> <span class="mini">[${esc(D.card(a.in).t)}] LB${a.inLb}</span>: ${pct(a.value / total - 1)}</li>`).join("")}</ul></details>` : ""}
+      ${Array.isArray(w) ? (w.length ? `<div class="wish"><h4>Cards worth getting</h4><ol>${w.map((x) => {
+        const cd = D.card(x.id);
+        const have = owned[x.id] != null;
+        return `<li><b>${esc(cd.n)}</b> <span class="mini">[${esc(cd.t)}] ${D.RARITY[cd.r]} ${D.typeLabel(cd.ty)}</span> ${have ? "from LB" + owned[x.id] + " to LB4" : "at LB4"}: <b>${pct(x.share)}</b>, replacing ${esc(D.card(x.replaces).n)}</li>`;
+      }).join("")}</ol><p class="mini">Each card is tried in place of the deck's two weakest cards you own.</p></div>` : `<p class="mini">No single card at LB4 beats your current picks for this race.</p>`) : ""}
+    </div>`;
+  }
+
+  function cmSkills(p, c) {
+    const status = svCache[p.id];
+    const mine = pasted[p.id] && pasted[p.id][c.style];
+    let rows = skillRows(p.id, c.style);
+    const src = skillSources(c);
+    const deckIds = new Set(state.deck.slots.filter(Boolean).map((sl) => sl.id));
+    const q = (c.sq || "").trim().toLowerCase();
+    rows = rows.filter((r) => {
+      const info = skillInfo(r.id);
+      if (c.globalSkills && !info[3]) return false;
+      if (q && info[0].toLowerCase().indexOf(q) === -1) return false;
+      if (c.sfilter === "cards" && !src[r.id]) return false;
+      if (c.sfilter === "deck" && !(src[r.id] || []).some((x) => deckIds.has(x.id)) && !D.DATA.supports.some((x) => deckIds.has(x.id) && (x.hs || []).concat(x.es || []).indexOf(r.id) !== -1)) return false;
+      return true;
+    });
+    const shown = rows.slice(0, skillLimit);
+    const opt = (pairs, v) => pairs.map(([k, l]) => `<option value="${k}" ${String(v) === k ? "selected" : ""}>${l}</option>`).join("");
+    const empty = status === "loading" ? "Loading skill values…"
+      : status === "missing" && !mine ? "Skill values for this race haven't been simulated yet. Paste your own from the Umalator below."
+      : status === "error" && !mine ? "Couldn't load the skill values. Check your connection and reopen this tab."
+      : "No skills match.";
+    return `<section class="panel cm-skills">
+      <h3>Skills for this race · ${STYLE_LABEL[c.style]}</h3>
+      <p class="mini">${mine ? "Using <b>your pasted Umalator results</b> for this race and style." : `Median length gain (L = one horse length) of each skill on this course, from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>: the same skill chart, run here for every skill.`} Gold skill costs don't include the white skill they need. L per 100 SP shows which skills are worth their points.</p>
+      <div class="db-controls">
+        <label class="field grow"><span>Search</span><input data-cm="sq" value="${esc(c.sq || "")}" placeholder="Skill name" autocomplete="off"></label>
+        <label class="field"><span>Show</span><select data-cm="sfilter">${opt([["all", "All skills"], ["cards", c.ownedOnly && ownedIds().length ? "Skills my cards can give" : "Skills Global cards can give"], ["deck", "Skills my coach deck can give"]], c.sfilter)}</select></label>
+        <label class="chip-toggle"><input type="checkbox" data-cm="globalSkills" ${c.globalSkills ? "checked" : ""}> On Global only</label>
+      </div>
+      <div id="cmSkillTable">${shown.length ? `<div class="table-wrap"><table class="skills"><thead><tr><th>Skill</th><th class="num">Median</th>${mine ? "" : '<th class="num opt-col">Mean</th>'}<th class="num">SP</th><th class="num">L / 100 SP</th><th class="opt-col">From cards</th></tr></thead><tbody>
+        ${shown.map((r) => {
+          const info = skillInfo(r.id);
+          const from = src[r.id] || [];
+          const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
+          return `<tr class="sk-${kind}"><td><b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${info[1] || "–"}</td><td class="num">${info[1] ? (r.L / info[1] * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+        }).join("")}</tbody></table></div>
+        ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
+      <details class="paste">
+        <summary>Use your own Umalator results</summary>
+        <p class="mini">In the Umalator's <b>Skill chart</b> tab, set up your own uma for this race and run it, then select the whole results table, copy it and paste it here. The coach reads each skill's median and uses it for this race and running style (${STYLE_LABEL[c.style]}).</p>
+        <textarea id="cmPaste" rows="5" placeholder="Paste the Skill chart table here"></textarea>
+        <div class="row-wrap"><button type="button" class="btn small" id="cmPasteBtn">Use these values</button>${mine ? '<button type="button" class="btn ghost small" id="cmPasteReset">Go back to the built-in values</button>' : ""}</div>
+      </details>
+    </section>`;
+  }
+
+  function parseUmalator(text) {
+    const names = {};
+    Object.entries(D.DATA.skills).forEach(([id, n]) => { names[id] = n; });
+    if (SV) Object.entries(SV.skills).forEach(([id, v]) => { names[id] = v[0]; });
+    return OPT.parseChart(text, names);
+  }
+
+  function cmInput(el) {
+    const c = cm();
+    const k = el.dataset.cm;
+    const v = el.type === "checkbox" ? el.checked : el.value;
+    c[k] = v;
+    save();
+    if (k === "sq") {
+      skillLimit = 60;
+      const box = $("#cmSkillTable");
+      const tmp = document.createElement("div");
+      tmp.innerHTML = cmSkills(presetById(c.preset), c);
+      const fresh = tmp.querySelector("#cmSkillTable");
+      if (box && fresh) box.innerHTML = fresh.innerHTML;
+      return;
+    }
+    if (k === "preset") skillLimit = 60;
+    renderCM();
+  }
+
+  function cmClick(e) {
+    const t = e.target;
+    const c = state.tab === "cm" ? cm() : null;
+    if (!c) return false;
+    const style = t.closest("[data-cm-style]");
+    if (style) { c.style = style.dataset.cmStyle; skillLimit = 60; save(); renderCM(); return true; }
+    const build = t.closest("[data-cm-build]");
+    if (build) { state.build = build.dataset.cmBuild; commit(true); flash("Turn coach build set to " + E.BUILDS[state.build].label); return true; }
+    if (t.closest("#cmRun")) { runOptimizer(); return true; }
+    if (t.closest("#cmWish")) { runWishlist(); return true; }
+    if (t.closest("[data-goto-tab]")) { state.tab = t.closest("[data-goto-tab]").dataset.gotoTab; save(); renderTab(); return true; }
+    if (t.closest("#cmLockAdd")) {
+      const card = cardByLabel.get($("#cmLock").value.trim());
+      if (!card) { flash("Pick a card from the list first."); return true; }
+      if (c.locked.indexOf(card.id) === -1) c.locked.push(card.id);
+      if (c.ownedOnly && owned[card.id] == null) flash(card.n + " isn't marked as owned, so it can only come in as the borrowed card.");
+      save();
+      renderCM();
+      return true;
+    }
+    const un = t.closest("[data-cm-unlock]");
+    if (un) { c.locked = c.locked.filter((id) => id !== +un.dataset.cmUnlock); save(); renderCM(); return true; }
+    if (t.closest("[data-use-opt]") && optResult) {
+      state.deck.slots = optResult.cards.map((x) => ({ id: x.id, lb: x.lb, bond: null }));
+      state.facilities.forEach((f) => { f.members = []; f.hints = []; });
+      commit(true);
+      flash("Deck set in Trainee and deck" + (optResult.cards.some((x) => x.borrowed) ? ". Remember to borrow the marked card." : ""));
+      return true;
+    }
+    if (t.closest("[data-cm-more]")) { skillLimit += 60; renderCM(); return true; }
+    if (t.closest("#cmPasteBtn")) {
+      const r = parseUmalator($("#cmPaste").value);
+      const n = Object.keys(r.values).length;
+      if (!n) { flash("Couldn't find any skills with values like “1.23 L” in that text."); return true; }
+      pasted[c.preset] = pasted[c.preset] || {};
+      pasted[c.preset][c.style] = r.values;
+      savePasted();
+      flash("Read " + n + " skills" + (r.unknown ? ", " + r.unknown + " names not recognized" : ""));
+      renderCM();
+      return true;
+    }
+    if (t.closest("#cmPasteReset")) {
+      if (pasted[c.preset]) delete pasted[c.preset][c.style];
+      savePasted();
+      renderCM();
+      return true;
+    }
+    return false;
+  }
+
+  // ---- Tier list: rank cards by what they add to your deck so far ----
+  const TIER_NAMES = ["S", "A", "B", "C", "D", "E", "F"];
+  const TIER_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"], ["", "All types"]];
+  const TIER_SHOW = [
+    ["", "Nothing"], ["score", "Score"], ["skills", "Best skills (L)"], ["evbond", "Event bond"], ["bond", "Initial bond"], ["race", "Race bonus"],
+    ["fs", "Friendship bonus"], ["te", "Training effectiveness"], ["spec", "Specialty priority"], ["mood", "Mood effect"], ["statgain", "Stats it adds"], ["sp", "SP it adds"]
+  ];
+  let tierRun = null; // { key, worker, f }
+  let tierResult = null; // { key, list }
+
+  function tier() {
+    if (!state.tier) state.tier = {};
+    const t = state.tier;
+    const d = { type: "speed", lbs: "all", global: true, ownedOnly: false, rarity: "2", deck: [], show1: "skills", show2: "evbond" };
+    Object.keys(d).forEach((k) => { if (t[k] == null) t[k] = d[k]; });
+    return t;
+  }
+
+  function tierCandidates(t) {
+    let cards = D.DATA.supports.filter((c) => (!t.global || D.onGlobal(c, TODAY) || owned[c.id] != null) && (!t.type || c.ty === t.type) && c.r >= +t.rarity);
+    if (t.ownedOnly) cards = cards.filter((c) => owned[c.id] != null);
+    const out = [];
+    cards.forEach((c) => {
+      const mine = owned[c.id];
+      if (t.ownedOnly || (t.lbs === "own" && mine != null)) out.push({ id: c.id, lb: mine });
+      else if (t.lbs === "own" || t.lbs === "4") out.push({ id: c.id, lb: 4 });
+      else for (let lb = 0; lb <= 4; lb++) out.push({ id: c.id, lb });
+    });
+    return out;
+  }
+
+  function tierKey(t) {
+    const c = cm();
+    return [t.type, t.lbs, t.global, t.ownedOnly, t.rarity, t.deck.map((x) => x.id + ":" + x.lb).join("."), state.scenario, state.deck.trainee, c.preset, c.style, c.skillW, svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0, t.ownedOnly || t.lbs === "own" ? ownedCode() : ""].join("|");
+  }
+
+  function runTiers() {
+    const t = tier();
+    const c = cm();
+    const p = presetById(c.preset);
+    const key = tierKey(t);
+    if (tierRun && tierRun.key === key) return;
+    if (tierRun && tierRun.worker) tierRun.worker.terminate();
+    const sv = skillMap(p.id, c.style);
+    const msg = {
+      job: "tiers",
+      opts: { scenario: state.scenario, build: p.build, trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, runs: 30, seed: 20261006 },
+      deck: t.deck, candidates: tierCandidates(t)
+    };
+    tierRun = { key, f: 0 };
+    const finish = (m) => {
+      if (!tierRun || tierRun.key !== key) return;
+      tierRun = null;
+      if (m.type === "error") flash("The tier list hit an error: " + m.message);
+      else tierResult = { key, list: m.list };
+      if (state.tab === "tiers") renderTiers();
+    };
+    let w = null;
+    try { w = new Worker("optimizer.worker.js?v=" + ASSET_V); } catch (err) { w = null; }
+    const inline = () => setTimeout(() => { try { finish(OPT.runJob(msg, () => {})); } catch (err) { finish({ type: "error", message: String(err.message || err) }); } }, 30);
+    if (!w) { inline(); return; }
+    tierRun.worker = w;
+    w.onmessage = (e) => {
+      if (e.data.type === "progress") { if (tierRun) tierRun.f = e.data.f; const bar = $("#tierProg"); if (bar) bar.style.width = Math.round(e.data.f * 100) + "%"; return; }
+      w.terminate();
+      finish(e.data);
+    };
+    w.onerror = (err) => { err.preventDefault(); w.terminate(); inline(); };
+    w.postMessage(msg);
+  }
+
+  function tierInfo(x, card, what) {
+    const lv = D.levelFor(card, x.lb);
+    const fx = D.baseEffects(card, lv);
+    switch (what) {
+      case "score": return Math.round(x.score) + " pts";
+      case "skills": return x.topSkills.length ? x.topSkills.map((s) => esc(skillInfo(s.id)[0]) + " " + s.L.toFixed(2) + "L").join(", ") : "no strong skills here";
+      case "evbond": { const ev = D.eventRewards(card); return "Event bond +" + ev.bond + (ev.known ? "" : " (est.)"); }
+      case "bond": return "Initial bond " + (fx[14] || 0);
+      case "race": return "Race bonus " + (fx[15] || 0) + "%";
+      case "fs": return "Friendship " + (fx[1] || 0) + "%";
+      case "te": return "Training eff. " + (fx[8] || 0) + "%";
+      case "spec": return "Specialty " + (fx[19] || 0);
+      case "mood": return "Mood effect " + (fx[2] || 0) + "%";
+      case "statgain": return E.STATS.map((s, i) => (Math.abs(x.stats[i]) >= 5 ? E.STAT_LABELS[s].slice(0, 3) + " " + (x.stats[i] > 0 ? "+" : "") + x.stats[i] : "")).filter(Boolean).join(" ") || "–";
+      case "sp": return (x.sp > 0 ? "+" : "") + x.sp + " SP";
+      default: return "";
+    }
+  }
+
+  function renderTiers() {
+    const body = $("#tabBody");
+    const t = tier();
+    const c = cm();
+    const p = presetById(c.preset);
+    loadSkillValues(p.id);
+    const key = tierKey(t);
+    if ((!tierResult || tierResult.key !== key) && !(tierRun && tierRun.key === key)) runTiers();
+    const opt = (pairs, v) => pairs.map(([k, l]) => `<option value="${k}" ${String(v) === k ? "selected" : ""}>${esc(l)}</option>`).join("");
+    const presetOpts = P.list.filter((x) => x.global.end >= TODAY || x.kind === "loh").concat(P.list.filter((x) => x.global.end < TODAY).reverse())
+      .map((x) => `<option value="${x.id}" ${x.id === p.id ? "selected" : ""}>${esc(presetLabel(x))}</option>`).join("");
+    const nType = t.deck.filter((x) => !t.type || D.card(x.id).ty === t.type).length;
+    const ord = ["1st", "2nd", "3rd", "4th", "5th", "6th"][Math.min(5, t.type ? nType : t.deck.length)];
+    const typeName = (TIER_TYPES.find((x) => x[0] === t.type) || [])[1];
+    const res = tierResult && tierResult.key === key ? tierResult.list : null;
+    let tiersHTML = "";
+    if (res && res.length) {
+      const top = res[0].score;
+      const bottom = res[res.length - 1].score;
+      const step = Math.max(1e-6, (top - bottom) / 7);
+      const rows = TIER_NAMES.map(() => []);
+      res.forEach((x) => { rows[Math.min(6, Math.floor((top - x.score) / step))].push(x); });
+      const inDeck = new Set(t.deck.map((x) => x.id));
+      tiersHTML = `<div class="tiers">${rows.map((r, i) => `<div class="tier-row"><div class="tier-name t${i}">${TIER_NAMES[i]}</div><div class="tier-cards">${r.map((x) => {
+        const card = D.card(x.id);
+        const own = owned[x.id];
+        return `<button type="button" class="tcard ty-${card.ty}${own != null && own >= x.lb ? " owned" : ""}${inDeck.has(x.id) ? " indeck" : ""}" data-tier-add="${x.id}" data-lb="${x.lb}" title="${esc(D.label(card))} LB${x.lb}: ${Math.round(x.score)} points (training ${Math.round(x.train)}, skills ${Math.round(x.skill)}). Tap to add to the deck.">
+          <span class="tc-top"><span class="tydot" aria-hidden="true"></span><b>${esc(card.n)}</b><span class="tc-lb">LB${x.lb}</span></span>
+          <span class="tc-title">${esc(card.t)} · ${D.RARITY[card.r]}${own != null ? ` · <span class="tc-own">owned LB${own}</span>` : ""}</span>
+          ${t.show1 ? `<span class="tc-info">${tierInfo(x, card, t.show1)}</span>` : ""}
+          ${t.show2 ? `<span class="tc-info">${tierInfo(x, card, t.show2)}</span>` : ""}
+        </button>`;
+      }).join("")}</div></div>`).join("")}</div>`;
+    } else if (res) {
+      tiersHTML = `<div class="empty">No cards match these filters${t.ownedOnly ? " (mark your cards in the Support cards tab)" : ""}.</div>`;
+    }
+    body.innerHTML = `<div class="cm">
+      <section class="panel tier-ctl">
+        <h2>Tier list</h2>
+        <p class="mini">Like <a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>: every card at every limit break, ranked by what it adds to the deck you have so far. Tap a card to add it, and the list re-ranks for your next pick. Each score comes from simulated <b>${esc(scenario().name)}</b> careers (scenario set at the top) for the race below: a <b>${esc(E.BUILDS[p.build].label)}</b> build, plus the skills each card can hint, valued by their length gain on that course. Event bond and event stats come from Euophrys' event table.</p>
+        <div class="db-controls">
+          <label class="field"><span>Card type</span><select data-tier="type">${opt(TIER_TYPES, t.type)}</select></label>
+          <label class="field"><span>Rarity</span><select data-tier="rarity">${opt([["1", "SSR, SR and R"], ["2", "SSR and SR"], ["3", "SSR only"]], t.rarity)}</select></label>
+          <label class="field"><span>Limit breaks</span><select data-tier="lbs">${opt([["all", "Every limit break"], ["4", "LB4 only"], ["own", "Mine (LB4 if not owned)"]], t.lbs)}</select></label>
+          <label class="chip-toggle"><input type="checkbox" data-tier="global" ${t.global ? "checked" : ""}> Global only</label>
+          <label class="chip-toggle"><input type="checkbox" data-tier="ownedOnly" ${t.ownedOnly ? "checked" : ""}> Cards I own</label>
+        </div>
+        <div class="db-controls">
+          <label class="field grow"><span>Race for skill values</span><select data-tier="preset">${presetOpts}</select></label>
+          <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-tier-style="${k}">${l}</button>`).join("")}</div></div>
+          <label class="field"><span>Skill hints count</span><select data-tier="skillW">${opt([["0", "Not at all"], ["0.5", "A little"], ["1", "Normal"], ["1.5", "A lot"]], c.skillW)}</select></label>
+          <label class="field"><span>Show</span><select data-tier="show1">${opt(TIER_SHOW, t.show1)}</select></label>
+          <label class="field"><span>and</span><select data-tier="show2">${opt(TIER_SHOW, t.show2)}</select></label>
+        </div>
+        <div class="tier-deck">
+          <span class="mini"><b>Your deck so far</b> (${t.deck.length}/6):</span>
+          ${t.deck.map((x, i) => `<span class="chip lockchip ty-${D.card(x.id).ty}"><span class="tydot"></span>${esc(D.card(x.id).n)} LB${x.lb} <button type="button" class="linkish" data-tier-remove="${i}" aria-label="Remove">✕</button></span>`).join("") || '<span class="mini">empty: this ranks your first card</span>'}
+          <button type="button" class="btn ghost small" id="tierFromCoach">Load my coach deck</button>
+          ${t.deck.length ? '<button type="button" class="btn ghost small" id="tierClear">Clear</button><button type="button" class="btn ghost small" id="tierToCoach">Use in the coach</button>' : ""}
+        </div>
+      </section>
+      <section class="panel">
+        <div class="row-wrap run-row"><h3>Ranking for your ${ord} ${typeName === "All types" ? "card" : esc(typeName) + " card"}</h3>
+          <div class="progress" ${tierRun ? "" : "hidden"}><i id="tierProg" style="width:${Math.round(((tierRun && tierRun.f) || 0) * 100)}%"></i></div></div>
+        ${tiersHTML || '<div class="empty">Ranking…</div>'}
+        <p class="mini">Tiers split the score range into 7 equal bands, like Euophrys' list. A green ring means you own the card at that limit break or higher.</p>
+      </section>
+    </div>`;
+  }
+
+  function tierInput(el) {
+    const t = tier();
+    const c = cm();
+    const k = el.dataset.tier;
+    const v = el.type === "checkbox" ? el.checked : el.value;
+    if (k === "preset") c.preset = v;
+    else if (k === "skillW") c.skillW = v;
+    else t[k] = v;
+    save();
+    renderTiers();
+  }
+
+  function tierClick(e) {
+    if (state.tab !== "tiers") return false;
+    const t = tier();
+    const el = e.target;
+    const add = el.closest("[data-tier-add]");
+    if (add) {
+      if (t.deck.length >= 6) { flash("The deck is full. Remove a card first."); return true; }
+      const card = D.card(+add.dataset.tierAdd);
+      t.deck.push({ id: card.id, lb: +add.dataset.lb });
+      save();
+      flash(card.n + " LB" + add.dataset.lb + " added");
+      renderTiers();
+      return true;
+    }
+    const rm = el.closest("[data-tier-remove]");
+    if (rm) { t.deck.splice(+rm.dataset.tierRemove, 1); save(); renderTiers(); return true; }
+    const st = el.closest("[data-tier-style]");
+    if (st) { cm().style = st.dataset.tierStyle; save(); renderTiers(); return true; }
+    if (el.closest("#tierFromCoach")) { t.deck = state.deck.slots.filter(Boolean).map((sl) => ({ id: sl.id, lb: sl.lb })); save(); renderTiers(); return true; }
+    if (el.closest("#tierClear")) { t.deck = []; save(); renderTiers(); return true; }
+    if (el.closest("#tierToCoach")) {
+      state.deck.slots = [0, 1, 2, 3, 4, 5].map((i) => (t.deck[i] ? { id: t.deck[i].id, lb: t.deck[i].lb, bond: null } : null));
+      state.facilities.forEach((f) => { f.members = []; f.hints = []; });
+      commit(true);
+      flash("Deck set in Trainee and deck");
+      return true;
+    }
+    return false;
+  }
+
   function renderTab() {
     const sc = scenario();
     $$(".tabs [data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === state.tab)));
     const body = $("#tabBody");
+    if (state.tab === "tiers" && HAS_DATA) {
+      renderTiers();
+      return;
+    }
+    if (state.tab === "cm" && HAS_DATA) {
+      renderCM();
+      return;
+    }
     if ((state.tab === "cards" || state.tab === "trainees") && HAS_DATA) {
       body.innerHTML = dbControls();
       renderDbList();
