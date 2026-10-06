@@ -85,6 +85,7 @@
   function forcedTurns(state, sc) {
     const set = new Set(state.goals || []);
     if (sc.finale && sc.finale.forced) sc.finale.turns.forEach((t) => set.add(t));
+    (sc.goalTurns || []).forEach((t) => set.add(t));
     return set;
   }
 
@@ -135,9 +136,16 @@
     return 4.5;
   }
 
-  function energyCost(stat, t, sc) {
-    const c = FACILITY[stat].cost;
-    return c < 0 ? c : c + 1.5 * (facilityLevel(t, sc) - 1);
+  // Energy a training spends at level 1 (negative = it restores energy), from the scenario's
+  // base values when known (U.A.F.'s Wit costs 15, for example).
+  function baseCost(stat, sc) {
+    if (sc && sc.train && sc.train[stat]) return -sc.train[stat][6];
+    return FACILITY[stat].cost;
+  }
+
+  function energyCost(stat, t, sc, level) {
+    const c = baseCost(stat, sc);
+    return c < 0 ? c : c + 1.5 * ((level || facilityLevel(t, sc)) - 1);
   }
 
   // Failure estimate from energy, used when the failure box is left blank.
@@ -150,7 +158,7 @@
   function estimateGain(f, state, sc, calib) {
     const cards = f.cards || 0;
     const rb = Math.min(f.rainbows || 0, cards);
-    const base = FACILITY[f.stat].base + (facilityLevel(state.turn, sc) - 1) * 1.3;
+    const base = FACILITY[f.stat].base + (facLevelFor(state, sc, f.stat) - 1) * 1.3;
     return (base + 3.5 * cards) * (1 + 0.06 * cards) * Math.pow(1.3, rb) * MOOD_MULT[state.mood] * (sc.gainScale || 1) * (calib || 1);
   }
 
@@ -184,7 +192,10 @@
     ctx.boost = sc.train ? scenarioBoost(state, sc) : 1;
     ctx.V = continuation(state, sc, calib);
     ctx.gainValue = (stat, g) => gainValue(stat, g, ctx);
-    ctx.energyValue = (delta) => ctx.V[clamp(Math.round(ctx.E + delta), 0, ctx.maxE)] - ctx.V[ctx.E];
+    // Fixed events at the end of this turn (URA's summer snack) land whatever you do.
+    const evNow = (sc.energyEvents && sc.energyEvents[state.turn]) || 0;
+    ctx.evNow = evNow;
+    ctx.energyValue = (delta) => ctx.V[clamp(Math.round(ctx.E + delta + evNow), 0, ctx.maxE)] - ctx.V[clamp(ctx.E + evNow, 0, ctx.maxE)];
     ctx.moodStep = (from) => moodStepValue(from, state, sc, calib);
     ctx.avgW = STATS.reduce((a, s) => a + build.w[s], 0) / STATS.length;
     return ctx;
@@ -231,18 +242,22 @@
     const maxE = state.maxEnergy || 100;
     const forced = forcedTurns(state, sc);
     const clampE = (e) => (e < 0 ? 0 : e > maxE ? maxE : Math.round(e));
+    const avgCost = ["speed", "stamina", "power", "guts"].reduce((a, st) => a + baseCost(st, sc), 0) / 4;
+    const witBase = baseCost("wit", sc);
     let next = new Float64Array(maxE + 1);
     for (let t = sc.totalTurns; t > state.turn; t--) {
       const cur = new Float64Array(maxE + 1);
       const typ = typAt(t, sc, calib);
-      const regen = t > 72 && sc.finaleEnergy ? sc.finaleEnergy : 0;
+      const regen = (t > 72 && sc.finaleEnergy ? sc.finaleEnergy : 0) + ((sc.energyEvents && sc.energyEvents[t]) || 0);
       const restGain = isCamp(t, sc) ? 40 : 50;
-      const cost = 20.5 + 1.5 * (facilityLevel(t, sc) - 1);
+      const lv = facilityLevel(t, sc);
+      const cost = avgCost + 1.5 * (lv - 1);
+      const witDelta = witBase < 0 ? -witBase : -(witBase + 1.5 * (lv - 1));
       for (let e = 0; e <= maxE; e++) {
         if (forced.has(t)) { cur[e] = next[clampE(e - 10 + regen)]; continue; }
         const rest = next[clampE(e + restGain + regen)];
         const fw = estimateFail("wit", e) / 100;
-        const wit = 0.4 * typ - fw * 0.9 * typ + next[clampE(e + 5 + regen)];
+        const wit = 0.4 * typ - fw * 0.9 * typ + next[clampE(e + witDelta + regen)];
         const f = estimateFail("speed", e) / 100;
         const after = next[clampE(e - cost + regen)];
         let v = 0;
@@ -286,16 +301,32 @@
 
   // Training facility level: your override, else 5 at camp, else counted from logged trainings
   // (most scenarios level a facility every 4 trainings), else an estimate for the stage.
+  // Facility level. Your choice wins; camp is always 5. Otherwise it follows the scenario's rule:
+  //  "count" (most): +1 level per 4 trainings there, counted from the log, with turns you didn't
+  //          log filled in from your training mix, plus scenario bonuses (L'Arc Expectation
+  //          gauge, Onsen bathing parties);
+  //  "rank"  (Unity Cup): follows team rank, so it's estimated from the stage of the career;
+  //  "discipline" (U.A.F.): follows the discipline level, estimated from the stage.
+  const DEFAULT_SHARE = { speed: 0.3, stamina: 0.15, power: 0.2, guts: 0.1, wit: 0.25 };
   function facLevelFor(state, sc, stat) {
     const o = state.facLevels && state.facLevels[stat];
     if (o) return o;
     if (isCamp(state.turn, sc)) return 5;
+    const t = state.turn;
+    const rule = sc.levelRule || "count";
+    if (rule === "rank") return t <= 16 ? 1 : t <= 30 ? 2 : t <= 44 ? 3 : t <= 60 ? 4 : 5;
+    if (rule === "discipline") return t <= 20 ? 1 : t <= 34 ? 2 : t <= 46 ? 3 : t <= 58 ? 4 : 5;
     const log = state.log || [];
-    if (log.length >= Math.max(4, (state.turn - 1) * 0.8)) {
-      const n = log.filter((l) => l.kind === "train" && l.stat === stat).length;
-      return Math.min(5, 1 + Math.floor(n / 4));
-    }
-    return Math.round(facilityLevel(state.turn, sc));
+    const loggedTurns = new Set(log.map((l) => l.turn));
+    const trains = log.filter((l) => l.kind === "train");
+    const mine = trains.filter((l) => l.stat === stat).length;
+    const forced = forcedTurns(state, sc);
+    let unlogged = 0;
+    for (let x = 1; x < t; x++) if (!loggedTurns.has(x) && !forced.has(x) && !isCamp(x, sc)) unlogged++;
+    const share = trains.length >= 4 ? (mine + 0.5) / (trains.length + 2.5) : DEFAULT_SHARE[stat];
+    const est = mine + unlogged * 0.78 * share;
+    const bonus = sc.levelBonus ? sc.levelBonus(state) : 0;
+    return Math.max(1, Math.min(5, 1 + Math.floor(est / 4) + bonus));
   }
 
   // Multiplier for scenario bonuses the card formula doesn't model (Unity training, island
@@ -398,7 +429,9 @@
     if (!deck || !sc.train || !Array.isArray(f.members)) return null;
     const members = f.members.map((i) => deck.slots[i]).filter(Boolean);
     const L = facLevelFor(state, sc, f.stat);
-    const r = Deck.trainingGain(sc.train[f.stat], f.stat, members, {
+    const genre = f.extras && f.extras.genre;
+    const row = sc.trainByGenre && genre && sc.trainByGenre[genre] ? sc.trainByGenre[genre][f.stat] : sc.train[f.stat];
+    const r = Deck.trainingGain(row, f.stat, members, {
       facilityLevel: L, extra: f.extra || 0, mood: state.mood, growth: deck.growth,
       energy: ctx.E, maxEnergy: ctx.maxE, deckTypes: deck.deckTypes, totalBond: deck.totalBond,
       flat: { main: ctx.songs.extra[f.stat] || 0, sp: ctx.songs.extra.sp || 0 }, fbBonus: ctx.songs.fb
@@ -445,7 +478,8 @@
       Object.keys(FACILITY[f.stat].split).forEach((st) => { statGains[st] = gain * FACILITY[f.stat].split[st]; });
       unbonded = Math.min(f.unbonded || 0, cards - rainbows);
       spPts = gain * SP_RATE[f.stat];
-      energyDelta = f.stat === "wit" ? 5 + 2 * rainbows : -energyCost(f.stat, state.turn, sc);
+      const ec = energyCost(f.stat, state.turn, sc, facLevelFor(state, sc, f.stat));
+      energyDelta = ec < 0 ? -ec + 2 * rainbows : -ec;
       fail = failBlank ? estimateFail(f.stat, ctx.E) : clamp(+f.fail, 0, 100);
     }
     let stats = 0;
@@ -567,13 +601,14 @@
           sp: r.sp * rb * SP_VALUE,
           fans: 0.05 * typ,
           energy: ctx.energyValue(-RACE_ENERGY),
-          risk: consec >= 2 ? -(consec - 1) * 0.35 * typ : 0
+          // Back-to-back racing: a 3rd race is fine, a 4th+ risks bad conditions and mood drops.
+          risk: consec >= 3 ? -(1.2 + (consec - 3) * 1.3) * typ : consec === 2 ? -0.2 * typ : 0
         };
         const o = {
           kind: "race", label: "Race (" + r.label + ")", energyDelta: -RACE_ENERGY, moodDelta: 0, prefix: [], consume: {},
           notes: ["about " + Math.round(r.sp * rb) + " skill points if you win"], parts: p
         };
-        if (consec >= 2) o.notes.push(consec + " races in a row already; a 3rd risks a bad condition or mood drop");
+        if (consec >= 3) o.notes.push(consec + " races in a row already; another one risks a bad condition or mood drop");
         if (hook.race) {
           const x = hook.race(ctx, state.race) || {};
           p.scenario = x.add || 0;
@@ -657,6 +692,11 @@
       Object.entries(option.statGains).forEach(([k, g]) => { if (s.stats[k] > 0) s.stats[k] = Math.round(s.stats[k] + g); });
     }
     s.extras.consec = option.kind === "race" ? (s.extras.consec || 0) + 1 : 0;
+    // Fixed scenario events at the end of this turn (e.g. URA's summer snack: +30 energy).
+    const evE = (scenario.energyEvents && scenario.energyEvents[state.turn]) || 0;
+    const evM = (scenario.moodEvents && scenario.moodEvents[state.turn]) || 0;
+    if (evE) s.energy = clamp(s.energy + evE, 0, maxE);
+    if (evM) s.mood = clamp(s.mood + evM, 0, 4);
     Object.entries(option.consume || {}).forEach(([k, v]) => {
       if (k === "badCondition") s.badCondition = v;
       else s.extras[k] = typeof v === "function" ? v(s.extras[k]) : v;
@@ -738,41 +778,100 @@
     o.value = sumParts(o.parts);
   }
 
+  function variant(o) {
+    return Object.assign({}, o, { parts: Object.assign({}, o.parts), prefix: o.prefix.slice(), notes: o.notes.slice(), consume: Object.assign({}, o.consume), statGains: Object.assign({}, o.statGains || {}) });
+  }
+
+  function statsValue(ctx, obj) {
+    return Object.entries(obj).reduce((a, [k, v]) => a + (k === "sp" ? v * SP_VALUE : ctx.gainValue(k, v)), 0);
+  }
+
+  // Re-scores a training as if energy were `e2` (items that restore energy before training).
+  function withEnergy(o, ctx, e2) {
+    const v = variant(o);
+    const drop = estimateFail(o.stat, ctx.E) - estimateFail(o.stat, e2);
+    v.fail = Math.max(0, Math.round(o.fail - drop));
+    v.parts.energy = ctx.V[clamp(Math.round(e2 + o.energyDelta + ctx.evNow), 0, ctx.maxE)] - ctx.V[clamp(ctx.E + ctx.evNow, 0, ctx.maxE)];
+    const moodDrop = ctx.state.mood > 0 ? ctx.moodStep(ctx.state.mood - 1) : 0;
+    v.parts.risk = -(v.fail / 100) * (o.raw + 0.5 * ctx.typ + moodDrop) - (v.fail > ctx.state.risk ? ((v.fail - ctx.state.risk) / 100) * ctx.typ * 2 : 0);
+    v.value = sumParts(v.parts);
+    return v;
+  }
+
+  // Unity Cup tables (GameTora, after the July 2026 update).
+  const UNITY_SPECIAL = {
+    speed: { 2: { speed: 2, sp: 1 }, 3: { speed: 4, power: 1, sp: 3 }, 4: { speed: 6, power: 3, sp: 5 }, 5: { speed: 10, power: 5, sp: 7 } },
+    stamina: { 2: { stamina: 2, sp: 1 }, 3: { stamina: 4, guts: 1, sp: 3 }, 4: { stamina: 6, guts: 3, sp: 5 }, 5: { stamina: 10, guts: 5, sp: 7 } },
+    power: { 2: { power: 2, sp: 1 }, 3: { power: 4, stamina: 1, sp: 3 }, 4: { power: 6, stamina: 3, sp: 5 }, 5: { power: 10, stamina: 5, sp: 7 } },
+    guts: { 2: { guts: 2, sp: 1 }, 3: { guts: 4, speed: 1, power: 1, sp: 3 }, 4: { guts: 6, speed: 2, power: 2, sp: 5 }, 5: { guts: 10, speed: 3, power: 3, sp: 7 } },
+    wit: { 2: { wit: 1 }, 3: { wit: 2, sp: 2 }, 4: { wit: 4, speed: 1, sp: 4 }, 5: { wit: 6, speed: 2, sp: 6 } }
+  };
+  const UNITY_BURST = {
+    speed: { speed: 15, power: 7, sp: 5 }, stamina: { stamina: 15, guts: 7, sp: 5 }, power: { stamina: 7, power: 15, sp: 5 },
+    guts: { speed: 3, power: 3, guts: 15, sp: 5 }, wit: { speed: 2, wit: 15, sp: 5 }
+  };
+  const UNITY_EXTREME = {
+    speed: { speed: 20, power: 10, sp: 15 }, stamina: { stamina: 20, guts: 10, sp: 15 }, power: { stamina: 10, power: 20, sp: 15 },
+    guts: { speed: 5, power: 5, guts: 20, sp: 15 }, wit: { speed: 5, wit: 15, sp: 15 }
+  };
+  const COIN = 0.015; // value of one Trackblazer shop coin, as a share of a typical turn
+  const VITA_COST = { 20: 35, 40: 55, 65: 75 };
+
   const HOOKS = {
     ura: {
       facility(f, ctx) {
-        return f.extras && f.extras.meek ? { add: 0.35 * ctx.typ, note: "Happy Meek duel: stats, cap +4 and a skill hint" } : null;
+        if (!(f.extras && f.extras.meek)) return null;
+        // A win pays 10-25 of the stat, 30 SP, +4 to its cap, +4 max energy and an Essence of Racing hint.
+        const add = ctx.gainValue(f.stat, 17) + 30 * SP_VALUE + 0.12 * ctx.typ;
+        return { add, note: "Happy Meek duel: about +17 " + STAT_LABELS[f.stat] + ", 30 SP, +4 cap and max energy and a hint, if the training succeeds" };
       }
     },
 
     unity: {
       facility(f, ctx) {
         const x = f.extras || {};
+        const t = ctx.state.turn;
         let add = 0;
         let energy = 0;
         const notes = [];
-        if (x.burst > 0) {
-          add += x.burst * (ctx.gainValue(f.stat, 20) + 7 * SP_VALUE + 0.05 * ctx.typ);
-          if (f.stat === "wit") energy += 5;
-          notes.push(x.burst + " Spirit Burst" + (x.burst > 1 ? "s" : ""));
+        const fl = Math.min(5, x.flames || 0);
+        if (fl >= 2) {
+          add += statsValue(ctx, UNITY_SPECIAL[f.stat][fl]);
+          notes.push("Special Training with " + fl + " flames");
+        }
+        // Flame teammates grow, which raises team rank (facility levels) and Unity Cup results.
+        if (fl) add += fl * (t <= 60 ? 0.04 : 0.015) * ctx.typ;
+        const zenith = ((ctx.state.extras && ctx.state.extras.bursts) || 0) < 13 ? 0.08 * ctx.typ : 0;
+        const b = x.burst || 0;
+        if (b) {
+          add += b * (statsValue(ctx, UNITY_BURST[f.stat]) + 0.12 * ctx.typ + zenith);
+          if (f.stat === "wit") energy += 5 * b;
+          notes.push(b + " Spirit Burst" + (b > 1 ? "s" : "") + " (+15 " + STAT_LABELS[f.stat] + " each and a Lv2+ hint)");
         }
         if (x.extreme) {
-          add += ctx.gainValue(f.stat, 25) + 0.25 * ctx.typ;
-          notes.push("Extreme Spirit Burst sets failure to 0%");
-        }
-        if (x.team > 0) {
-          const k = ctx.state.turn <= 36 ? 0.12 : ctx.state.turn <= 60 ? 0.07 : 0.03;
-          add += x.team * k * ctx.typ;
-          notes.push(x.team + " team member(s) for Unity training");
+          add += statsValue(ctx, UNITY_EXTREME[f.stat]) + 0.15 * ctx.typ + zenith;
+          notes.push("Extreme Spirit Burst: big stats, a hint, and failure becomes 0%");
         }
         return { add, energy, fail0: !!x.extreme, note: notes.join(", ") };
+      },
+      afterTurn(s, option) {
+        if (option.kind !== "train") return;
+        const fac = s.facilities.find((f) => f.stat === option.stat);
+        const x = (fac && fac.extras) || {};
+        const n = (x.burst || 0) + (x.extreme ? 1 : 0);
+        if (n) s.extras.bursts = (s.extras.bursts || 0) + n;
       }
     },
 
     trackblazer: {
       race(ctx, grade) {
-        const k = { g1: 0.7, g2: 0.55, g3: 0.45, op: 0.3 }[grade] || 0.3;
-        return { add: k * ctx.typ, note: "Grade Points and up to 100 shop coins" };
+        const x = ctx.state.extras || {};
+        const gp = { g1: 100, g2: 80, g3: 60, op: 40 }[grade] || 30;
+        const need = +(x.gpNeed || 0);
+        let add = 70 * COIN * ctx.typ; // expected coins over likely placements
+        if (need > 0) add += (Math.min(gp, need) / 100) * 0.6 * ctx.typ;
+        else add += 0.1 * ctx.typ;
+        return { add, note: "about " + gp + " Grade Points and 100 coins if you win" + (need > 0 ? " (" + need + " still needed)" : "") };
       },
       items(ctx, options) {
         const x = ctx.state.extras || {};
@@ -780,23 +879,52 @@
         if (x.charm) {
           const risky = trains.filter((o) => o.fail >= 8 && o.raw >= 0.9 * ctx.typ).sort((a, b) => b.raw - a.raw)[0];
           if (risky) {
-            const v = Object.assign({}, risky, { parts: Object.assign({}, risky.parts), prefix: risky.prefix.slice(), notes: risky.notes.slice(), consume: Object.assign({}, risky.consume), fail: 0, failEst: false });
+            const v = variant(risky);
+            v.fail = 0;
+            v.failEst = false;
             v.parts.risk = 0;
-            useOn(v, ctx, "Use Good-Luck Charm", -0.15 * ctx.typ, "Charm sets failure to 0%", { charm: false });
+            useOn(v, ctx, "Use Good-Luck Charm", -40 * COIN * ctx.typ, "Charm sets failure to 0%", { charm: false });
+            options.push(v);
+          }
+        }
+        const vita = +x.vita || 0;
+        if (vita && ctx.E < ctx.maxE - 10) {
+          const top = trains.slice().sort((a, b) => b.raw - a.raw)[0];
+          if (top) {
+            const v = withEnergy(top, ctx, Math.min(ctx.maxE, ctx.E + vita));
+            useOn(v, ctx, "Drink Vita " + vita + " (no turn used)", -(VITA_COST[vita] || 50) * COIN * ctx.typ, "energy " + ctx.E + " → " + Math.min(ctx.maxE, ctx.E + vita) + " before training, instead of spending the turn resting", { vita: "0" });
             options.push(v);
           }
         }
         options.sort((a, b) => b.value - a.value);
         const best = bestTraining(options);
-        if (!best || !isStrong(best, ctx)) return;
+        const cup = +x.cupcake || 0;
+        if (cup && ctx.state.mood < 4 && best && (isStrong(best, ctx) || ctx.state.mood <= 2)) {
+          const steps = Math.min(cup, 4 - ctx.state.mood);
+          let mv = 0;
+          for (let i = 0; i < steps; i++) mv += ctx.moodStep(ctx.state.mood + i);
+          useOn(best, ctx, "Eat the " + (cup === 2 ? "Berry Sweet" : "Plain") + " Cupcake (no turn used)", mv + best.parts.stats * 0.1 * steps - (cup === 2 ? 55 : 30) * COIN * ctx.typ, "mood +" + steps + " without spending a turn", { cupcake: "0" });
+          best.moodDelta = steps;
+        }
+        const top = options[0];
+        if (x.whistle && top && !top.forced && !ctx.camp && (!best || best.raw < 0.75 * ctx.typ)) {
+          top.prefix.unshift("Try the Reset Whistle first (no turn used)");
+          top.notes.push("every training is weak; the whistle reshuffles the cards for 20 coins, then re-enter the trainings");
+        }
+        const race = options.find((o) => o.kind === "race" && !o.forced);
+        const hammer = +x.hammer || 0;
+        if (hammer && race) useOn(race, ctx, "Use the +" + hammer + "% Cleat Hammer", (hammer / 100) * (race.parts.stats + race.parts.sp), "save hammers for G1s", { hammer: "0" });
+        options.sort((a, b) => b.value - a.value);
+        const b2 = bestTraining(options);
+        if (!b2 || !isStrong(b2, ctx)) return;
         const mega = +x.megaphone || 0;
-        if (mega) useOn(best, ctx, "Use the +" + mega + "% Megaphone", best.parts.stats * mega / 100 * 0.8, "Megaphone lasts " + ({ 20: 4, 40: 3, 60: 2 }[mega] || 2) + " turns from now", { megaphone: "0" });
-        if (x.weights && best.stat !== "wit") {
-          const main = best.statGains[best.stat] || 0;
-          useOn(best, ctx, "Use Ankle Weights", ctx.gainValue(best.stat, main * 0.5) - 0.1 * ctx.typ, "Ankle Weights: +50% " + STAT_LABELS[best.stat] + ", +20% energy use", { weights: false });
-          best.energyDelta *= 1.2;
-          best.parts.energy = ctx.energyValue(best.energyDelta);
-          best.value = sumParts(best.parts);
+        if (mega) useOn(b2, ctx, "Use the +" + mega + "% Megaphone", b2.parts.stats * mega / 100 * 0.8, "Megaphone lasts " + ({ 20: 4, 40: 3, 60: 2 }[mega] || 2) + " turns from now", { megaphone: "0" });
+        if (x.weights && b2.stat !== "wit") {
+          const main = b2.statGains[b2.stat] || 0;
+          useOn(b2, ctx, "Use Ankle Weights", ctx.gainValue(b2.stat, main * 0.5) - 50 * COIN * ctx.typ, "Ankle Weights: +50% " + STAT_LABELS[b2.stat] + ", +20% energy use", { weights: false });
+          b2.energyDelta *= 1.2;
+          b2.parts.energy = ctx.energyValue(b2.energyDelta);
+          b2.value = sumParts(b2.parts);
         }
       }
     },
@@ -821,32 +949,57 @@
     grandmasters: {
       facility(f, ctx) {
         const n = (f.extras && f.extras.frag) || 0;
-        return n ? { add: n * 0.07 * ctx.typ, note: n + " fragment(s)" } : null;
+        return n ? { add: n * 0.08 * ctx.typ, note: n + " fragment" + (n > 1 ? "s" : "") + " toward the next Goddess Wisdom" } : null;
       },
+      // Each Wisdom is tried on every training; the best version is offered as its own option.
       items(ctx, options) {
         const w = ctx.state.extras && ctx.state.extras.wisdom;
         if (!w) return;
-        const best = bestTraining(options);
-        if (w === "red" && best && isStrong(best, ctx)) useOn(best, ctx, "Use Red Wisdom", best.parts.stats * 0.3, "Red Wisdom on a strong training", { wisdom: "" });
-        if (w === "blue" && options[0] && !options[0].forced) useOn(options[0], ctx, "Use Blue Wisdom", 0.1 * ctx.typ, "Blue Wisdom gives hints, so use it now", { wisdom: "" });
-        if (w === "yellow" && (ctx.E < 55 || ctx.state.turn <= 24) && options[0] && !options[0].forced) {
-          useOn(options[0], ctx, "Use Yellow Wisdom", 0.1 * ctx.typ, "Yellow restores energy and bond. Re-check failure rates after using it.", { wisdom: "" });
-        }
+        const trains = options.filter((o) => o.kind === "train");
+        const mood = ctx.state.mood;
+        const tries = trains.map((o) => {
+          let v;
+          if (w === "red") {
+            v = withEnergy(o, ctx, Math.min(ctx.maxE, ctx.E + 50));
+            const moodUp = MOOD_MULT[4] / MOOD_MULT[mood];
+            let mv = 0;
+            for (let i = mood; i < 4; i++) mv += ctx.moodStep(i);
+            v.parts.item = o.parts.stats * (moodUp * 1.2 - 1) + mv;
+            v.notes.push("+50 energy, mood to max and the facility trains past level 5 this turn");
+          } else if (w === "blue") {
+            v = variant(o);
+            v.parts.item = o.cards * (0.12 * ctx.typ + 3 * ctx.avgW);
+            v.notes.push("every card here (" + o.cards + ") gives a skill hint and a few stats");
+          } else {
+            v = variant(o);
+            const extra = Math.max(0, o.cards - o.rainbows);
+            v.parts.item = o.parts.stats * (Math.pow(1.3, extra) - 1);
+            v.notes.push("all " + o.cards + " card(s) here count as friendship");
+          }
+          v.prefix.unshift("Obtain " + w[0].toUpperCase() + w.slice(1) + " Wisdom (no turn used)");
+          v.consume = Object.assign({}, v.consume, { wisdom: "" });
+          v.value = sumParts(v.parts);
+          return v;
+        }).sort((a, b) => b.value - a.value);
+        if (tries[0]) options.push(tries[0]);
       }
     },
 
     larc: {
-      facility(f, ctx) {
+      facility(f, ctx, o) {
         const n = (f.extras && f.extras.star) || 0;
-        return n ? { add: n * (ctx.state.turn <= 60 ? 0.07 : 0.03) * ctx.typ, note: n + " member(s) filling Star gauge" } : null;
+        if (!n) return null;
+        if (ctx.camp) return { add: 0, note: "Star gauges don't fill during the France expedition" };
+        const blocks = 1 + Math.min(f.rainbows || 0, f.cards || 0);
+        return { add: n * blocks * (ctx.state.turn <= 60 ? 0.035 : 0.015) * ctx.typ, note: n + " member(s) +" + blocks + " Star block" + (blocks > 1 ? "s" : "") };
       },
       actions(ctx) {
         const m = (ctx.state.extras && ctx.state.extras.ss) || 0;
-        if (!m) return [];
+        if (!m || ctx.camp) return [];
         return [{
           kind: "scenario", label: "SS Match (" + m + " member" + (m > 1 ? "s" : "") + ")",
-          parts: { scenario: 0.28 * ctx.typ * m + 0.1 * ctx.typ },
-          notes: ["uses a turn but no energy", m < 5 ? "more members ready makes it stronger" : "full lineup"],
+          parts: { scenario: 0.28 * ctx.typ * m + 0.1 * ctx.typ + (m >= 5 ? 0.3 * ctx.typ : 0) },
+          notes: ["uses a turn but no energy; trains every stat and pays Supporter Points", m < 5 ? "waiting for 5 members makes it stronger and can trigger an SSS Match" : "5 members: chance of an SSS Match"],
           consume: { ss: 0 }
         }];
       }
@@ -854,17 +1007,58 @@
 
     uaf: {
       facility(f, ctx) {
-        return f.extras && f.extras.heat ? { add: 0.45 * ctx.typ, note: "triggers a Heat-Up for the next 2 turns" } : null;
+        const x = f.extras || {};
+        let add = 0;
+        const notes = [];
+        if (x.genre) {
+          const link = ctx.state.facilities.filter((g) => g.extras && g.extras.genre === x.genre).length;
+          if (link >= 2) {
+            add += (link - 1) * 0.1 * ctx.typ;
+            notes.push(link + "-sport " + x.genre + " Link Training");
+          }
+        }
+        if (x.heat) {
+          add += 0.45 * ctx.typ;
+          notes.push("triggers a Heat-Up for the next 2 trainings");
+        }
+        return { add, note: notes.join(", ") };
+      },
+      items(ctx, options) {
+        const x = ctx.state.extras || {};
+        const left = x.consult != null ? +x.consult : 3;
+        const counts = {};
+        ctx.state.facilities.forEach((f) => { const g = f.extras && f.extras.genre; if (g) counts[g] = (counts[g] || 0) + 1; });
+        const gs = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        const top = options[0];
+        if (left > 0 && gs.length >= 2 && gs[0][1] < 5 && top && !top.forced) {
+          top.notes.push("consult Elfie (" + left + " left, no turn used) to swap " + gs[1][0] + " into " + gs[0][0] + " for a " + (gs[0][1] + gs[1][1]) + "-sport link, then re-enter");
+        }
       }
     },
 
     cooking: {
       items(ctx, options) {
-        const pct = +((ctx.state.extras && ctx.state.extras.dish) || 0);
-        const best = bestTraining(options);
-        if (pct && best && (isStrong(best, ctx) || ctx.camp)) {
-          useOn(best, ctx, "Cook the dish", best.parts.stats * pct / 100 * 0.8, "dishes only last this turn; match the dish to " + STAT_LABELS[best.stat], { dish: "0" });
-        }
+        const tier = +((ctx.state.extras && ctx.state.extras.dish) || 0);
+        if (!tier || !ctx.sc.dishes) return;
+        const t = ctx.state.turn;
+        const pick = (stat) => {
+          const list = ctx.sc.dishes.filter((d) => d.tier === tier && d.from <= t);
+          return list.find((d) => d.stats.indexOf(stat) !== -1) || null;
+        };
+        const tries = options.filter((o) => o.kind === "train").map((o) => {
+          const dish = pick(o.stat);
+          if (!dish) return null;
+          const v = variant(o);
+          v.parts.item = o.parts.stats * dish.pct / 100 * 0.8 + (dish.energy ? ctx.energyValue(dish.energy) : 0);
+          v.prefix.unshift("Cook " + dish.name);
+          v.notes.push(dish.name + ": +" + dish.pct + "% to this training, this turn only");
+          if (dish.energy) v.energyDelta += dish.energy;
+          v.consume = Object.assign({}, v.consume, { dish: "0" });
+          v.value = sumParts(v.parts);
+          return v;
+        }).filter(Boolean).sort((a, b) => b.value - a.value);
+        const best = tries[0];
+        if (best && (best.rainbows >= 2 || best.raw >= 1.2 * ctx.typ || ctx.camp || tier === 4)) options.push(best);
       }
     },
 
@@ -967,16 +1161,29 @@
         return { add, note: notes.join(", ") };
       },
       actions(ctx, trains) {
-        if (!(ctx.state.extras && ctx.state.extras.dreamsReady)) return [];
+        const x = ctx.state.extras || {};
+        const left = x.dreamsLeft != null ? +x.dreamsLeft : 2;
+        if (!left || ctx.state.turn > 72) return [];
+        const t = ctx.state.turn;
+        const end = [12, 24, 36, 48, 60, 72].find((h) => h >= t) || 72;
+        const urgent = end - t + 1 <= left;
         const best = trains.slice().sort((a, b) => b.raw - a.raw)[0];
-        const good = ctx.camp || ctx.E >= 60;
-        const delta = -energyCost(best.stat, ctx.state.turn, ctx.sc);
+        const good = ctx.camp || ctx.E >= 60 || urgent;
+        const delta = -energyCost(best.stat, t, ctx.sc);
+        // Only 2 per half year: spending one now gives up using it on a better turn later
+        // (camp, high energy), unless the half year is about to end.
+        const reserve = urgent ? 0 : ctx.camp ? 0.3 * ctx.typ : 0.9 * ctx.typ;
+        const gain = (best.parts.stats + best.parts.sp) * 1.6;
+        const moodDrop = ctx.state.mood > 0 ? ctx.moodStep(ctx.state.mood - 1) : 0;
         return [{
-          kind: "scenario", label: "DREAMS training (" + STAT_LABELS[best.stat] + ")", energyDelta: delta,
-          parts: { scenario: (best.parts.stats + best.parts.sp) * 1.6 + (good ? 0 : -0.3 * ctx.typ), energy: ctx.energyValue(delta) },
-          notes: ["every card and member joins every facility", good ? "high-value turn" : "energy is low, so consider saving it"],
-          consume: { dreamsReady: false }
+          kind: "scenario", label: "DREAMS training (" + STAT_LABELS[best.stat] + ")", energyDelta: delta, fail: best.fail,
+          parts: { scenario: gain - reserve, energy: ctx.energyValue(delta), risk: -(best.fail / 100) * (gain + 0.5 * ctx.typ + moodDrop) },
+          notes: ["every card and member joins every facility", urgent ? left + " left and the half year ends on turn " + end + ": use it or lose it" : good ? "high-value turn" : "energy is low, so consider saving it"],
+          consume: { dreamsLeft: (v) => Math.max(0, (v != null ? +v : 2) - 1) }
         }];
+      },
+      afterTurn(s) {
+        if ([12, 24, 36, 48, 60].indexOf(s.turn) !== -1) s.extras.dreamsLeft = 2;
       }
     },
 
