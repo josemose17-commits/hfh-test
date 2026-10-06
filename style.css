@@ -413,3 +413,8 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 .tc-own { color: var(--accent); font-weight: 600; }
 .tc-info { font-size: .72rem; color: var(--fg); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 @media (max-width: 560px) { .tcard { width: calc(50% - 3px); } .tier-row { grid-template-columns: 34px minmax(0, 1fr); } .tier-name { font-size: 1.3rem; } }
+.comp { display: grid; gap: 6px; }
+.comp-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.comp-f { min-width: 74px; }
+.comp-f > span { display: flex; align-items: center; gap: 4px; }
+.comp-f select { border-top: 3px solid var(--c, var(--line)); }

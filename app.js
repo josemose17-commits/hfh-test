@@ -501,6 +501,13 @@
         if (row) row.classList.toggle("owned", e.target.value !== "");
         return;
       }
+      if (e.target.dataset.cmComp != null) {
+        const comp = cm().comp;
+        if (e.target.value === "") delete comp[e.target.dataset.cmComp]; else comp[e.target.dataset.cmComp] = +e.target.value;
+        save();
+        renderCM();
+        return;
+      }
       if (e.target.dataset.cm != null) { cmInput(e.target); return; }
       if (e.target.dataset.tier != null) { tierInput(e.target); return; }
       if (e.target.dataset.pickTrainee != null) {
@@ -1181,7 +1188,7 @@
   function cm() {
     if (!state.cm) state.cm = {};
     const c = state.cm;
-    const defaults = { style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], sq: "", sfilter: "all", globalSkills: true };
+    const defaults = { comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], sq: "", sfilter: "all", globalSkills: true };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
     return c;
@@ -1248,7 +1255,7 @@
 
   function optKey() {
     const c = cm();
-    return [c.preset, c.style, state.scenario, state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.runs, c.locked.join("."), ownedCode()].join("|");
+    return [c.preset, c.style, state.scenario, state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.runs, c.locked.join("."), JSON.stringify(c.comp), ownedCode()].join("|");
   }
 
   function startJob(msg, done) {
@@ -1287,7 +1294,7 @@
     const sv = skillMap(p.id, c.style);
     return {
       scenario: state.scenario, build: p.build, trainee: state.deck.trainee, skills: sv.map, costs: sv.costs,
-      skillWeight: +c.skillW, runs: +c.runs, borrow: c.borrow, locked: c.locked.slice(), seed: 20261006
+      skillWeight: +c.skillW, runs: +c.runs, borrow: c.borrow, locked: c.locked.slice(), comp: Object.assign({}, c.comp), seed: 20261006
     };
   }
 
@@ -1373,6 +1380,7 @@
         <label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt([["0", "Not at all"], ["0.5", "A little"], ["1", "Normal"], ["1.5", "A lot"]], c.skillW)}</select></label>
         <label class="field"><span>Search</span><select data-cm="runs">${opt([["6", "Quick"], ["10", "Normal"], ["20", "Thorough (slow)"]], c.runs)}</select></label>
       </div>
+      ${compHTML(c)}
       <div class="row-wrap">
         <label class="field grow"><span>Must include (optional)</span><input id="cmLock" list="cardListAll" placeholder="A card that must be in the deck" autocomplete="off"></label>
         <button type="button" class="btn ghost small" id="cmLockAdd">Add</button>
@@ -1385,6 +1393,17 @@
       </div>
       <div id="cmOut">${optResult ? optResultHTML(optResult, c) : ""}</div>
     </section>`;
+  }
+
+  const COMP_TYPES = [["speed", "Speed"], ["stamina", "Stamina"], ["power", "Power"], ["guts", "Guts"], ["wit", "Wit"], ["friend", "Friend"], ["group", "Group"]];
+  function compHTML(c) {
+    const fixed = COMP_TYPES.reduce((a, [k]) => a + (c.comp[k] != null ? c.comp[k] : 0), 0);
+    return `<div class="comp">
+      <span class="mini"><b>Deck makeup</b> (how many of each type, borrowed card included). Leave “Any” to let the optimizer decide.</span>
+      <div class="comp-row">${COMP_TYPES.map(([k, l]) => `<label class="field comp-f ty-${k}"><span><i class="tydot"></i>${l}</span><select data-cm-comp="${k}"><option value="">Any</option>${[0, 1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${c.comp[k] === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>`).join("")}
+      ${Object.keys(c.comp).length ? '<button type="button" class="btn ghost small" id="compClear">Reset</button>' : ""}</div>
+      ${fixed > 6 ? `<p class="mini warn">That adds up to ${fixed} cards; a deck has 6.</p>` : ""}
+    </div>`;
   }
 
   function optResultHTML(r, c) {
@@ -1501,7 +1520,13 @@
     if (style) { c.style = style.dataset.cmStyle; skillLimit = 60; save(); renderCM(); return true; }
     const build = t.closest("[data-cm-build]");
     if (build) { state.build = build.dataset.cmBuild; commit(true); flash("Turn coach build set to " + E.BUILDS[state.build].label); return true; }
-    if (t.closest("#cmRun")) { runOptimizer(); return true; }
+    if (t.closest("#compClear")) { c.comp = {}; save(); renderCM(); return true; }
+    if (t.closest("#cmRun")) {
+      const fixed = Object.values(c.comp).reduce((a, b) => a + b, 0);
+      if (fixed > 6) { flash("The deck makeup adds up to " + fixed + " cards. A deck has 6."); return true; }
+      runOptimizer();
+      return true;
+    }
     if (t.closest("#cmWish")) { runWishlist(); return true; }
     if (t.closest("[data-goto-tab]")) { state.tab = t.closest("[data-goto-tab]").dataset.gotoTab; save(); renderTab(); return true; }
     if (t.closest("#cmLockAdd")) {

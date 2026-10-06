@@ -158,3 +158,15 @@ test("skills the trainee already has (unique, innate, awakening) add no value fr
   assert.ok(O.simulate(ctx(null), [{ card, lb: 4 }]).skills.some((s) => +s.id === sk));
   assert.ok(!O.simulate(ctx(t.id), [{ card, lb: 4 }]).skills.some((s) => +s.id === sk));
 });
+
+test("deck makeup: the optimizer builds exactly the counts you fix, borrowed card included", () => {
+  const pool = globalCards().filter((c) => c.r >= 2).map((c) => ({ id: c.id, lb: 4 }));
+  const borrow = globalCards(3).map((c) => ({ id: c.id, lb: 4 }));
+  const comp = { speed: 2, stamina: 2, wit: 1, friend: 1 };
+  const r = O.runJob({ job: "optimize", opts: { scenario: "ura", build: "long", runs: 4, borrow: true, comp }, pool, borrowPool: borrow });
+  const n = {};
+  r.cards.forEach((c) => { const t = D.card(c.id).ty; n[t] = (n[t] || 0) + 1; });
+  assert.deepStrictEqual(n, comp);
+  assert.ok(r.runnersUp.every((a) => D.card(a.in).ty === D.card(a.out).ty), "an alternative broke the makeup");
+  assert.throws(() => O.runJob({ job: "optimize", opts: { scenario: "ura", build: "long", runs: 4, comp: { group: 5 } }, pool: pool.slice(0, 20), borrowPool: [] }), /Not enough cards/);
+});
