@@ -503,6 +503,17 @@
       }
       if (e.target.dataset.cm != null) { cmInput(e.target); return; }
       if (e.target.dataset.tier != null) { tierInput(e.target); return; }
+      if (e.target.dataset.tierTrainee != null) {
+        const v = e.target.value.trim();
+        const tr = traineeByLabel.get(v);
+        if (tr || !v) {
+          tier().trainee = tr ? tr.id : 0;
+          tier().deck = tier().deck.filter((x) => !tr || D.card(x.id).cid !== tr.cid);
+          save();
+          renderTiers();
+        }
+        return;
+      }
       const k = e.target.dataset.db; if (!k) return;
       const d = db();
       d[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -1558,9 +1569,38 @@
     return out;
   }
 
+  // The tier list's trainee: its own pick, else the coach's trainee.
+  const tierTrainee = (t) => (t.trainee != null ? t.trainee : state.deck.trainee);
+
+  function stylesFor(tr) {
+    const rank = (g) => "GFEDCBAS".indexOf(g);
+    return STYLES.map(([k, l], i) => [k, l, tr.apt[6 + i]]).sort((a, b) => rank(b[2]) - rank(a[2]));
+  }
+
+  function tierTraineeHTML(t, p) {
+    const tr = tierTrainee(t) ? D.trainee(tierTrainee(t)) : null;
+    const label = tr ? traineeLabel(tr) : "";
+    let info = '<span class="mini">No trainee: cards are ranked without growth bonuses.</span>';
+    if (tr) {
+      const distIdx = { Sprint: 2, Mile: 3, Medium: 4, Long: 5 }[p.course.dist];
+      const surf = tr.apt[p.course.surface === "Dirt" ? 1 : 0];
+      const dist = tr.apt[distIdx];
+      const best = stylesFor(tr)[0];
+      const weak = "GFEDCB".indexOf(surf) !== -1 || "GFEDCB".indexOf(dist) !== -1;
+      info = `<span class="mini">Growth: <b>${growthText(tr)}</b> · ${esc(p.course.surface)} <b>${surf}</b> · ${esc(p.course.dist)} <b>${dist}</b> · best style ${esc(best[1])} <b>${best[2]}</b>. Her own character's cards are left out.</span>
+        ${cm().style !== best[0] ? `<button type="button" class="btn ghost small" data-tier-style="${best[0]}">Use her best style: ${esc(best[1])}</button>` : ""}
+        ${weak ? `<span class="mini warn">Her aptitude for this race is below A, so she'll race at a penalty.</span>` : ""}`;
+    }
+    return `<div class="row-wrap tier-trainee">
+      <label class="field grow"><span>Trainee</span><input data-tier-trainee="1" list="traineeList" value="${esc(label)}" placeholder="Type a trainee name" autocomplete="off"></label>
+      ${t.trainee != null ? '<button type="button" class="btn ghost small" id="tierTraineeCoach">Use the coach\'s trainee</button>' : ""}
+      ${info}
+    </div>`;
+  }
+
   function tierKey(t) {
     const c = cm();
-    return [t.type, t.lbs, t.global, t.ownedOnly, t.rarity, t.deck.map((x) => x.id + ":" + x.lb).join("."), state.scenario, state.deck.trainee, c.preset, c.style, c.skillW, svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0, t.ownedOnly || t.lbs === "own" ? ownedCode() : ""].join("|");
+    return [t.type, t.lbs, t.global, t.ownedOnly, t.rarity, t.deck.map((x) => x.id + ":" + x.lb).join("."), state.scenario, tierTrainee(t), c.preset, c.style, c.skillW, svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0, t.ownedOnly || t.lbs === "own" ? ownedCode() : ""].join("|");
   }
 
   function runTiers() {
@@ -1573,7 +1613,7 @@
     const sv = skillMap(p.id, c.style);
     const msg = {
       job: "tiers",
-      opts: { scenario: state.scenario, build: p.build, trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, runs: 30, seed: 20261006 },
+      opts: { scenario: state.scenario, build: p.build, trainee: tierTrainee(t), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, runs: 30, seed: 20261006 },
       deck: t.deck, candidates: tierCandidates(t)
     };
     tierRun = { key, f: 0 };
@@ -1671,6 +1711,7 @@
           <label class="field"><span>Show</span><select data-tier="show1">${opt(TIER_SHOW, t.show1)}</select></label>
           <label class="field"><span>and</span><select data-tier="show2">${opt(TIER_SHOW, t.show2)}</select></label>
         </div>
+        ${tierTraineeHTML(t, p)}
         <div class="tier-deck">
           <span class="mini"><b>Your deck so far</b> (${t.deck.length}/6):</span>
           ${t.deck.map((x, i) => `<span class="chip lockchip ty-${D.card(x.id).ty}"><span class="tydot"></span>${esc(D.card(x.id).n)} LB${x.lb} <button type="button" class="linkish" data-tier-remove="${i}" aria-label="Remove">✕</button></span>`).join("") || '<span class="mini">empty: this ranks your first card</span>'}
@@ -1718,6 +1759,7 @@
     const st = el.closest("[data-tier-style]");
     if (st) { cm().style = st.dataset.tierStyle; save(); renderTiers(); return true; }
     if (el.closest("#tierFromCoach")) { t.deck = state.deck.slots.filter(Boolean).map((sl) => ({ id: sl.id, lb: sl.lb })); save(); renderTiers(); return true; }
+    if (el.closest("#tierTraineeCoach")) { t.trainee = null; save(); renderTiers(); return true; }
     if (el.closest("#tierClear")) { t.deck = []; save(); renderTiers(); return true; }
     if (el.closest("#tierToCoach")) {
       state.deck.slots = [0, 1, 2, 3, 4, 5].map((i) => (t.deck[i] ? { id: t.deck[i].id, lb: t.deck[i].lb, bond: null } : null));
