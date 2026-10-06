@@ -1,5 +1,5 @@
 // Euophrys' Uma Musume support card tier list, bundled by tools/build_euophrys.mjs. Do not edit.
-// Source: https://github.com/Euophrys/umamusume-tierlist (built 2026-10-06)
+// Source: https://github.com/Euophrys/umamusume-tierlist
 /*
 MIT License
 

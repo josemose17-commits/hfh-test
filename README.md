@@ -125,6 +125,8 @@ python3 tools/build_data.py
 
 The generated file is committed, so the coach works offline.
 
+**Automatic updates:** `.github/workflows/update-data.yml` runs every day (and on demand from the Actions tab). It rebuilds the GameTora and Euophrys data, and when there are new cards, trainees, Global release dates or event values and the tests pass, it commits them to `main`, bumps the `?v=` cache version and asks GitHub Pages to rebuild. Cards and trainees also switch to "on Global" by themselves on their Global release date. Champions Meeting dates and skill values still need a manual rebuild (see below), since they depend on the Umalator's files.
+
 Champions Meeting and League of Heroes presets (`data/presets.js`) come from GameTora's event lists plus alpha123's Umalator preset lists:
 
 ```
