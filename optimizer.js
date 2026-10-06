@@ -280,6 +280,22 @@
     return !cards.some((x) => x.card.id === c.card.id || (x.card.cid && x.card.cid === c.card.cid));
   }
 
+  // Deck makeup: comp is { type: exact count } for the types you fixed (others are free).
+  // A partial deck is fine as long as the slots left can still meet every fixed count.
+  const TYPES = ["speed", "stamina", "power", "guts", "wit", "friend", "group"];
+  function compOK(cards, comp, total) {
+    if (!comp) return true;
+    const n = {};
+    cards.forEach((c) => { n[c.card.ty] = (n[c.card.ty] || 0) + 1; });
+    let need = 0;
+    for (const t of TYPES) {
+      if (comp[t] == null) continue;
+      if ((n[t] || 0) > comp[t]) return false;
+      need += comp[t] - (n[t] || 0);
+    }
+    return need <= total - cards.length;
+  }
+
   // Finds the best decks. pool: [{ card, lb, borrowed? }]. opts.locked: card ids that must stay.
   // onProgress(fraction) is called as the search goes.
   function optimize(opts, onProgress) {
@@ -287,6 +303,8 @@
     const tchar = opts.trainee ? (D.trainee(opts.trainee) || {}).cid : null;
     const pool = opts.pool.filter((c) => !(tchar && c.card.cid === tchar));
     const borrowPool = (opts.borrowPool || []).filter((c) => !(tchar && c.card.cid === tchar));
+    const comp = opts.comp && Object.keys(opts.comp).length ? opts.comp : null;
+    const ok = (rest, c) => compatible(rest, c, tchar) && compOK(rest.concat([c]), comp, 6);
     const cache = new Map();
     const evals = { n: 0 };
     const key = (cards) => cards.map((c) => c.card.id + ":" + c.lb + (c.borrowed ? "b" : "")).sort().join(",");
@@ -306,13 +324,17 @@
     for (let s = 0; s < steps; s++) {
       let best = null, bestV = -Infinity;
       pool.forEach((c) => {
-        if (!compatible(deck, c, tchar)) return;
+        if (!ok(deck, c)) return;
         const v = score(deck.concat([c]), quick).value;
         if (v > bestV) { bestV = v; best = c; }
       });
       if (!best) break;
       deck.push(best);
       progress(0.1 + 0.4 * (s + 1) / Math.max(1, steps));
+    }
+    if (deck.length < ownedSlots) {
+      const short = comp ? TYPES.filter((t) => comp[t] != null).map((t) => comp[t] + " " + t).join(", ") : "";
+      throw new Error("Not enough cards to fill the deck" + (short ? " with " + short + ". Check you own enough cards of each type (or allow a borrowed card)" : "") + ".");
     }
     // 2. Swaps: try replacing each unlocked card with every other card until nothing improves.
     const locked = new Set(opts.locked || []);
@@ -323,7 +345,7 @@
         if (locked.has(deck[i].card.id)) continue;
         const rest = deck.filter((_, j) => j !== i);
         pool.forEach((c) => {
-          if (!compatible(rest, c, tchar)) return;
+          if (!ok(rest, c)) return;
           const cand = rest.concat([c]);
           const v = score(cand, quick).value;
           if (v > cur + 1e-6) { deck = cand; cur = v; improved = true; }
@@ -336,7 +358,7 @@
     if (borrowedSlot) {
       let best = null, bestV = -Infinity;
       borrowPool.forEach((c) => {
-        if (!compatible(deck, c, tchar)) return;
+        if (!ok(deck, c)) return;
         const v = score(deck.concat([Object.assign({}, c, { borrowed: true })]), quick).value;
         if (v > bestV) { bestV = v; best = c; }
       });
@@ -351,7 +373,7 @@
       const rest = deck.filter((_, j) => j !== i);
       let best = null, bestV = -Infinity;
       pool.forEach((c) => {
-        if (c.card.id === d.card.id || !compatible(rest, c, tchar)) return;
+        if (c.card.id === d.card.id || !ok(rest, c)) return;
         const v = score(rest.concat([c]), quick).value;
         if (v > bestV) { bestV = v; best = c; }
       });
@@ -374,6 +396,8 @@
     const sim = (cards) => simulate(Object.assign({}, ctx, { runs: quick }), cards).value;
     const base = sim(deck);
     const slots = swapSlots || deck.map((_, i) => i);
+    const comp = opts.comp && Object.keys(opts.comp).length ? opts.comp : null;
+    const ok = (rest, c) => compatible(rest, c, tchar) && compOK(rest.concat([c]), comp, 6);
     const out = [];
     candidates.forEach((c) => {
       if (tchar && c.card.cid === tchar) return;
@@ -382,7 +406,7 @@
         const d = deck[i];
         if (!d || d.borrowed) return;
         const rest = deck.filter((_, j) => j !== i);
-        if (!compatible(rest, c, tchar)) return;
+        if (!ok(rest, c)) return;
         const v = sim(rest.concat([c]));
         if (v > best) { best = v; swapOut = d; }
       });
@@ -474,7 +498,7 @@
     };
   }
 
-  const api = { optimize, simulate, wishlist, runJob, parseChart, tierScores, buildCtx, statsValue, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, statsValue, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
