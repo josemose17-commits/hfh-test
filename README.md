@@ -46,7 +46,7 @@ Pick any Champions Meeting or League of Heroes:
 
 ## Tier list
 
-[Euophrys' tier list](https://euophrys.github.io/uma-tiers/), with skills added. The base score is Euophrys' own code, card data and scenario presets (URA, Unity Cup, Trackblazer, Grand Concert, Grand Masters), bundled unchanged (MIT): the extra weighted stats a card adds to the deck you have so far. With skills set to "Not at all" the ranking is exactly Euophrys'. On top comes a **skill score**: each skill the card can hint or give through its events, valued by its median length gain (L) on the race you pick for your running style, minus its SP cost (a length counts as about 171 SP), only for skills your deck and trainee don't already cover.
+[Euophrys' tier list](https://euophrys.github.io/uma-tiers/), with skills added. The base score is Euophrys' own code, card data and scenario presets (URA, Unity Cup, Trackblazer, Grand Concert, Grand Masters), bundled unchanged (MIT): the extra weighted stats a card adds to the deck you have so far. With skills set to "Not at all" the ranking is exactly Euophrys'. On top comes a **skill score**: each skill the card can hint or give through its events, valued by its median length gain (L) on the race you pick for your running style (1 L counts like 60 Speed in Euophrys' weights) plus the SP the hint discount saves, only for skills your deck and trainee don't already cover. The total is Euophrys' score plus this skill score.
 
 - Pick the card type, rarity, limit breaks (all, LB4, or yours), Global only, or only cards you own.
 - Tap a card to add it to "your deck so far" and the list re-ranks for your next pick, like on Euophrys' site. You can start from your coach deck or one of Euophrys' preset decks, and send the result back to the coach.
