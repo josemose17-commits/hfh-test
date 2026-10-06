@@ -1288,7 +1288,7 @@
     const sv = skillMap(p.id, c.style);
     const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW };
     if (c.goal === "ace" || c.goal === "debuff") {
-      o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs), statsWeight: +c.statsW };
+      o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, (id) => skillInfo(id)[2]), statsWeight: +c.statsW };
     }
     return o;
   }
@@ -1446,7 +1446,7 @@
     return `<section class="panel cm-opt">
       <h3>Deck optimizer</h3>
       <div class="field"><span>Build a deck for</span><div class="seg style-seg" role="radiogroup" aria-label="Deck goal">${GOALS.map(([k, l]) => `<button type="button" role="radio" aria-checked="${goal === k}" data-cm-goal="${k}">${l}</button>`).join("")}</div></div>
-      ${goal !== "race" ? `<p class="mini"><b>${goal === "ace" ? "Ace parent" : "Debuffer parent"}:</b> picks the cards that give your parent the most ${goal === "ace" ? "skills that are strong on this race (weighted by median L for the running style)" : "debuff skills that work on this race's distance and surface with your running style (gold debuffs count double)"}, so she can learn them and pass them down as skill sparks. Every skill counts, not just the best 8, and stats only count as much as you choose.</p>
+      ${goal !== "race" ? `<p class="mini"><b>${goal === "ace" ? "Ace parent" : "Debuffer parent"}:</b> picks the cards that give your parent the most ${goal === "ace" ? "white skills that are strong on this race (weighted by median L for the running style)" : "white debuff skills that work on this race's distance and surface with your running style"}, so she can learn them and pass them down as skill sparks. Gold skills don't count, since only white skills become sparks. Every skill counts, not just the best 8, and stats only count as much as you choose.</p>
         <label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"]], c.statsW)}</select></label>` : ""}
       <p class="mini">Builds the deck the way you'd use <a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>: it picks the best card, then the best card given that one, and so on, with Euophrys' own scoring for the scenario. On top, every skill a card can hint is scored by its median length gain on this race as a ${STYLE_LABEL[c.style]} runner. Then it rechecks each slot with the other five fixed.</p>
       ${traineePickerHTML(p, "data-cm-style")}

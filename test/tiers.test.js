@@ -95,3 +95,17 @@ test("parent decks collect more target skills than a racing deck", () => {
   assert.ok(parent.expected > 3);
   assert.ok(covered(parent.cards) > covered(race.cards));
 });
+
+test("parent targets are white skills only (gold skills and inherited uniques don't become sparks)", () => {
+  const X = require("../data/debuffs.js");
+  const SV = require("../data/skillvalues/index.js");
+  const P = require("../data/presets.js");
+  const pr = P.list.find((p) => p.id === SV.ready[0]);
+  const L = {};
+  require("../data/skillvalues/" + pr.id + ".json").Senkou.forEach(([id, m]) => { L[id] = m / 100; });
+  const ace = T.parentTargets("ace", pr, "Senkou", L, X, 0.1, (id) => SV.skills[id][2]);
+  assert.ok(Object.keys(ace).length > 10);
+  assert.ok(Object.keys(ace).every((id) => SV.skills[id][2] === 1));
+  const deb = T.parentTargets("debuff", pr, "Senkou", {}, X);
+  assert.ok(Object.keys(deb).every((id) => X[id].r === 1));
+});
