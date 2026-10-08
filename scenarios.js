@@ -80,12 +80,14 @@
       coreLoop: [
         "Junior: train where the most white flames gather. Every flame you train with grows that teammate, and team rank sets your facility levels (F/G=1, D/E=2, B/C=3, A=4, S=5).",
         "2+ white flames on one training is Special Training: 2 flames give +2 main stat, 3 give +4/+1, 4 give +6/+3, 5 give +10/+5 plus skill points. Scenario-linked cards add +1 to each.",
-        "A full spirit gauge fires a Spirit Burst: +15 main stat, +7 second stat, +5 SP (Wit: +2 Speed, +15 Wit, and +5 energy). Hold it for a facility you want.",
+        "A full spirit gauge fires a Spirit Burst: +15 main stat, +7 second stat, +5 SP (Wit: +2 Speed, +15 Wit, and +5 energy). Hold it for a facility you want: the stats your build needs that are hardest to raise (Speed for sprinters, Stamina and Power for longer races).",
         "After a member's burst, her next Unity training fires an Extreme Spirit Burst: +20/+10 stats, +15 SP, a hint and 0% failure. Use it on a risky but strong training.",
-        "Team Zenith Declares War (Senior Late November) rewards total bursts: 4+ white hint, 7+ hint Lv3, 10+ gold hint, 13+ gold Lv3 with stats.",
+        "Team Zenith Declares War (Senior Late November) rewards total bursts: 4+ white hint, 7+ hint Lv3, 10+ gold hint, 13+ gold Lv3 with stats. Aim for 10+ if you want the gold skill; 7-9 saves skill points if you don't.",
+        "Unity Cup matches: win at least 3 of the 5 races to raise your league rank (a loss lowers it), so pick an opponent you can beat, with 3+ circles in Tazuna's preview. Keep each distance's team members viable; losing an early match is survivable but costs its bonuses.",
+        "Bursts and Special Training cost a lot of energy: most decks bring a Wit card, and a Friend card helps.",
         "Wit caps at 1800 here, so Wit-heavy builds are strong."
       ],
-      deck: "Fewer cards of your main type than in URA. Mixed decks make more flames. Speed and Wit work well because of the high Wit cap.",
+      deck: "Fewer cards of your main type than in URA. Mixed decks make more flames. Speed and Wit work well because of the high Wit cap, and nearly every top deck runs a Wit card for energy.",
       keyCards: ["Riko Kashimoto (Friend, scenario link)", "Kitasan Black (Speed)"],
       inputs: [
         { id: "flames", label: "White flames", scope: "facility", type: "number", max: 5, help: "Characters on this training with a white flame (Special Training at 2+)" },
@@ -119,20 +121,30 @@
       gainScale: 1.0,
       formulaBoost: 1.15,
       train: { speed: [8, 0, 4, 0, 0, 2, -19], stamina: [0, 7, 0, 3, 0, 2, -17], power: [0, 4, 6, 0, 0, 2, -18], guts: [3, 0, 3, 6, 0, 2, -20], wit: [2, 0, 0, 0, 6, 3, 5] },
-      finale: { name: "Twinkle Star Climax", turns: [74, 76, 78], forced: true, note: "Three finale races. Your result decides the scenario bonus." },
+      // Grade Point goals (GameTora), due at the end of Late December each year. Surplus doesn't
+      // carry over. Dirt specialists and sprint-only turf trainees have lower targets.
+      gradePoints: { due: [24, 48, 72], turf: [60, 300, 300], dirt: [30, 200, 300], sprint: [60, 200, 300] },
+      finale: { name: "Twinkle Star Climax", turns: [74, 76, 78], forced: true, note: "Three finale races scored by Victory Points (1st 10, 2nd 8, 3rd 6). Each leg pays +10 to every stat and 30 SP, scaled by race bonus: use your Master Cleat Hammers here." },
       summary: "No fixed race goals: you need Grade Points (60, then +300, then +300) from races. Races also pay shop coins (1st 100, 2nd-3rd 60, 4th-5th 30), and the shop (restocks every 6 turns, max 5 of each item) sells training boosts, energy, mood, stats, facility levels and race bonus.",
       coreLoop: [
-        "Race often. A win pays Grade Points by grade: G1 100, G2 80, G3 60, OP 40, Pre-OP 20 (less for lower places), plus 100 coins.",
-        "Avoid more than 3 races in a row. Back-to-back racing risks bad conditions and mood drops.",
+        "Race often: guides count 30-40 races a career, about two races for every training outside camp. Take only strong trainings, and skip a race when a training is exceptional. Summer camp is where the stats come from.",
+        "A win pays Grade Points by grade: G1 100, G2 80, G3 60, OP 40, Pre-OP 20 (less for lower places), plus 100 coins.",
+        "Grade Point goals: 60 by the end of Junior, then 300 more by the end of Classic and 300 more by the end of Senior (each due after Late December, and surplus doesn't carry over). Dirt specialists need 30 and 200, sprint-only turf trainees 200 in Classic. The coach counts them as you race and says when a race can't wait.",
+        "Keep race chains to 2 in a row, unless the 3rd ends the year. Back-to-back racing risks bad conditions and mood drops.",
+        "Plan races around G1 title bonuses: the Classic Triple Crown or the Autumn Senior Triple for medium and long, the Triple Tiara or the mile titles for milers.",
+        "Rivals appear in some G3-and-up races when your distance and surface aptitude are C or better. Beating one gives a skill hint, and the chairman's event adds stats.",
+        "Before each summer camp, stock up on Vitas, Megaphones and Ankle Weights (Megaphone plus Ankle Weights together is a big boost).",
         "Megaphones: +20% for 4 turns (40 coins), +40% for 3 (55), +60% for 2 (70). Start one when a run of strong turns begins, such as summer camp.",
         "Ankle Weights (50): +50% to one stat's training for one turn, +20% energy use. Good-Luck Charm (40): 0% failure for one turn.",
         "Vita 20/40/65 (35/55/75 coins) restore energy without using a turn, so drinking one often beats resting. Cupcakes (+1 or +2 mood) replace outings.",
-        "Reset Whistle (20) reshuffles where cards stand when every training is weak. Cleat Hammers add +20% or +35% race bonus to one race; save them for G1s.",
+        "Reset Whistle (20) reshuffles where cards stand when every training is weak. Cleat Hammers (Artisan +20% for 25 coins, Master +35% for 40) boost one race's bonus; save them for G1s. Glow Sticks (15) give +50% fans for one race.",
+        "Twinkle Star Climax: each of the three legs pays +10 to every stat and 30 SP, scaled by race bonus, and the legs' distance is set by the races you ran. Keep 3 Master Cleat Hammers for them, and about 150 coins for the last shop rotation (the Climax races pay no coins).",
+        "Keep at least 100 coins before each shop refresh (every 6 turns) so you can grab what shows up.",
         "Training Applications (150) raise a facility level permanently. Grilled Carrots (40) give every card +5 bond.",
         "Your unique skill levels up via Umamusume of the Year in Late December, which needs Akikawa's bond: 1 blue bar (Junior), 2 blue bars (Classic), green (Senior), plus wins and fans that year. Cat Food (10) gives her +5 bond.",
         "Speed, Power and Guts cap at 1200 here, but Stamina reaches 1900 and Wit 1500."
       ],
-      deck: "Race-bonus cards matter (aim for 35%+ total race bonus). Speed and Power cards with high race bonus are best.",
+      deck: "Race bonus matters: aim for 50%+ in total (four 10% cards and two 5% cards get there). Common decks: 2 Speed, 2 Wit and 2 Power, or 3 Guts and 2 Wit plus a 4th Guts or a Speed card.",
       keyCards: ["Kitasan Black (Speed, race bonus)", "Satono Diamond (Stamina)"],
       inputs: [
         { id: "megaphone", label: "Megaphone", scope: "turn", type: "select", options: [["0", "None"], ["20", "+20% (4 turns)"], ["40", "+40% (3 turns)"], ["60", "+60% (2 turns)"]] },
@@ -142,14 +154,20 @@
         { id: "cupcake", label: "Cupcake", scope: "turn", type: "select", options: [["0", "None"], ["1", "Plain (+1)"], ["2", "Berry (+2)"]] },
         { id: "whistle", label: "Reset Whistle", scope: "turn", type: "check" },
         { id: "hammer", label: "Cleat Hammer", scope: "turn", type: "select", options: [["0", "None"], ["20", "+20% race"], ["35", "+35% race"]] },
-        { id: "gpNeed", label: "Grade Pt still needed", scope: "turn", type: "number", max: 400 },
+        { id: "gpNeed", label: "Grade Pt still needed", scope: "turn", type: "number", max: 400, help: "The coach counts this down as you race (counting a win) and resets it each Late December. Type your real number if you placed lower." },
         { id: "consec", label: "Races in a row", scope: "turn", type: "number", max: 6, help: "Filled in for you from the career log" }
       ],
       events: [
         { turn: 12, label: "Make Debut", tip: "Goal race. The shop unlocks after it." },
+        { turn: 24, label: "Grade Point goal", tip: "60 Grade Points by the end of this turn (30 for dirt specialists). Surplus doesn't carry over." },
         { turn: 24, label: "Junior Uma of the Year", tip: "Unique skill level-up if picked: needs 1 blue bar of Akikawa bond plus wins and fans this year." },
+        { turn: 36, label: "Stock up for camp", tip: "Stock Vitas, Megaphones and Ankle Weights for camp, your best training window." },
+        { turn: 48, label: "Grade Point goal", tip: "300 Grade Points this year by the end of this turn (200 for dirt specialists and sprint-only turf trainees)." },
         { turn: 48, label: "Classic Uma of the Year", tip: "Needs 2 blue bars of Akikawa bond plus wins and fans this year." },
-        { turn: 72, label: "Senior Uma of the Year", tip: "Needs a green Akikawa bond plus wins and fans this year." }
+        { turn: 60, label: "Stock up for camp", tip: "Last camp: stock Vitas, Megaphones and Ankle Weights. Start saving Master Cleat Hammers for the Climax too." },
+        { turn: 72, label: "Grade Point goal", tip: "300 Grade Points this year by the end of this turn." },
+        { turn: 72, label: "Senior Uma of the Year", tip: "Needs a green Akikawa bond plus wins and fans this year." },
+        { turn: 73, label: "Climax prep", tip: "Have 3 Master Cleat Hammers for the three legs, and spend your coins: the Climax races pay none." }
       ],
       hook: "trackblazer"
     },
@@ -248,11 +266,14 @@
       coreLoop: [
         "Rainbow trainings drop two matching fragments (Wit rarely does). Goal races give two. With 7 held, no doubles; with 8, nothing until you obtain the Wisdom.",
         "Obtain a Wisdom from the Knowledge Table at the start of a turn; it doesn't use a turn. Its one-turn effect applies to what you do that turn.",
-        "Red (Darley Arabian): +50 energy, mood to max, and every facility trains past level 5 this turn. Use it when energy is low and a good training is up, or on your best camp turn.",
+        "Obtain a Wisdom as soon as you hold 8 fragments: while you hold 8, no new fragments drop. The exceptions: save it for summer camp, and don't spend it on a turn where few cards are training.",
+        "Red (Darley Arabian): +50 energy, mood to max, every facility trains past level 5 this turn, and +35% stats from races. Use it when energy is low and a good training is up, on your best camp turn, or on a Late December turn so the year-end race pays more (it can't be used on the race screen).",
         "Blue (Godolphin Barb): every card on the training you pick gives a skill hint plus a few stats. Use it on the training with the most cards.",
         "Yellow (Byerley Turk): every card on the training you pick counts as friendship, whatever its type or bond. Use it on the training with the most non-rainbow cards.",
         "Goddess levels (up to 5) add permanent training bonus (+5% to +15% each): Blue also hint rate, Red energy discount, Yellow support event effects. Year-end races pay extra when a goddess's level is at least the year number.",
-        "You control the Wisdom color with the 1st and 5th fragments of each table (the left side of each crystal decides the color)."
+        "You control the Wisdom color with the 1st and 5th fragments of each table (the left side of each crystal decides the color).",
+        "Level Red (Darley Arabian) first in Junior, to about level 2-3: level 1 already cuts training energy use 10%. Then bring every goddess to at least level 1.",
+        "Before the goddess skill event (turn 77), have the goddess whose skill you want at level 4+. Darley Arabian's (mid-race speed) is the best all-round pick, Byerley Turk's (late-race speed, no condition) the steady one; Godolphin Barb's (early acceleration) costs too much for what it does. You get about 9-11 goddess levels a run."
       ],
       deck: "Speed and Power core, plus cards that bring the goddess colors you want.",
       keyCards: [],
@@ -262,9 +283,9 @@
       ],
       events: [
         { turn: 3, label: "Fragments start", tip: "Every action can drop fragments from now on." },
-        { turn: 24, label: "GUR (Junior)", tip: "Year-end race after this turn (no turn used): all stats +10, 50 SP, more from goddesses at level 1+." },
-        { turn: 48, label: "WBC (Classic)", tip: "Year-end race after this turn: all stats +15, 60 SP, more from goddesses at level 2+." },
-        { turn: 72, label: "SWBC (Senior)", tip: "Year-end race after this turn: all stats +20, 70 SP, more from goddesses at level 3+." },
+        { turn: 24, label: "GUR (Junior)", tip: "Year-end race after this turn (no turn used): all stats +10, 50 SP, more from goddesses at level 1+. A Red Wisdom used this turn adds 35% to the race's stats." },
+        { turn: 48, label: "WBC (Classic)", tip: "Year-end race after this turn: all stats +15, 60 SP, more from goddesses at level 2+. A Red Wisdom used this turn adds 35% to the race's stats." },
+        { turn: 72, label: "SWBC (Senior)", tip: "Year-end race after this turn: all stats +20, 70 SP, more from goddesses at level 3+. A Red Wisdom used this turn adds 35% to the race's stats." },
         { turn: 51, label: "Unique skill check", tip: "60,000 fans by now levels up your unique skill (40,000 for dirt-only trainees)." },
         { turn: 55, label: "Unique skill check", tip: "70,000 fans by now (60,000 dirt-only) levels it up; also needs a green (3-bar) bond with chairman Akikawa." },
         { turn: 71, label: "Unique skill check", tip: "120,000 fans by Late December (80,000 dirt-only) levels it up again." },

@@ -468,3 +468,37 @@ test("Grand Concert opening: turn 4 rests when energy is 65 or less, so turn 5 s
   assert.ok(E.eventsFor(12, gl, { goals: [] }).some((e) => e.label === "Reset check"));
   assert.ok(E.eventsFor(12, gl, { goals: [] }).some((e) => /Debut/.test(e.label)), "the debut still shows");
 });
+
+test("Trackblazer: Grade Point goals replace career goals, count down on races and reset each December", () => {
+  const D = require("../deck.js");
+  const tb = sc("trackblazer");
+  const tr = (n) => D.DATA.trainees.find((t) => t.n === n).id;
+  const sw = (o) => base(Object.assign({ deck: { trainee: tr("Special Week"), slots: [] }, fans: 30000 }, o));
+  assert.deepStrictEqual(E.traineeGoals(sw({}), tb).map((g) => g.turn), [12], "only the debut stays a goal race");
+  assert.strictEqual(E.gradeGoal(sw({ turn: 20 }), tb).goal, 60);
+  assert.strictEqual(E.gradeGoal(base({ turn: 30, deck: { trainee: tr("Haru Urara"), slots: [] } }), tb).goal, 200, "dirt target");
+  assert.strictEqual(E.gradeGoal(base({ turn: 30, deck: { trainee: tr("Curren Chan"), slots: [] } }), tb).goal, 200, "sprint-only target");
+  // 200 still needed on turn 46: the races left after this turn pay at most 180, so race now.
+  const late = sw({ turn: 46, extras: { gpNeed: 200, gpDue: 48 } });
+  const rec = E.recommend(late, tb);
+  assert.strictEqual(rec.gradePlan.status, "urgent");
+  assert.strictEqual(rec.action.kind, "race");
+  const after = E.advance(late, tb, rec.action);
+  assert.strictEqual(after.extras.gpNeed, 200 - rec.action.gp);
+  // A typed count from another year doesn't apply.
+  assert.strictEqual(E.gradePlan(sw({ turn: 50, extras: { gpNeed: 20, gpDue: 48 } }), tb).need, 300);
+  // The deadline turn resets the count for next year's goal.
+  const dec = E.advance(sw({ turn: 48, extras: { gpNeed: 0, gpDue: 48 } }), tb, { kind: "rest", energyDelta: 50, moodDelta: 0, prefix: [], notes: [], consume: {} });
+  assert.strictEqual(dec.extras.gpNeed, undefined);
+  assert.strictEqual(E.gradePlan(dec, tb).need, 300);
+});
+
+test("Grand Masters: Wisdom waits for a camp that's a turn away, and Red counts the year-end race", () => {
+  const gm = sc("grandmasters");
+  const s = (turn, wisdom) => base({ turn, energy: 90, extras: { wisdom }, facilities: facs({ speed: { cards: 3, rainbows: 1 }, power: { cards: 1 } }) });
+  assert.ok(/Wisdom/.test(E.recommend(s(30, "yellow"), gm).headline), "uses it right away");
+  assert.ok(!/Wisdom/.test(E.recommend(s(36, "yellow"), gm).headline), "holds it for camp");
+  const red = E.recommend(s(24, "red"), gm);
+  assert.ok(/Red Wisdom/.test(red.headline));
+  assert.ok(red.action.notes.some((n) => /year-end race/.test(n)));
+});

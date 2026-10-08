@@ -283,6 +283,8 @@
     $("#turnExtras").addEventListener("input", (e) => {
       const k = e.target.dataset.extra; if (!k) return;
       state.extras[k] = readExtra(e.target);
+      // Trackblazer: a typed Grade Point count belongs to this year's goal.
+      if (k === "gpNeed") state.extras.gpDue = (E.gradeGoal(state, scenario()) || {}).due;
       commit();
     });
 
@@ -1159,7 +1161,10 @@
     $("#trackStats").checked = !!state.trackStats;
 
     const turnInputs = sc.inputs.filter((i) => i.scope === "turn");
-    $("#turnExtras").innerHTML = turnInputs.length ? `<div class="extras-head">${esc(sc.name)}</div>` + turnInputs.map((i) => extraField(i, state.extras)).join("") : "";
+    // Trackblazer's Grade Point box shows the coach's running count.
+    const gp = sc.gradePoints ? E.gradePlan(state, sc) : null;
+    const bag = gp ? Object.assign({}, state.extras, { gpNeed: gp.need }) : state.extras;
+    $("#turnExtras").innerHTML = turnInputs.length ? `<div class="extras-head">${esc(sc.name)}</div>` + turnInputs.map((i) => extraField(i, bag)).join("") : "";
     $("#turnExtras").hidden = !turnInputs.length;
     renderFacilities();
     renderDeck();
@@ -1222,8 +1227,17 @@
         <button type="button" class="btn ghost" id="undoBtn" ${(state.log || []).length ? "" : "disabled"}>Undo last</button>
       </div>`;
     const fp = $("#fanPlan");
-    fp.hidden = !rec.fanPlan || rec.fanPlan.status === "met";
-    if (rec.fanPlan) { fp.textContent = E.fanPlanText(rec.fanPlan, sc); fp.className = "mini fanplan fp-" + rec.fanPlan.status; }
+    const gp = rec.gradePlan;
+    if (rec.fanPlan && rec.fanPlan.status !== "met") {
+      fp.hidden = false;
+      fp.textContent = E.fanPlanText(rec.fanPlan, sc);
+      fp.className = "mini fanplan fp-" + rec.fanPlan.status;
+    } else if (gp) {
+      // Trackblazer: the Grade Point goal takes the same line (tight reads like an efficient race).
+      fp.hidden = false;
+      fp.textContent = E.gradePlanText(gp, sc);
+      fp.className = "mini fanplan fp-" + ({ tight: "efficient", ok: "wait" }[gp.status] || gp.status);
+    } else fp.hidden = true;
     $("#dockText").textContent = (a.prefix.length ? a.prefix.join(" → ") + " → " : "") + a.label;
     $("#dock").className = "dock k-" + kind + (a.stat ? " s-" + a.stat : "");
   }

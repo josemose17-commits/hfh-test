@@ -117,6 +117,8 @@
       else out.push({ turn: g.t, forced: false, label: "Goal due", tip: "A career goal is due by this turn. Check the in-game goal list." });
       i++;
     }
+    // Trackblazer swaps the career goals for Grade Point goals; only the debut stays.
+    if (sc && sc.gradePoints) return out.filter((x) => x.turn === 12);
     return out.filter((x) => x.turn >= 1 && x.turn <= last);
   }
 
@@ -256,6 +258,84 @@
     if (plan.status === "efficient") return head + " " + rest + ": racing now (" + plan.now.race.n + ", ~" + n(plan.now.fans) + ") " + (plan.saves ? "saves " + plan.saves + " race" + (plan.saves > 1 ? "s" : "") + " later, so it's worth a training turn." : "fits your plan without adding a race, so it's listed as an option against training.");
     const why = plan.now ? "races later give as much or more" : "no race that fits you is on this turn";
     return head + " " + rest + ": about " + plan.racesNeeded + " race(s) do it" + (picks ? " (" + picks + ")" : "") + ". " + (plan.tight ? "That's nearly every race that fits you before the deadline, so don't skip them. " : "") + "You can keep training now: " + why + ".";
+  }
+
+  // ---- Trackblazer Grade Points ----
+  // Grade Points a win pays, by race grade (GameTora). Lower places pay less.
+  const GP_BY_G = { 100: 100, 200: 80, 300: 60, 400: 40, 700: 20 };
+  const GP_BY_KEY = { g1: 100, g2: 80, g3: 60, op: 40 };
+  const gpOf = (r) => GP_BY_G[r.g] || 20;
+
+  // The Grade Point goal in force on this turn. Each is due at the end of Late December; dirt
+  // specialists and sprint-only turf trainees get lower targets (sc.gradePoints).
+  function gradeGoal(state, sc) {
+    const gp = sc && sc.gradePoints;
+    if (!gp) return null;
+    const i = gp.due.findIndex((d) => d >= state.turn);
+    if (i === -1) return null;
+    const t = state.deck && state.deck.trainee && Deck ? Deck.trainee(state.deck.trainee) : null;
+    const ok = (a) => APT_RANK.indexOf(a) >= 5;
+    let kind = "turf";
+    if (t && ok(t.apt[1]) && !ok(t.apt[0])) kind = "dirt";
+    else if (t && ok(t.apt[2]) && !ok(t.apt[3]) && !ok(t.apt[4]) && !ok(t.apt[5])) kind = "sprint";
+    return { due: gp.due[i], goal: gp[kind][i], kind, n: i };
+  }
+
+  // Plans the Grade Point goal like fanPlan, counting wins: how many races still do it, and
+  // whether later races that fit the trainee can cover it. The coach keeps the count (gpNeed)
+  // as you race; type your real number in when you place lower than 1st.
+  // status: met | ok | tight | urgent | short.
+  function gradePlan(state, sc) {
+    const g = gradeGoal(state, sc);
+    if (!g) return null;
+    const x = state.extras || {};
+    const need = x.gpNeed != null && x.gpDue === g.due ? Math.max(0, +x.gpNeed || 0) : g.goal;
+    const plan = Object.assign({}, g, { need, turnsLeft: g.due - state.turn });
+    if (need <= 0) return Object.assign(plan, { status: "met" });
+    const forced = forcedTurns(state, sc);
+    const have = state.fans || 0;
+    const list = [];
+    for (let t = state.turn; t <= g.due; t++) {
+      if (forced.has(t)) continue;
+      let rs = racesAt(state, t);
+      if (t === state.turn) {
+        const picked = state.raceName && rs.find((r) => r.n === state.raceName);
+        rs = picked ? [picked] : rs.filter((r) => !have || (r.need || 0) <= have);
+      }
+      const best = rs.sort((a, b) => gpOf(b) - gpOf(a) || b.f[0] - a.f[0])[0];
+      if (best) list.push({ turn: t, race: best, gp: gpOf(best) });
+    }
+    const count = (n, arr) => {
+      if (n <= 0) return 0;
+      let k = 0, sum = 0;
+      for (const v of arr.map((a) => a.gp).sort((a, b) => b - a)) { sum += v; k += 1; if (sum >= n) return k; }
+      return Infinity;
+    };
+    const now = list.length && list[0].turn === state.turn ? list[0] : null;
+    const later = list.filter((a) => a.turn > state.turn);
+    const kLater = count(need, later);
+    plan.now = now;
+    plan.racesNeeded = Math.min(kLater, now ? 1 + count(need - now.gp, later) : Infinity);
+    plan.spare = kLater === Infinity ? 0 : later.length - kLater;
+    plan.picks = later.slice().sort((a, b) => b.gp - a.gp || a.turn - b.turn).slice(0, kLater === Infinity ? 4 : Math.min(4, kLater));
+    if (kLater === Infinity) plan.status = now ? "urgent" : "short";
+    else plan.status = plan.spare <= 2 ? "tight" : "ok";
+    return plan;
+  }
+
+  function gradePlanText(plan, sc) {
+    if (!plan) return "";
+    const kind = plan.kind === "dirt" ? " (dirt target)" : plan.kind === "sprint" ? " (sprint target)" : "";
+    const head = "Grade Points: " + plan.need + " of " + plan.goal + kind + " still needed by turn " + plan.due + " (" + turnInfo(plan.due, sc).text + ").";
+    if (plan.status === "met") return "Grade Point goal for this year is done. Extra points don't carry over, so race now for coins, stats and fans.";
+    const picks = (plan.picks || []).map((a) => a.race.n + " (turn " + a.turn + ", " + a.gp + ")").join(", ");
+    if (plan.status === "urgent") return head + " Later races that fit you can't cover it: race now (" + plan.now.race.n + ", " + plan.now.gp + " for a win).";
+    if (plan.status === "short") return head + " That's more than the races that fit you can pay, even winning them all. Missing it ends the run: race every turn you can, outside your best distance if you must.";
+    const n = plan.racesNeeded;
+    const spare = plan.spare === 0 ? "No spare race turns left before then, so don't skip any." : "Only " + plan.spare + " spare race turn" + (plan.spare === 1 ? "" : "s") + " left before then, so race when you can.";
+    return head + " " + (n === 1 ? "One win does it" : "About " + n + " wins do it") + (picks ? " (" + picks + ")" : "") + ". " +
+      (plan.status === "tight" ? spare : "Plenty of race turns left.") +
+      " Counting wins; lower places pay less, so fix the number if you place lower.";
   }
 
   // Goal race turns that come from the trainee's goals, minus any you unmarked.
@@ -885,6 +965,12 @@
       let raceKey = state.race;
       let named = state.raceName ? racesAt(state, state.turn).find((x) => x.n === state.raceName) : null;
       if (!raceKey && plan && (plan.status === "urgent" || plan.status === "short" || plan.status === "efficient") && plan.now) { named = plan.now.race; raceKey = GRADE_KEY[named.g]; }
+      // Trackblazer runs on races, so the best race this turn that fits the trainee (most Grade
+      // Points, then fans) is always weighed against training.
+      if (!raceKey && sc.gradePoints && state.deck && state.deck.trainee) {
+        const pick = racesAt(state, state.turn).filter((x) => !state.fans || (x.need || 0) <= state.fans).sort((a, b) => gpOf(b) - gpOf(a) || b.f[0] - a.f[0])[0];
+        if (pick) { named = pick; raceKey = GRADE_KEY[pick.g]; }
+      }
       if (raceKey && RACES[raceKey]) {
         const r = RACES[raceKey];
         const rb = 1 + (ctx.deck ? ctx.deck.raceBonus : state.raceBonus || 0) / 100;
@@ -902,6 +988,7 @@
           notes: ["about " + Math.round(r.sp * rb) + " skill points if you win"], parts: p,
           fans: named ? expectedFans(state, named) : Math.round(TYPICAL_FANS[raceKey] * 0.8 * (1 + fanBonus(state) / 100))
         };
+        if (sc.gradePoints) { o.gp = named ? gpOf(named) : GP_BY_KEY[raceKey] || 20; o.raceName = named ? named.n : ""; }
         if (plan && plan.status !== "met" && plan.status !== "covered") {
           const typ = ctx.typ;
           p.fans += plan.status === "urgent" || plan.status === "short" ? 2.5 * typ : plan.status === "efficient" ? (0.35 + 0.9 * plan.saves) * typ : 0;
@@ -909,7 +996,7 @@
         }
         if (consec >= 3) o.notes.push(consec + " races in a row already; another one risks a bad condition or mood drop");
         if (hook.race) {
-          const x = hook.race(ctx, raceKey) || {};
+          const x = hook.race(ctx, raceKey, named) || {};
           p.scenario = x.add || 0;
           if (x.note) o.notes.push(x.note);
         }
@@ -939,6 +1026,8 @@
     const reasons = best.notes.slice();
     const plan = fanPlan(state, scenario);
     if (plan && plan.status !== "met" && (plan.status !== "covered" || plan.turnsLeft <= 6)) reasons.push(fanPlanText(plan, scenario));
+    const gplan = gradePlan(state, scenario);
+    if (gplan && gplan.status !== "met" && (gplan.status !== "ok" || best.kind === "race")) reasons.push(gradePlanText(gplan, scenario));
     if (best.kind === "train") {
       const top = Object.entries(best.statGains).filter(([, g]) => g >= 1).sort((a, b) => b[1] - a[1]);
       reasons.unshift((best.gainEst ? "about " : "") + top.map(([s, g]) => STAT_LABELS[s] + " +" + Math.round(g)).join(", ") + (best.gainEst ? " (estimated)" : ""));
@@ -977,6 +1066,7 @@
       calib: ctx.calib,
       phase: phaseFor(state.turn, scenario),
       fanPlan: plan,
+      gradePlan: gplan,
       events: eventsFor(state.turn, scenario, state),
       turn: turnInfo(state.turn, scenario)
     };
@@ -1168,14 +1258,31 @@
     },
 
     trackblazer: {
-      race(ctx, grade) {
-        const x = ctx.state.extras || {};
-        const gp = { g1: 100, g2: 80, g3: 60, op: 40 }[grade] || 30;
-        const need = +(x.gpNeed || 0);
+      race(ctx, grade, named) {
+        const gp = named ? gpOf(named) : GP_BY_KEY[grade] || 20;
+        const plan = gradePlan(ctx.state, ctx.sc);
         let add = 70 * COIN * ctx.typ; // expected coins over likely placements
-        if (need > 0) add += (Math.min(gp, need) / 100) * 0.6 * ctx.typ;
-        else add += 0.1 * ctx.typ;
-        return { add, note: "about " + gp + " Grade Points and 100 coins if you win" + (need > 0 ? " (" + need + " still needed)" : "") };
+        if (plan && plan.need > 0) {
+          const share = Math.min(gp, plan.need) / 100;
+          // A goal later races can't cover outweighs any training; a tight one adds a push, and
+          // with plenty of race turns left the points could come later anyway.
+          add += plan.status === "urgent" || plan.status === "short" ? 2.5 * ctx.typ : plan.status === "tight" ? (0.3 + 0.6 * share) * ctx.typ : 0.2 * share * ctx.typ;
+        } else add += 0.1 * ctx.typ;
+        // Guides keep race chains to 2, unless the 3rd ends the year.
+        const chain = ((ctx.state.extras || {}).consec || 0) === 2 && ctx.sc.gradePoints.due.indexOf(ctx.state.turn) === -1;
+        if (chain) add -= 0.4 * ctx.typ;
+        return { add, note: (chain ? "this would be a 3rd race in a row; guides keep chains to 2 unless the 3rd ends the year. " : "") + "about " + gp + " Grade Points and 100 coins if you win" + (plan && plan.need > 0 ? " (" + plan.need + " still needed by turn " + plan.due + ")" : "") };
+      },
+      // Keeps the Grade Point count: a race takes its points off what's still needed (counting a
+      // win), and each Late December deadline starts the next goal (surplus doesn't carry over).
+      afterTurn(s, option, sc) {
+        const plan = gradePlan(s, sc);
+        if (!plan) return;
+        if (option.kind === "race" && option.gp && !option.forced) {
+          s.extras.gpNeed = Math.max(0, plan.need - option.gp);
+          s.extras.gpDue = plan.due;
+        }
+        if (s.turn === plan.due) { delete s.extras.gpNeed; delete s.extras.gpDue; }
       },
       items(ctx, options) {
         const x = ctx.state.extras || {};
@@ -1310,6 +1417,9 @@
         if (!w) return;
         const trains = options.filter((o) => o.kind === "train");
         const mood = ctx.state.mood;
+        const t = ctx.state.turn;
+        // Year-end race after this turn (all stats +10/+15/+20): Red adds 35% to race stats.
+        const yearEnd = { 24: 10, 48: 15, 72: 20 }[t] || 0;
         const tries = trains.map((o) => {
           let v;
           if (w === "red") {
@@ -1317,8 +1427,9 @@
             const moodUp = MOOD_MULT[4] / MOOD_MULT[mood];
             let mv = 0;
             for (let i = mood; i < 4; i++) mv += ctx.moodStep(i);
-            v.parts.item = o.parts.stats * (moodUp * 1.2 - 1) + mv;
+            v.parts.item = o.parts.stats * (moodUp * 1.2 - 1) + mv + 0.35 * 5 * yearEnd * ctx.avgW;
             v.notes.push("+50 energy, mood to max and the facility trains past level 5 this turn");
+            if (yearEnd) v.notes.push("the year-end race after this turn pays 35% more stats with Red active (it can't be used on the race screen)");
           } else if (w === "blue") {
             v = variant(o);
             v.parts.item = o.cards * (0.12 * ctx.typ + 3 * ctx.avgW);
@@ -1334,7 +1445,26 @@
           v.value = sumParts(v.parts);
           return v;
         }).sort((a, b) => b.value - a.value);
-        if (tries[0]) options.push(tries[0]);
+        const best = tries[0];
+        if (!best) return;
+        // Use it right away (no fragments drop while you hold 8), unless camp is a turn or two
+        // off: guides save it for camp, where it's worth more.
+        const soon = ctx.camp ? 0 : isCamp(t + 1, ctx.sc) ? 1 : isCamp(t + 2, ctx.sc) ? 2 : 0;
+        if (soon && !(w === "red" && yearEnd)) {
+          // Held, it pays about as much as now, scaled to camp's bigger trainings, minus the
+          // fragments that don't drop meanwhile.
+          const ratio = typAt(t + soon, ctx.sc, ctx.calib) / ctx.typ;
+          best.parts.item -= Math.max(0, best.parts.item) * ratio * (1 - 0.08 * soon);
+          const plain = trains.slice().sort((a, b) => b.value - a.value)[0];
+          const note = "camp starts in " + soon + " turn" + (soon > 1 ? "s" : "") + "; guides save the Wisdom for camp, where it's worth more";
+          best.notes.push(note);
+          if (plain) plain.notes.push("hold the " + w + " Wisdom: " + note);
+        } else {
+          best.parts.item += 0.1 * ctx.typ;
+          best.notes.push("no fragments drop while you hold 8, so use it now");
+        }
+        best.value = sumParts(best.parts);
+        options.push(best);
       }
     },
 
@@ -1554,7 +1684,7 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
   };
