@@ -11,7 +11,7 @@
   const APT = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
   const FX_SHORT = { 1: "Friendship", 8: "Training", 2: "Mood", 15: "Race", 19: "Specialty", 14: "Init. bond", 30: "SP bonus", 3: "Spd bonus", 4: "Sta bonus", 5: "Pow bonus", 6: "Gut bonus", 7: "Wit bonus", 27: "Fail prot.", 28: "Energy cut", 31: "Wit recovery", 41: "All stats", 18: "Hint rate", 17: "Hint Lv" };
   const blankFacility = (stat) => ({ stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 });
-  const blankGl = () => ({ songs: {}, tokens: [0, 0, 0, 0, 0] });
+  const blankGl = () => ({ songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} });
   const GAUGE = [["Blue", 40, "g-blue"], ["Green", 60, "g-green"], ["Orange", 80, "g-orange"], ["Max", 100, "g-max"]];
   const blankDeck = () => ({ trainee: null, slots: [null, null, null, null, null, null], globalOnly: true });
   const resetBonds = (d) => Object.assign({}, d, { slots: d.slots.map((sl) => (sl ? { id: sl.id, lb: sl.lb, bond: null, dates: { unlocked: false, done: 0 } } : null)) });
@@ -436,6 +436,15 @@
       $("#tabTrainees").hidden = true;
     }
 
+    $("#songsBody").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-gllesson]");
+      if (!b) return;
+      const plan = E.songPlan(state, scenario());
+      if (!plan) return;
+      state.gl.lessons = state.gl.lessons || {};
+      state.gl.lessons[plan.period] = Math.max(0, (state.gl.lessons[plan.period] || 0) + +b.dataset.gllesson);
+      commit(true);
+    });
     $("#songsBody").addEventListener("input", (e) => {
       const i = e.target.dataset.tok;
       if (i == null) return;
@@ -786,15 +795,37 @@
         <div>Active now: ${extras || "no extra stat gains yet"}${bon.fb ? ` · Friendship +${bon.fb}%` : ""}${bon.pendingFb ? ` · +${bon.pendingFb}% Friendship waiting for the next live` : ""}</div>
         <div>${learnedN >= 18 ? "18+ songs: special Girls' Legend U unlocked." : (18 - learnedN) + " more song(s) by Senior Late Dec for the special Girls' Legend U (16 by Senior Early Nov for the lyrics event)."}</div>
       </div>
+      ${songPlanHTML(sc)}
       ${top.length ? `<div class="song-advice"><b>Best next:</b> ${top.map((a) => `${esc(a.song.name)} ${a.affordable ? '<span class="pill c-clear-pick">affordable</span>' : `<span class="mini">(need ${a.short.map((x, i) => (x ? sc.tokens[i].slice(0, 2) + " " + x : "")).filter(Boolean).join(", ")})</span>`}`).join(" · ")}</div>` : ""}
       ${groups.map(([from, label]) => `<div class="song-group"><h3>${label}</h3>${sc.songs.filter((x) => x.from === from).map((song) => {
         const t = gl.songs[song.id];
         const locked = song.from > state.turn && t == null;
         return `<label class="song${t != null ? " on" : ""}${locked ? " locked" : ""}"><input type="checkbox" data-song="${song.id}" ${t != null ? "checked" : ""} ${locked ? "disabled" : ""}>
-          <span class="song-name">${esc(song.name)}${t != null ? ` <span class="mini">turn ${t}</span>` : ""}</span>
+          <span class="song-name">${esc(song.name)}${t != null ? ` <span class="mini">turn ${t}</span>` : ""}${t == null && planTag(song.id) ? " " + planTag(song.id) : ""}</span>
           <span class="song-cost">${tok(song.cost)}</span>
           <span class="mini song-fx">${esc(effect(song))}</span></label>`;
       }).join("")}</div>`).join("")}`;
+  }
+
+  // The song plan for this half year, with a technique lesson counter.
+  function songPlanHTML(sc) {
+    const plan = E.songPlan(state, sc);
+    if (!plan) return `<div class="song-plan mini">Song plan starts on turn 5, when lessons open. Year one: 5 songs, then carry the 6th over to after the 1st Promo Live.</div>`;
+    const lessons = plan.lessons;
+    return `<div class="song-plan">
+      <div><b>Song plan to the ${plan.last ? "Grand Live" : "live on turn " + plan.live}:</b> buy ${plan.target} song${plan.target > 1 ? "s" : ""}${plan.last ? "" : ", then carry 1 over"} · done: <b>${plan.bought}</b> song${plan.bought === 1 ? "" : "s"}, <b>${lessons}</b> technique lesson${lessons === 1 ? "" : "s"}
+        <button type="button" class="btn ghost small square" data-gllesson="-1" aria-label="One fewer technique lesson">−</button>
+        <button type="button" class="btn ghost small" data-gllesson="1">+ technique lesson</button></div>
+      <div class="plan-next">Next: ${esc(plan.text)}</div>
+    </div>`;
+  }
+
+  function planTag(id) {
+    const plan = E.songPlan(state, scenario());
+    if (!plan) return "";
+    if (plan.focus.indexOf(id) !== -1) return '<span class="pill c-clear-pick">aim for this</span>';
+    if (plan.avoid.indexOf(id) !== -1) return '<span class="pill c-close-call">skip in year one</span>';
+    return "";
   }
 
   // Token typing only refreshes the advice line, so the box keeps focus.

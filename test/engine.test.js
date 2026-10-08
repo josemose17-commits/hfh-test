@@ -252,12 +252,33 @@ test("Grand Concert songs add extra stat gains and a delayed friendship bonus", 
   assert.strictEqual(h.need, 2);
 });
 
-test("Grand Concert recommends an affordable song before acting", () => {
-  const s = base({ turn: 10, gl: { songs: {}, tokens: [40, 0, 0, 30, 0] } });
+test("Grand Concert follows the song plan: lessons first, then an affordable song (not the +Guts one in year one)", () => {
+  const gl = sc("grandlive");
+  const s = base({ turn: 10, gl: { songs: {}, tokens: [40, 0, 0, 30, 0], lessons: {} } });
+  const plan = E.songPlan(s, gl);
+  assert.strictEqual(plan.target, 5);
+  assert.strictEqual(plan.step, "lessons", "year one starts with 1 technique lesson before the first song");
+  assert.doesNotMatch(pick(s, "grandlive").headline, /Learn/);
+  s.gl.lessons = { 0: 1 };
   const r = pick(s, "grandlive");
   assert.match(r.headline, /Learn .* \(no turn used\)/);
-  const adv = E.songAdvice(s, sc("grandlive"));
-  assert.ok(adv[0].affordable);
+  assert.doesNotMatch(r.headline, /Nigekiri/, "the +Guts song (also affordable) is skipped in year one");
+  const adv = E.songAdvice(s, gl);
+  assert.ok(adv.find((a) => a.song.id === "nigekiri").avoid);
+});
+
+test("Grand Concert song plan: 5 songs and a carry-over in year one, 3 + carry after, 18 by the Grand Live", () => {
+  const gl = sc("grandlive");
+  const at = (turn, songs, lessons) => E.songPlan(base({ turn, gl: { songs, tokens: [0, 0, 0, 0, 0], lessons } }), gl);
+  const five = { kiseki: 6, tachiichi: 8, gothisway: 12, runrun: 16, zensoku: 20 };
+  assert.strictEqual(at(22, five, { 0: 14 }).step, "lessons", "2 more lessons until the 6th song shows");
+  assert.strictEqual(at(22, five, { 0: 16 }).step, "hold", "then hold it for after the live");
+  const y2 = at(25, five, {});
+  assert.strictEqual(y2.target, 3);
+  assert.match(y2.text, /carried over first/);
+  assert.deepStrictEqual(y2.focus, ["yumewo", "growup"]);
+  assert.strictEqual(at(61, five, {}).target, 4, "the last half buys the 4th song instead of carrying it");
+  assert.deepStrictEqual(at(50, five, {}).focus, ["daisuki", "fanfare"]);
 });
 
 test("hint cards add value and extra bond; Friend outings become an option", () => {
@@ -437,4 +458,13 @@ test("race calendar: races on a turn fit the trainee's aptitudes", () => {
   const races = E.racesAt(base({ deck: { trainee: urara.id, slots: [] } }), 50);
   assert.ok(races.every((r) => r.s === 2), "only dirt races for a dirt-only trainee");
   assert.ok(E.racesAt(base({}), 27).some((r) => r.n === "Kisaragi Sho"));
+});
+
+test("Grand Concert opening: turn 4 rests when energy is 65 or less, so turn 5 starts full", () => {
+  const gl = sc("grandlive");
+  const s = (energy) => base({ turn: 4, energy, mood: 2, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} }, facilities: facs({ speed: { cards: 1, unbonded: 1 }, wit: { cards: 1, unbonded: 1 } }) });
+  assert.strictEqual(E.recommend(s(60), gl).action.kind, "rest");
+  assert.strictEqual(E.recommend(s(95), gl).action.kind, "train");
+  assert.ok(E.eventsFor(12, gl, { goals: [] }).some((e) => e.label === "Reset check"));
+  assert.ok(E.eventsFor(12, gl, { goals: [] }).some((e) => /Debut/.test(e.label)), "the debut still shows");
 });
