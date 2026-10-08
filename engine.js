@@ -1479,10 +1479,16 @@
       actions(ctx) {
         const m = (ctx.state.extras && ctx.state.extras.ss) || 0;
         if (!m || ctx.camp) return [];
+        // Energy sets the win chance (game8): sure above ~20%, shaky below, worse below ~10%;
+        // a loss halves the stats.
+        const pct = (100 * ctx.E) / ctx.maxE;
+        const win = pct >= 30 ? 1 : pct > 20 ? 0.95 : pct > 10 ? 0.8 : 0.6;
+        const notes = ["uses a turn but no energy; trains every stat and pays Supporter Points", m < 5 ? "waiting for 5 members makes it stronger and can trigger an SSS Match" : "5 members: run it now (holding only leaves more gauges stuck at full)"];
+        if (win < 1) notes.push("energy is low enough that the match can be lost, which halves the stats; rest first if you can");
         return [{
           kind: "scenario", label: "SS Match (" + m + " member" + (m > 1 ? "s" : "") + ")",
-          parts: { scenario: 0.28 * ctx.typ * m + 0.1 * ctx.typ + (m >= 5 ? 0.3 * ctx.typ : 0) },
-          notes: ["uses a turn but no energy; trains every stat and pays Supporter Points", m < 5 ? "waiting for 5 members makes it stronger and can trigger an SSS Match" : "5 members: chance of an SSS Match"],
+          parts: { scenario: (0.28 * ctx.typ * m + 0.1 * ctx.typ + (m >= 5 ? 0.3 * ctx.typ : 0)) * (win + (1 - win) * 0.5) },
+          notes,
           consume: { ss: 0 }
         }];
       }
@@ -1541,7 +1547,9 @@
           return v;
         }).filter(Boolean).sort((a, b) => b.value - a.value);
         const best = tries[0];
-        if (best && (best.rainbows >= 2 || best.raw >= 1.2 * ctx.typ || ctx.camp || tier === 4)) options.push(best);
+        // Cooking Points give a lasting training bonus, so Junior cooks whenever it can.
+        if (best && t <= 24 && !(best.rainbows >= 2 || best.raw >= 1.2 * ctx.typ)) best.notes.push("Junior: cook whenever you can; Cooking Points boost training for the rest of the run");
+        if (best && (best.rainbows >= 2 || best.raw >= 1.2 * ctx.typ || ctx.camp || tier === 4 || t <= 24)) options.push(best);
       }
     },
 
@@ -1551,8 +1559,11 @@
       },
       items(ctx, options) {
         const best = bestTraining(options);
-        if (ctx.state.extras && ctx.state.extras.overdrive && best && isStrong(best, ctx)) {
-          useOn(best, ctx, "Fire Overdrive", best.parts.stats * 0.3, "Overdrive on a strong training", { overdrive: false });
+        const t = ctx.state.turn;
+        // Super Overdrive in the URA Finals can't use stored charges, so spend them by Late December.
+        const flush = t >= 69 && t <= 72;
+        if (ctx.state.extras && ctx.state.extras.overdrive && best && (isStrong(best, ctx) || flush)) {
+          useOn(best, ctx, "Fire Overdrive", best.parts.stats * 0.3, flush && !isStrong(best, ctx) ? "spend stored Overdrive before the URA Finals: Super Overdrive there can't use it" : "Overdrive on a strong training", { overdrive: false });
         }
       }
     },
@@ -1581,15 +1592,19 @@
         const t = ctx.state.turn;
         if (!tickets || ctx.camp || t > 72) return [];
         const friendFacs = trains.filter((o) => o.rainbows > 0).length;
+        // You hold only 1 ticket until Senior Early September (turn 65), when 2 more arrive.
+        // Classic: use it before camp. Senior spring: keep it through camp to enter the last
+        // half year with 3, unless the turn is exceptional.
         let ok;
-        if (t >= 61) ok = friendFacs >= 2 || ctx.turnsLeft <= tickets + 1;
-        else if (t >= 49) ok = tickets > 3 ? friendFacs >= 2 : friendFacs >= 4;
-        else ok = friendFacs >= 3 || (tickets > 3 && friendFacs >= 2);
+        if (t >= 65) ok = friendFacs >= 2 || ctx.turnsLeft <= tickets + 1;
+        else if (t >= 49) ok = friendFacs >= 4;
+        else ok = friendFacs >= 3 || (t >= 33 && t <= 36);
         if (t <= 24 && friendFacs < 3) ok = false;
         if (!ok) return [];
         const total = trains.reduce((a, o) => a + o.parts.stats + o.parts.sp, 0);
         const notes = [friendFacs + " facilities with friendship", "no energy cost and can't fail"];
-        if (t >= 49 && t < 61) notes.push("still worth it while banking tickets for the last half year");
+        if (t >= 33 && t <= 36 && friendFacs < 3) notes.push("use it before summer camp");
+        if (t >= 49 && t < 65) notes.push("an exceptional turn; otherwise keep the ticket through camp for 3 in the last half year");
         return [{ kind: "scenario", label: "Island Training", parts: { scenario: total * 0.5 + friendFacs * 0.1 * ctx.typ }, notes, consume: { tickets: (v) => Math.max(0, (v || 0) - 1) } }];
       }
     },
@@ -1655,18 +1670,27 @@
         const delta = -energyCost(best.stat, t, ctx.sc);
         // Only 2 per half year: spending one now gives up using it on a better turn later
         // (camp, high energy), unless the half year is about to end.
-        const reserve = urgent ? 0 : ctx.camp ? 0.3 * ctx.typ : 0.9 * ctx.typ;
+        let reserve = urgent ? 0 : ctx.camp ? 0.3 * ctx.typ : 0.9 * ctx.typ;
         const gain = (best.parts.stats + best.parts.sp) * 1.6;
         const moodDrop = ctx.state.mood > 0 ? ctx.moodStep(ctx.state.mood - 1) : 0;
+        const notes = ["every card and member joins every facility", urgent ? left + " left and the half year ends on turn " + end + ": use it or lose it" : good ? "high-value turn" : "energy is low, so consider saving it"];
+        // game8: early on, use it when all three gauges are full; from Classic camp on, not on
+        // turns when members rank up (the gains hit the cap).
+        const rankUps = ctx.state.facilities.reduce((a, f) => a + ((f.extras && f.extras.fullgauge) || 0), 0);
+        if (t <= 36 && x.allFull) { reserve -= 0.4 * ctx.typ; notes.push("all three gauges are full: the best early DREAMS turn"); }
+        if (t >= 37 && rankUps && !urgent) { reserve += 0.5 * ctx.typ * rankUps; notes.push("a member ranks up this turn; guides avoid DREAMS training then (gains hit the cap)"); }
         return [{
           kind: "scenario", label: "DREAMS training (" + STAT_LABELS[best.stat] + ")", energyDelta: delta, fail: best.fail,
           parts: { scenario: gain - reserve, energy: ctx.energyValue(delta), risk: -(best.fail / 100) * (gain + 0.5 * ctx.typ + moodDrop) },
-          notes: ["every card and member joins every facility", urgent ? left + " left and the half year ends on turn " + end + ": use it or lose it" : good ? "high-value turn" : "energy is low, so consider saving it"],
+          notes,
           consume: { dreamsLeft: (v) => Math.max(0, (v != null ? +v : 2) - 1) }
         }];
       },
       afterTurn(s) {
-        if ([12, 24, 36, 48, 60].indexOf(s.turn) !== -1) s.extras.dreamsLeft = 2;
+        // 2 per half year; Senior June's meeting refills 4 for the last half year.
+        if ([12, 24, 36, 48].indexOf(s.turn) !== -1) s.extras.dreamsLeft = 2;
+        if (s.turn === 60) s.extras.dreamsLeft = 4;
+        s.extras.allFull = false;
       }
     },
 
@@ -1675,8 +1699,11 @@
         const x = ctx.state.extras || {};
         const best = bestTraining(options);
         if (!best || !x.tasting) return;
-        if (isStrong(best, ctx) || (x.tips || 0) >= 9 || ctx.camp) {
-          useOn(best, ctx, "Hold a tasting session", best.parts.stats * 0.25, (x.tips || 0) >= 9 ? "tips are near the 10 cap" : "tasting right before a friendship training", { tasting: false });
+        // Tips reset after each Late December, so the last turns of a year use them up.
+        const t = ctx.state.turn;
+        const yearEnd = (x.tips || 0) > 0 && [24, 48, 72].some((d) => d - t >= 0 && d - t <= 2);
+        if (isStrong(best, ctx) || (x.tips || 0) >= 9 || ctx.camp || yearEnd) {
+          useOn(best, ctx, "Hold a tasting session", best.parts.stats * 0.25, yearEnd && !isStrong(best, ctx) ? "tips reset after Late December, so use them now" : (x.tips || 0) >= 9 ? "tips are near the 10 cap" : "tasting right before a friendship training", { tasting: false });
         }
       }
     }

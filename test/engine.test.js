@@ -502,3 +502,35 @@ test("Grand Masters: Wisdom waits for a camp that's a turn away, and Red counts 
   assert.ok(/Red Wisdom/.test(red.headline));
   assert.ok(red.action.notes.some((n) => /year-end race/.test(n)));
 });
+
+test("future scenarios: guide rules (SS Match energy, DREAMS refills, island tickets, Overdrive, tips, cooking)", () => {
+  // L'Arc: an SS Match at very low energy can be lost, so it's worth less.
+  const larc = sc("larc");
+  const ss = (energy) => E.evaluate(base({ turn: 20, energy, extras: { ss: 5 } }), larc).options.find((o) => /SS Match/.test(o.label));
+  assert.ok(ss(8).value < ss(80).value);
+  assert.ok(ss(8).notes.some((n) => /halves/.test(n)));
+  // Beyond Dreams: 4 DREAMS trainings after Senior June's meeting; avoid them on rank-up turns later on.
+  const dreams = sc("dreams");
+  const rest = { kind: "rest", energyDelta: 50, moodDelta: 0, prefix: [], notes: [], consume: {} };
+  assert.strictEqual(E.advance(base({ turn: 60, extras: {} }), dreams, rest).extras.dreamsLeft, 4);
+  assert.strictEqual(E.advance(base({ turn: 48, extras: {} }), dreams, rest).extras.dreamsLeft, 2);
+  const dr = (fullgauge) => E.evaluate(base({ turn: 52, energy: 90, extras: { dreamsLeft: 2 }, facilities: facs({ speed: { cards: 2, rainbows: 1, extras: { members: 2, fullgauge } } }) }), dreams).options.find((o) => /DREAMS/.test(o.label));
+  assert.ok(dr(1).value < dr(0).value, "a rank-up turn makes DREAMS training worth less");
+  // Island: Senior spring keeps the one ticket unless the turn is exceptional; Classic uses it before camp.
+  const isl = sc("island");
+  const island = (turn, rb) => E.evaluate(base({ turn, extras: { tickets: 1 }, facilities: facs({ speed: { cards: 2, rainbows: rb ? 1 : 0 }, stamina: { cards: 2, rainbows: rb ? 1 : 0 }, power: { cards: 2, rainbows: rb ? 1 : 0 } }) }), isl).options.some((o) => o.label === "Island Training");
+  assert.ok(!island(52, true), "3 friendship facilities isn't enough to spend it in Senior spring");
+  assert.ok(island(36, false), "Classic: use it before camp");
+  // Mecha: stored Overdrive is spent before the URA Finals.
+  assert.match(E.recommend(base({ turn: 71, extras: { overdrive: true }, facilities: facs({ speed: { cards: 1 } }) }), sc("mecha")).headline, /Overdrive/);
+  // Trecen-ken: tips reset after Late December, so a tasting is held then.
+  const tips = (turn) => E.recommend(base({ turn, extras: { tips: 4, tasting: true }, facilities: facs({ speed: { cards: 2 } }) }), sc("ramen")).headline;
+  assert.match(tips(47), /tasting/);
+  assert.doesNotMatch(tips(43), /tasting/, "mid-year it waits for a friendship training");
+  // Great Food Festival: Junior cooks even on an ordinary training (Cooking Points last all run).
+  const cook = (turn) => E.recommend(base({ turn, energy: 90, extras: { dish: "1" }, facilities: facs({ speed: { cards: 1 } }) }), sc("cooking")).headline;
+  assert.match(cook(5), /Cook/);
+  assert.doesNotMatch(cook(30), /Cook/);
+  // Onsen: the Junior reset check shows on the plan.
+  assert.ok(E.eventsFor(21, sc("onsen"), { goals: [] }).some((e) => e.label === "Reset check"));
+});
