@@ -40,6 +40,8 @@
       goalRace: false,
       badCondition: false,
       race: "",
+      raceName: "",
+      fans: 0,
       goals: [],
       goalsOff: [],
       extras: {},
@@ -178,11 +180,11 @@
               <div class="field"><span>Mood</span><div class="seg" id="mood" role="radiogroup" aria-label="Mood"></div></div>
             </div>
             <div class="row-wrap">
-              <label class="field"><span>Optional race open</span>
-                <select id="race"><option value="">None</option><option value="op">OP / Pre-OP</option><option value="g3">G3</option><option value="g2">G2</option><option value="g1">G1</option></select>
-              </label>
+              <label class="field grow"><span>Optional race open</span><select id="race"></select></label>
+              <label class="field"><span>Fans</span><input id="fans" type="number" inputmode="numeric" min="0" max="9999999" placeholder="0"></label>
               <label class="chip-toggle"><input type="checkbox" id="badCondition"> Bad condition</label>
             </div>
+            <p class="mini fanplan" id="fanPlan" hidden></p>
             <div id="turnExtras" class="extras"></div>
           </div>
 
@@ -257,7 +259,16 @@
       $("#energy").value = state.energy; $("#energyNum").value = state.energy; commit();
     }));
     $("#mood").addEventListener("click", (e) => { const b = e.target.closest("[data-mood]"); if (b) { state.mood = +b.dataset.mood; commit(); } });
-    $("#race").addEventListener("change", (e) => { state.race = e.target.value; commit(); });
+    $("#race").addEventListener("change", (e) => {
+      const v = e.target.value;
+      if (v.indexOf("named:") === 0) {
+        const r = E.racesAt(state, state.turn).find((x) => x.n === v.slice(6));
+        state.race = r ? E.GRADE_KEY[r.g] : "";
+        state.raceName = r ? r.n : "";
+      } else { state.race = v; state.raceName = ""; }
+      commit();
+    });
+    $("#fans").addEventListener("input", (e) => { const v = numOrNull(e.target.value); state.fans = v == null ? 0 : Math.max(0, v); commit(); });
     $("#badCondition").addEventListener("change", (e) => { state.badCondition = e.target.checked; commit(); });
     $("#trackStats").addEventListener("change", (e) => { state.trackStats = e.target.checked; commit(); });
 
@@ -1107,7 +1118,12 @@
     $("#energy").max = state.maxEnergy;
     $("#energy").value = state.energy;
     $("#energyNum").value = state.energy;
-    $("#race").value = state.race || "";
+    // This turn's races that fit the trainee, then the generic grades.
+    const races = E.racesAt(state, state.turn);
+    const fans = (x) => Math.round(E.expectedFans(state, x)).toLocaleString("en-US");
+    $("#race").innerHTML = `<option value="">None</option>${races.length ? `<optgroup label="Races this turn">${races.map((r) => `<option value="named:${esc(r.n)}">${E.GRADE_LABEL[r.g]} ${esc(r.n)} · ${r.d}m ${r.s === 2 ? "dirt" : "turf"} · ~${fans(r)} fans</option>`).join("")}</optgroup>` : ""}<optgroup label="Other"><option value="op">OP / Pre-OP</option><option value="g3">G3</option><option value="g2">G2</option><option value="g1">G1</option></optgroup>`;
+    $("#race").value = state.raceName && races.some((r) => r.n === state.raceName) ? "named:" + state.raceName : state.race || "";
+    if (document.activeElement !== $("#fans")) $("#fans").value = state.fans || "";
     $("#badCondition").checked = !!state.badCondition;
     $("#trackStats").checked = !!state.trackStats;
 
@@ -1174,6 +1190,9 @@
         <button type="button" class="btn" id="doneBtn">Done, next turn ▶</button>
         <button type="button" class="btn ghost" id="undoBtn" ${(state.log || []).length ? "" : "disabled"}>Undo last</button>
       </div>`;
+    const fp = $("#fanPlan");
+    fp.hidden = !rec.fanPlan || rec.fanPlan.status === "met";
+    if (rec.fanPlan) { fp.textContent = E.fanPlanText(rec.fanPlan, sc); fp.className = "mini fanplan fp-" + rec.fanPlan.status; }
     $("#dockText").textContent = (a.prefix.length ? a.prefix.join(" → ") + " → " : "") + a.label;
     $("#dock").className = "dock k-" + kind + (a.stat ? " s-" + a.stat : "");
   }

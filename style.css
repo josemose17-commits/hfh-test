@@ -422,3 +422,6 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 .tokpick { display: flex; gap: 4px; align-items: center; }
 .tokpick select { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: var(--surface); font-size: .8rem; }
 .tokpick input { width: 52px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 5px; background: var(--surface); }
+.fanplan { border-left: 3px solid var(--gold); padding-left: 8px; }
+.fanplan.fp-urgent, .fanplan.fp-short { border-color: var(--bad); color: var(--fg); }
+.fanplan.fp-efficient { border-color: var(--accent); }
