@@ -534,3 +534,34 @@ test("future scenarios: guide rules (SS Match energy, DREAMS refills, island tic
   // Onsen: the Junior reset check shows on the plan.
   assert.ok(E.eventsFor(21, sc("onsen"), { goals: [] }).some((e) => e.label === "Reset check"));
 });
+
+test("friend card outings: game8 data per card, the best choice for this turn, and no outing once they're all done", () => {
+  const D = require("../deck.js");
+  const DATES = require("../data/dates.js");
+  // Every card is a friend or group card, and every hint is a real skill.
+  Object.entries(DATES.cards).forEach(([id, info]) => {
+    const c = D.card(+id);
+    assert.ok(c && (c.ty === "friend" || c.ty === "group"), id + " is a friend or group card");
+    assert.ok(info.dates.length >= 3 && info.dates.length <= 5, id + " outing count");
+    const hints = [];
+    const walk = (o) => { if (!o) return; if (o.opts) o.opts.forEach(walk); (o.h || []).forEach(([sid]) => hints.push(sid)); };
+    info.dates.forEach(walk);
+    ["keep", "lose", "alt"].forEach((k) => walk(info.unlock[k]));
+    hints.forEach((sid) => assert.ok(D.DATA.skills[sid], id + " hint " + sid));
+  });
+  const deck = (id, done) => ({ slots: [{ id, lb: 4, bond: 90, dates: { unlocked: true, done } }] });
+  const outing = (o) => E.evaluate(base(Object.assign({ facilities: facs() }, o)), sc("ura")).options.find((x) => x.outing != null);
+  // Light Hello's 3rd outing: the +80 energy choice when tired, Speed +20 / Guts +20 when not.
+  const tired = outing({ energy: 5, deck: deck(30052, 2) });
+  assert.match(tired.label, /\(3\/5\)/);
+  assert.match(tired.notes[0], /\+80 energy/);
+  assert.match(outing({ energy: 95, mood: 4, deck: deck(30052, 2) }).notes[0], /Speed \+20/);
+  assert.strictEqual(outing({ energy: 50, deck: deck(30052, 5) }), undefined, "no 6th outing");
+  // Sasami's outings can fail, and the coach says so.
+  assert.match(outing({ energy: 50, deck: deck(30080, 0) }).notes[0], /can fail/);
+  // A card without data still gets the typical outing.
+  assert.match(outing({ energy: 50, deck: deck(10021, 0) }).notes[0], /typical values/);
+  // Advancing on an outing counts it.
+  const st = base({ energy: 25, deck: deck(30052, 2) });
+  assert.strictEqual(E.advance(st, sc("ura"), outing({ energy: 25, deck: deck(30052, 2) })).deck.slots[0].dates.done, 3);
+});

@@ -8,6 +8,7 @@
 // climbing) than this turn's training.
 (function (root) {
   const Deck = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
+  const Dates = root.UmaDates || (typeof require !== "undefined" ? require("./data/dates.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const STAT_LABELS = { speed: "Speed", stamina: "Stamina", power: "Power", guts: "Guts", wit: "Wit" };
   const MOODS = ["Awful", "Bad", "Normal", "Good", "Great"];
@@ -760,9 +761,74 @@
     }).sort((a, b) => (b.affordable - a.affordable) || (b.perToken - a.perToken));
   }
 
-  // ---- Friend / Group card outings ----
-  // Outings with Pal-type cards (e.g. Light Hello) beat a normal outing: energy, mood, stats, bond.
-  // Values are approximate until exact event data is loaded.
+  // ---- Friend / Group card outings ("dates") ----
+  // Cards in data/dates.js use game8's values for each outing: the coach values every choice
+  // (energy, max energy, mood, stats, skill points, hints, curing a bad condition) and picks
+  // the best for this turn. Other cards fall back to typical values.
+  const dateCard = (id) => (Dates && Dates.cards && Dates.cards[id]) || null;
+  const DATE_STATS = ["speed", "stamina", "power", "guts", "wit"];
+
+  function hintValue(h, ctx) {
+    return (h || []).reduce((a, [id, lv]) => {
+      const gold = Dates && Dates.gold && Dates.gold.indexOf(id) !== -1;
+      return a + lv * (gold ? 0.1 : 0.05) * ctx.typ;
+    }, 0);
+  }
+
+  // Value of one outcome, split into parts so the comparison reasons stay readable.
+  function dateParts(o, ctx) {
+    const st = ctx.state;
+    let mood = 0;
+    for (let i = 0, m = st.mood; i < Math.abs(o.mo || 0); i++) {
+      if (o.mo > 0 && m < 4) { mood += ctx.moodStep(m); m++; } else if (o.mo < 0 && m > 0) { mood -= ctx.moodStep(m - 1); m--; }
+    }
+    const rand = o.r ? (o.r * (o.rn || 1)) / 5 : 0; // a random stat, spread as an average
+    const stats = DATE_STATS.reduce((a, k, i) => { const g = ((o.s || [])[i] || 0) + rand; return a + (g ? ctx.gainValue(k, g) : 0); }, 0);
+    return {
+      energy: ctx.energyValue(o.e || 0) + (o.me ? ctx.energyValue(Math.min(o.me, 10)) * 0.5 : 0),
+      mood,
+      stats,
+      sp: (o.sp || 0) * SP_VALUE,
+      hint: hintValue(o.h, ctx),
+      bond: (o.b || 0) > 0 ? 0.04 * ctx.typ : 0,
+      condition: o.cure && st.badCondition ? 0.7 * ctx.typ * Math.min(1, ctx.turnsLeft / 10) : 0
+    };
+  }
+
+  // A choice can be an outcome or a roll between two outcomes (success or not).
+  function choiceParts(c, ctx) {
+    if (!c.roll) return dateParts(c, ctx);
+    const a = choiceParts(c.opts[0], ctx);
+    const b = choiceParts(c.opts[1], ctx);
+    const p = c.p != null ? c.p : 0.5;
+    const out = {};
+    Object.keys(a).forEach((k) => { out[k] = p * a[k] + (1 - p) * (b[k] || 0); });
+    return out;
+  }
+
+  // Short text of what an outcome gives, e.g. "+80 energy, mood +1" or "Speed +20, Guts +20".
+  function dateText(o) {
+    if (o.roll) return o.fail ? dateText(o.opts[0]) + " if it succeeds (it can fail: " + (dateText(o.opts[1]) || "nothing") + ")" : dateText(o.opts[0]) + " on a great success (a little less otherwise)";
+    const bits = [];
+    if (o.e) bits.push((o.e > 0 ? "+" : "") + o.e + " energy");
+    if (o.me) bits.push("+" + o.me + " max energy");
+    if (o.mo) bits.push("mood " + (o.mo > 0 ? "+" : "") + o.mo);
+    const s = o.s || [];
+    if (s.length && s.every((g) => g === s[0]) && s[0]) bits.push("all stats +" + s[0]);
+    else s.forEach((g, i) => { if (g) bits.push(STAT_LABELS[DATE_STATS[i]] + " +" + g); });
+    if (o.r) bits.push((o.rn > 1 ? o.rn + " random stats +" : "a random stat +") + o.r);
+    if (o.sp) bits.push(o.sp + " SP");
+    (o.h || []).forEach(([id, lv]) => bits.push(skillName(id) + " hint +" + lv));
+    if (o.cure) bits.push("cures a bad condition");
+    if (o.x) bits.push(o.x);
+    return bits.join(", ");
+  }
+
+  function skillName(id) {
+    const n = Deck && Deck.DATA && Deck.DATA.skills ? Deck.DATA.skills[id] : null;
+    return n || "skill #" + id;
+  }
+
   function outingOptions(ctx) {
     const { state, deck, typ } = ctx;
     if (!deck || ctx.camp || state.goalRace) return [];
@@ -771,6 +837,24 @@
       const d = raw.dates || {};
       if (!d.unlocked) return null;
       const n = (d.done || 0) + 1;
+      const info = dateCard(sl.card.id);
+      const known = info && info.dates[n - 1];
+      if (info && n > info.dates.length) return null; // every outing done
+      const base = { kind: "recreation", outing: sl.idx, prefix: [], consume: {} };
+      if (known) {
+        const tries = known.opts.map((c) => ({ c, parts: known.roll ? choiceParts(known, ctx) : choiceParts(c, ctx) }))
+          .map((x) => Object.assign(x, { value: sumParts(x.parts) })).sort((a, b) => b.value - a.value);
+        const pick = known.roll ? { c: known, parts: tries[0].parts, value: tries[0].value } : tries[0];
+        const out = pick.c.roll ? pick.c.opts[0] : pick.c;
+        const notes = ["outing " + n + " of " + info.dates.length + " with " + sl.card.n + ": " + dateText(pick.c)];
+        if (!known.roll && tries.length > 1) notes.push("pick the choice that gives that; the other " + (tries.length > 2 ? "choices give " : "one gives ") + tries.slice(1).map((x) => dateText(x.c)).join("; or "));
+        if (info.lv !== 50) notes.push("values from game8 at " + (info.lv ? "Lv" + info.lv : "an unstated level") + "; yours may differ a little");
+        return Object.assign(base, {
+          label: "Outing with " + sl.card.n + " (" + n + "/" + info.dates.length + ")",
+          energyDelta: out.e || 0, moodDelta: Math.max(-state.mood, Math.min(4 - state.mood, out.mo || 0)),
+          notes, parts: pick.parts, value: pick.value
+        });
+      }
       const last = n >= 5;
       const energy = 20;
       const parts = {
@@ -779,13 +863,12 @@
         stats: (last ? 25 : 12) * ctx.avgW,
         bond: 0.04 * typ
       };
-      return {
-        kind: "recreation", outing: sl.idx,
+      return Object.assign(base, {
         label: "Outing with " + sl.card.n,
-        energyDelta: energy, moodDelta: state.mood < 4 ? 1 : 0, prefix: [], consume: {},
-        notes: ["outing " + n + " with " + sl.card.n + ": energy, mood, stats and bond (approximate until event data is loaded)"].concat(state.mood >= 4 ? ["mood is already Great, but the outing still pays stats and energy"] : []),
+        energyDelta: energy, moodDelta: state.mood < 4 ? 1 : 0,
+        notes: ["outing " + n + " with " + sl.card.n + ": energy, mood, stats and bond (typical values; no outing data for this card)"].concat(state.mood >= 4 ? ["mood is already Great, but the outing still pays stats and energy"] : []),
         parts, value: sumParts(parts)
-      };
+      });
     }).filter(Boolean);
   }
 
@@ -1711,7 +1794,7 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, dateCard, dateText, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
   };

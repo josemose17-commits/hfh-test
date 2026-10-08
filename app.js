@@ -161,7 +161,7 @@
               <div id="traineeInfo" class="trainee-info"></div>
               <div class="slots" id="slots"></div>
               <div class="row-wrap"><button type="button" class="btn ghost small" id="allBond">All cards +5 bond</button><span class="mini">For events or items that raise every card's bond (e.g. Trackblazer's Grilled Carrots).</span></div>
-              <p class="mini">Bonds start at each card's initial value. Pressing Done adds 7 for every card you trained with, plus about 5 for a card that had a hint (!). Card events also raise bond: tap <b>+5</b> or <b>+10</b> when one happens, or tap the gauge color the game shows (orange = 80+, friendship unlocked). For Friend and Group cards like Light Hello, tick <b>Outings unlocked</b> once the game offers outings with her and the coach will weigh them against training.</p>
+              <p class="mini">Bonds start at each card's initial value. Pressing Done adds 7 for every card you trained with, plus about 5 for a card that had a hint (!). Card events also raise bond: tap <b>+5</b> or <b>+10</b> when one happens, or tap the gauge color the game shows (orange = 80+, friendship unlocked). For Friend and Group cards like Light Hello, tick <b>Outings unlocked</b> once the game offers outings with her and the coach will weigh them against training. Open a card's <b>Outings</b> list to see which event unlocks them and what each outing gives.</p>
             </div>
           </details>
           <datalist id="traineeList"></datalist><datalist id="cardList"></datalist><datalist id="cardListAll"></datalist>
@@ -950,9 +950,10 @@
         </div>
         ${c.ty === "friend" || c.ty === "group" ? `<div class="slot-dates">
           <label class="chip-toggle small"><input type="checkbox" data-date-unlock="${i}" ${sl.dates && sl.dates.unlocked ? "checked" : ""}> Outings unlocked</label>
-          <span class="mini">Outings done: <b>${(sl.dates && sl.dates.done) || 0}</b></span>
+          <span class="mini">Outings done: <b>${(sl.dates && sl.dates.done) || 0}</b>${E.dateCard(c.id) ? " of " + E.dateCard(c.id).dates.length : ""}</span>
           <button type="button" class="btn ghost small square" data-date-adj="${i}" data-v="-1" aria-label="One fewer outing">−</button>
           <button type="button" class="btn ghost small square" data-date-adj="${i}" data-v="1" aria-label="One more outing">+</button>
+          ${datesHTML(c, sl)}
         </div>` : ""}
         <div class="slot-fx">${keyEffects(c, lvl)}</div>
       </div>`;
@@ -1131,6 +1132,24 @@
         <button type="button" class="btn ghost small" data-add-card="${c.id}" ${inDeck ? "disabled" : ""}>${inDeck ? "In deck" : "Add to deck"}</button>
       </div>
     </div>`;
+  }
+
+  // A friend or group card's outings (game8 values): how they unlock, then each outing.
+  function datesHTML(c, sl) {
+    const info = E.dateCard(c.id);
+    if (!info) return `<p class="mini dates-note">No outing data for this card yet; the coach uses typical values.</p>`;
+    const u = info.unlock;
+    const how = u.auto ? `Outings unlock with the event “${esc(u.name)}” (no choice).`
+      : u.both ? `Outings unlock with the event “${esc(u.name)}”, whichever choice you pick.`
+      : `Outings unlock with the event “${esc(u.name)}”: take the choice that gives ${esc(E.dateText(u.keep))}. The other (${esc(E.dateText(u.lose))}) locks them.`;
+    const done = (sl.dates && sl.dates.done) || 0;
+    const row = (d, n) => d ? (d.roll ? esc(E.dateText(d)) : d.opts.map((o) => esc(E.dateText(o))).join(" <i>or</i> ")) : "not listed on game8";
+    const lv = info.lv === 50 ? "at full limit break" : info.lv ? "at Lv" + info.lv : "at a level game8 doesn't state";
+    return `<details class="dates"><summary>Outings (${info.dates.length})</summary>
+      <p class="mini">${how}${u.note ? " " + esc(u.note) : ""}</p>
+      <ol class="dates-list">${info.dates.map((d, n) => `<li class="${n < done ? "done" : n === done ? "next" : ""}">${row(d, n)}</li>`).join("")}</ol>
+      <p class="mini">Values from <a href="https://game8.jp/umamusume/${info.page}" target="_blank" rel="noopener">game8</a> ${lv}${info.partial ? "; game8 lists only some of this card's outings" : ""}.</p>
+    </details>`;
   }
 
   function extraField(i, bag) {

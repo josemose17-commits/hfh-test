@@ -430,3 +430,11 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 #fans { width: 110px; }
 .song-plan { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; background: var(--surface); }
 .song-plan .plan-next { font-weight: 600; }
+
+/* Friend and group card outings */
+.slot-dates .dates, .slot-dates .dates-note { flex-basis: 100%; margin: 4px 0 0; }
+.dates summary { cursor: pointer; font-size: 0.85rem; }
+.dates-list { margin: 4px 0; padding-left: 1.4em; font-size: 0.85rem; }
+.dates-list li { margin: 2px 0; overflow-wrap: anywhere; }
+.dates-list li.done { color: var(--muted); text-decoration: line-through; }
+.dates-list li.next { font-weight: 600; }

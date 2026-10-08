@@ -22,7 +22,7 @@ Open **Trainee and deck** and type your trainee and up to 6 support cards. Names
 - each training shows your cards as chips. Tap the ones that appear there, and add **Others** for characters not in your deck;
 - tap a card once for "here" and twice for "here with a hint (!)". Friendship (rainbow) is detected from each card's type and bond;
 - bonds go up by 7 for each training together and about 5 more for a hint. Card events are logged with the **+5** / **+10** buttons, or by tapping the gauge color the game shows (Blue, Green, Orange 80+, Max);
-- Friend and Group cards (Light Hello and others) track outings. Once **Outings unlocked** is ticked, "Outing with ..." is weighed against training as its own option;
+- Friend and Group cards (Light Hello and others) track outings. Once **Outings unlocked** is ticked, "Outing with ..." is weighed against training as its own option. Each card's **Outings** list (from game8's card pages) shows which event unlocks them and which choice keeps them, then every outing with what each choice gives; the coach uses those values and tells you which choice to pick for this turn (the energy one when you're tired, the stat one when you're not). Covered: SSR Tazuna (both), Riko Kashimoto, Sasami Anshinzawa, Light Hello, SR Aoi Kiryuin, The Throne's Assemblage, Team Sirius (only its last outing is listed), and the JP friend and group cards (Mei Satake, Ryoka Tsurugi, Yayoi Akikawa, Tucker Bryne, Kiyoko Hoshina, Casino Drive, Ancestors & Guides, Carvers of History, Embodiment of Legends). Other cards (the R friend cards) use typical values;
 - gains, skill points, energy cost and failure come from the game's training formula with your cards' real effects at their level: stat bonus, friendship, mood effect, training effectiveness, card count, your trainee's growth bonuses, plus energy cost reduction, failure protection and conditional unique effects such as bond-gated bonuses;
 - your race bonus is added up from your cards automatically.
 
@@ -170,6 +170,7 @@ When releasing a change to the site, bump the `?v=` number on the file links in 
 ## Files
 
 - `scenarios.js`: scenario data (mechanics, caps, base training values, key turns, deck advice, extra inputs).
+- `data/dates.js`: Friend and Group card outings (unlock event and each outing's rewards), from game8's card pages.
 - `data/gametora.js`: generated card, trainee and skill data. `tools/build_data.py` rebuilds it.
 - `deck.js`: card effects at any level, unique effects and the training gain formula.
 - `engine.js`: scoring, the energy lookahead, turn advance and undo. Pure functions, shared by the page and the tests.
@@ -182,6 +183,6 @@ When releasing a change to the site, bump the `?v=` number on the file links in 
 
 ## Limits
 
-These are estimates, not a game simulator. Support card event effects and Friend/Group outing rewards use approximate values (bond +5 per hint or outing, outings about +20 energy, +1 mood and a few stats). Exact per-event values need GameTora's training event data. Card effects and level-1 base training values come from GameTora's data. The increase per facility level, rest amounts, race rewards and scenario-specific bonuses are approximations. Real gains and failure rates from your screen always beat the built-in estimates. Turns marked "approx." are best-effort, so trust the in-game goal list when they disagree. The newest JP scenarios are based on launch-period guides.
+These are estimates, not a game simulator. Support card event effects use approximate values (bond +5 per hint or outing). Friend and Group outings use game8's values at the card level game8 lists (usually full limit break, so a lower-LB card gives a little less); outings that roll a great success or can fail are counted half and half, since the odds aren't published. Card effects and level-1 base training values come from GameTora's data. The increase per facility level, rest amounts, race rewards and scenario-specific bonuses are approximations. Real gains and failure rates from your screen always beat the built-in estimates. Turns marked "approx." are best-effort, so trust the in-game goal list when they disagree. The newest JP scenarios are based on launch-period guides.
 
 The deck optimizer ranks decks with a simplified career simulation, not a full game simulator: card events, outings and scenario-specific mechanics are approximate, so treat close results (a few percent apart) as ties. Skill values are for one fixed stat line per distance with no other skills, like the Umalator's default chart. Your own uma's numbers can differ, which is what the paste box is for. Global dates past the announced cups are estimates.
