@@ -364,3 +364,77 @@ test("Beyond Dreams: use DREAMS training before the half year ends", () => {
   const r = pick(base({ turn: 47, energy: 70, extras: { dreamsLeft: 2 }, facilities: facs({ speed: { cards: 2, rainbows: 1 } }) }), "dreams");
   assert.match(r.action.label, /DREAMS/);
 });
+
+test("Grand Concert: Done adds the training's tokens (typed or estimated), capped, and Undo removes them", () => {
+  const gl = sc("grandlive");
+  const st = base({ turn: 10, gl: { songs: {}, tokens: [0, 0, 0, 0, 0] }, facLevels: {} });
+  st.facilities[0] = fac("speed", { cards: 2, rainbows: 1, members: [], hints: [] });
+  const opt = pick(st, "grandlive").ranked.find((o) => o.kind === "train" && o.stat === "speed");
+  const g = E.tokenGain(st.facilities[0], st, gl);
+  assert.strictEqual(g.length, 2, "friendship training gives two token types");
+  assert.strictEqual(g[0].type, 0); // Speed: Dance first
+  const after = E.advance(st, gl, opt);
+  assert.strictEqual(after.gl.tokens[0], g[0].amount);
+  assert.strictEqual(after.gl.tokens[g[1].type], g[1].amount);
+  assert.deepStrictEqual(E.undo(after).gl.tokens, [0, 0, 0, 0, 0]);
+  st.facilities[0].extras = { tokType: 4, tok: 30 };
+  st.gl.tokens = [0, 0, 0, 0, 190];
+  assert.strictEqual(E.advance(st, gl, opt).gl.tokens[4], 200, "capped at 200 before the first live");
+  assert.strictEqual(E.tokenCap(Object.assign({}, st, { turn: 40 }), gl), 300);
+});
+
+test("trainee goals: fixed goal races are marked on their turns, choices only when they share a turn", () => {
+  const D = require("../deck.js");
+  const tr = (name) => D.DATA.trainees.find((t) => t.n === name);
+  const ura = sc("ura");
+  const sw = base({ turn: 27, deck: { trainee: tr("Special Week").id, slots: [] } });
+  const auto = E.autoGoalTurns(sw, ura);
+  [12, 27, 34, 44, 56, 70, 72].forEach((t) => assert.ok(auto.has(t), "turn " + t));
+  assert.ok(E.forcedTurns(sw, ura).has(34));
+  assert.ok(E.eventsFor(34, ura, sw).some((e) => /Japanese Derby/.test(e.label)));
+  // On a goal turn the coach races.
+  sw.goalRace = true;
+  assert.strictEqual(E.recommend(sw, ura).action.kind, "race");
+  // Daiwa Scarlet: Oaks or Derby, both on turn 34, so turn 34 is a goal race either way.
+  const dw = base({ deck: { trainee: tr("Daiwa Scarlet").id, slots: [] } });
+  assert.ok(E.autoGoalTurns(dw, ura).has(34));
+  // Unmarking a trainee goal works through goalsOff.
+  assert.ok(!E.autoGoalTurns(Object.assign({}, sw, { goalsOff: [34] }), ura).has(34));
+  // L'Arc keeps its own fixed goals.
+  assert.strictEqual(E.traineeGoals(sw, sc("larc")).length, 0);
+});
+
+test("trainee goals: 'pick one' goals on different turns are options, not forced", () => {
+  const D = require("../deck.js");
+  const fm = D.DATA.trainees.find((t) => t.n === "Fine Motion");
+  const st = base({ deck: { trainee: fm.id, slots: [] } });
+  const goals = E.traineeGoals(st, sc("ura"));
+  const opts = goals.filter((g) => g.choice);
+  assert.ok(opts.length >= 2 && opts.every((g) => !g.forced));
+  assert.ok(goals.some((g) => g.forced && g.turn === 64), "Sapporo Kinen stays a fixed goal");
+});
+
+test("fan goals: waits when bigger races later cover it, races when it must, and counts fans on Done", () => {
+  const D = require("../deck.js");
+  const ura = sc("ura");
+  const tm = D.DATA.trainees.find((t) => t.n === "Tamamo Cross"); // 5,000 fans by turn 29
+  const st = (turn, fans) => base({ turn, fans, deck: { trainee: tm.id, slots: [] }, race: "", raceName: "" });
+  const early = E.fanPlan(st(14, 700), ura);
+  assert.strictEqual(early.goal.fans, 5000);
+  assert.strictEqual(early.status, "wait");
+  assert.strictEqual(E.recommend(st(14, 700), ura).action.kind !== "race", true);
+  const late = E.recommend(st(26, 2500), ura);
+  assert.strictEqual(late.fanPlan.status, "urgent");
+  assert.strictEqual(late.action.kind, "race", "with no later way to make the goal, it races now");
+  const after = E.advance(st(26, 2500), ura, late.action);
+  assert.ok(after.fans > 2500, "Done on a race adds its fans");
+  assert.strictEqual(E.fanPlan(st(20, 6000), ura).status, "met");
+});
+
+test("race calendar: races on a turn fit the trainee's aptitudes", () => {
+  const D = require("../deck.js");
+  const urara = D.DATA.trainees.find((t) => t.n === "Haru Urara"); // dirt sprinter
+  const races = E.racesAt(base({ deck: { trainee: urara.id, slots: [] } }), 50);
+  assert.ok(races.every((r) => r.s === 2), "only dirt races for a dirt-only trainee");
+  assert.ok(E.racesAt(base({}), 27).some((r) => r.n === "Kisaragi Sho"));
+});

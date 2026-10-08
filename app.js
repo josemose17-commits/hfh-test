@@ -40,7 +40,10 @@
       goalRace: false,
       badCondition: false,
       race: "",
+      raceName: "",
+      fans: 0,
       goals: [],
+      goalsOff: [],
       extras: {},
       stats: {},
       log: [],
@@ -177,11 +180,11 @@
               <div class="field"><span>Mood</span><div class="seg" id="mood" role="radiogroup" aria-label="Mood"></div></div>
             </div>
             <div class="row-wrap">
-              <label class="field"><span>Optional race open</span>
-                <select id="race"><option value="">None</option><option value="op">OP / Pre-OP</option><option value="g3">G3</option><option value="g2">G2</option><option value="g1">G1</option></select>
-              </label>
+              <label class="field grow"><span>Optional race open</span><select id="race"></select></label>
+              <label class="field"><span>Fans</span><input id="fans" type="number" inputmode="numeric" min="0" max="9999999" placeholder="0"></label>
               <label class="chip-toggle"><input type="checkbox" id="badCondition"> Bad condition</label>
             </div>
+            <p class="mini fanplan" id="fanPlan" hidden></p>
             <div id="turnExtras" class="extras"></div>
           </div>
 
@@ -256,7 +259,16 @@
       $("#energy").value = state.energy; $("#energyNum").value = state.energy; commit();
     }));
     $("#mood").addEventListener("click", (e) => { const b = e.target.closest("[data-mood]"); if (b) { state.mood = +b.dataset.mood; commit(); } });
-    $("#race").addEventListener("change", (e) => { state.race = e.target.value; commit(); });
+    $("#race").addEventListener("change", (e) => {
+      const v = e.target.value;
+      if (v.indexOf("named:") === 0) {
+        const r = E.racesAt(state, state.turn).find((x) => x.n === v.slice(6));
+        state.race = r ? E.GRADE_KEY[r.g] : "";
+        state.raceName = r ? r.n : "";
+      } else { state.race = v; state.raceName = ""; }
+      commit();
+    });
+    $("#fans").addEventListener("input", (e) => { const v = numOrNull(e.target.value); state.fans = v == null ? 0 : Math.max(0, v); commit(); });
     $("#badCondition").addEventListener("change", (e) => { state.badCondition = e.target.checked; commit(); });
     $("#trackStats").addEventListener("change", (e) => { state.trackStats = e.target.checked; commit(); });
 
@@ -315,6 +327,11 @@
         f[k] = e.target.type === "checkbox" ? e.target.checked : numOrNull(e.target.value);
         if (k === "hint") e.target.closest("label").classList.toggle("on", f.hint);
       }
+      if (e.target.dataset.gltok) {
+        const k = e.target.dataset.gltok;
+        f.extras[k] = e.target.value === "" ? null : +e.target.value;
+        if (k === "tokType" || k === "tokType2") { box.outerHTML = facilityHTML(f, +box.dataset.idx); }
+      }
       if (e.target.dataset.lv) {
         const v = +e.target.value;
         if (v) state.facLevels[f.stat] = v; else delete state.facLevels[f.stat];
@@ -347,7 +364,7 @@
         const v = e.target.value.trim();
         const t = traineeByLabel.get(v);
         if (t && t.id === state.deck.trainee) return;
-        if (t) { state.deck.trainee = t.id; commit(true); flash(t.n + " set as trainee"); }
+        if (t) { setTrainee(t.id); }
         else if (!v) { state.deck.trainee = null; commit(true); }
         else flash("No trainee matches that name. Pick one from the list.");
       });
@@ -490,7 +507,7 @@
       const add = e.target.closest("[data-add-card]");
       if (add) { addToDeck(+add.dataset.addCard); return; }
       const use = e.target.closest("[data-use-trainee]");
-      if (use) { state.deck.trainee = +use.dataset.useTrainee; commit(true); flash(D.trainee(state.deck.trainee).n + " set as trainee"); return; }
+      if (use) { setTrainee(+use.dataset.useTrainee); return; }
       const more = e.target.closest("[data-more]");
       if (more) { db().limit += 60; renderDbList(); return; }
       const row = e.target.closest("[data-db-row]");
@@ -528,12 +545,8 @@
         const v = e.target.value.trim();
         const tr = traineeByLabel.get(v);
         if ((tr && tr.id !== state.deck.trainee) || (!v && state.deck.trainee)) {
-          state.deck.trainee = tr ? tr.id : null;
           if (tr) tier().deck = tier().deck.filter((x) => D.card(x.id).cid !== tr.cid);
-          save();
-          renderDeck();
-          renderTab();
-          flash(tr ? tr.n + " set as trainee" : "Trainee cleared");
+          setTrainee(tr ? tr.id : null);
         }
         return;
       }
@@ -581,15 +594,25 @@
   function setTurn(t) {
     state.turn = t;
     clampTurn();
-    state.goalRace = (state.goals || []).indexOf(state.turn) !== -1;
+    state.goalRace = E.isGoalTurn(state, scenario(), state.turn);
     commit(true);
   }
 
+  // A goal from the trainee's goal list is unmarked through goalsOff; others through goals.
   function toggleGoal() {
-    const g = new Set(state.goals || []);
-    if (g.has(state.turn)) g.delete(state.turn); else g.add(state.turn);
-    state.goals = Array.from(g).sort((a, b) => a - b);
-    state.goalRace = g.has(state.turn);
+    const sc = scenario();
+    const t = state.turn;
+    const auto = E.traineeGoals(state, sc).some((x) => x.forced && x.turn === t);
+    if (auto) {
+      const off = new Set(state.goalsOff || []);
+      if (off.has(t)) off.delete(t); else off.add(t);
+      state.goalsOff = Array.from(off);
+    } else {
+      const g = new Set(state.goals || []);
+      if (g.has(t)) g.delete(t); else g.add(t);
+      state.goals = Array.from(g).sort((a, b) => a - b);
+    }
+    state.goalRace = E.isGoalTurn(state, sc, t);
     commit(true);
   }
 
@@ -641,13 +664,14 @@
   // Value edits refresh only the outputs, so a field being typed in keeps focus.
   function commit(full) {
     state.example = false;
+    state.goalRace = E.isGoalTurn(state, scenario(), state.turn);
     save();
     if (full) render(); else renderOutputs();
   }
 
   function renderStrip() {
     const sc = scenario();
-    const evTurns = new Set((sc.events || []).map((e) => e.turn).concat(sc.finale.turns, [12]));
+    const evTurns = new Set((sc.events || []).map((e) => e.turn).concat(sc.finale.turns, [12], E.traineeGoals(state, sc).map((g) => g.turn)));
     const goals = new Set(E.forcedTurns(state, sc));
     const logged = new Set((state.log || []).map((l) => l.turn));
     let html = "";
@@ -662,12 +686,14 @@
     const ti = E.turnInfo(state.turn, sc);
     $("#turnNum").textContent = "Turn " + state.turn + " / " + sc.totalTurns;
     $("#turnText").innerHTML = esc(ti.text) + (E.isCamp(state.turn, sc) ? ' <span class="chip camp">summer camp</span>' : "");
-    const isGoal = (state.goals || []).indexOf(state.turn) !== -1;
+    const isGoal = E.isGoalTurn(state, sc, state.turn);
     const forcedFinale = sc.finale.forced && sc.finale.turns.indexOf(state.turn) !== -1;
     const g = $("#goalToggle");
     g.setAttribute("aria-pressed", String(isGoal || forcedFinale));
     g.disabled = forcedFinale;
-    g.textContent = forcedFinale ? "★ Finale race" : isGoal ? "★ Goal race (tap to unmark)" : "☆ Mark goal race";
+    const tg = E.traineeGoals(state, sc).find((x) => x.turn === state.turn);
+    const raceName = tg ? tg.label.replace(/^Goal( option)?: /, "") : "";
+    g.textContent = forcedFinale ? "★ Finale race" : isGoal ? "★ Goal race" + (tg && tg.forced ? ": " + raceName : "") + " (tap to unmark)" : tg && tg.choice ? "☆ Pick this goal: " + raceName : "☆ Mark goal race";
   }
 
   function pipsHTML(k, v, label, cls) {
@@ -692,9 +718,23 @@
         ${deckOn() ? "" : `<label class="chk ${f.hint ? "on" : ""}"><input type="checkbox" data-k="hint" ${f.hint ? "checked" : ""}> Hint !</label>`}
         ${levelPicker(f)}
         ${facInputs.map((i) => extraField(i, f.extras)).join("")}
+        ${sc.tokenOf ? tokenRow(f, sc) : ""}
       </fieldset>`;
   }
 
+
+  // Grand Concert: the token(s) this training gives. Prefilled with its usual token and an
+  // estimate; type what the training shows and Done adds it to your tokens.
+  function tokenRow(f, sc) {
+    const g = E.tokenGain(f, state, sc);
+    const ex = f.extras || {};
+    const sel = (key, cur) => `<select data-gltok="${key}" aria-label="Token type">${sc.tokens.map((n, i) => `<option value="${i}" ${cur === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
+    const row = (x, k) => `<div class="tokpick"><span class="tok t${x.type}">${sc.tokens[x.type].slice(0, 2)}</span>${sel(k ? "tokType2" : "tokType", x.type)}<input type="number" inputmode="numeric" min="0" max="99" data-gltok="${k ? "tok2" : "tok"}" value="${ex[k ? "tok2" : "tok"] != null ? ex[k ? "tok2" : "tok"] : ""}" placeholder="~${x.amount}" aria-label="Token amount"></div>`;
+    return `<div class="tokrow" title="Tokens this training gives. Set the type and amount your screen shows; Done adds them to your tokens.">
+      <span class="pip-label">Tokens${g.length > 1 ? " (friendship: 2 types)" : ""}</span>
+      ${g.map((x, i) => row(x, i)).join("")}
+    </div>`;
+  }
 
   // ---- Deck (GameTora data) ----
   const cardByLabel = new Map();
@@ -740,7 +780,7 @@
     const top = adv.slice(0, 3);
     $("#songsBody").innerHTML = `
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
-      <p class="mini">Type your tokens from the lesson screen. Ticking a song records the turn and takes its cost off your tokens.</p>
+      <p class="mini">Tokens go up by themselves when you press <b>Done</b> on a training (set the token type and amount each training shows on its card; blank uses the estimate), capped at ${E.tokenCap(state, sc)} for now (+50 after each live). Ticking a song takes its cost off. You can still correct the numbers here.</p>
       <div class="song-status">
         ${hype && hype.next != null ? `<div><b>${hype.since}/3</b> songs since the last live. Next live: turn ${hype.next} (${esc(E.turnInfo(hype.next, sc).text)})${hype.need ? `, ${hype.need} more for a guaranteed Great Success.` : ", Hype gauge full."}</div>` : ""}
         <div>Active now: ${extras || "no extra stat gains yet"}${bon.fb ? ` · Friendship +${bon.fb}%` : ""}${bon.pendingFb ? ` · +${bon.pendingFb}% Friendship waiting for the next live` : ""}</div>
@@ -888,6 +928,16 @@
     const info = E.deckInfo(state);
     $("#deckSummary").textContent = (t ? t.n + " · " : "") + (used ? used + " card" + (used > 1 ? "s" : "") + (info ? " · race bonus " + info.raceBonus + "%" : "") : "Optional: set your deck for exact gains");
     if (!used && !t) $("#deckPanel").open = $("#deckPanel").open || false;
+  }
+
+  // Picking a trainee also loads her career goals into the turn plan.
+  function setTrainee(id) {
+    state.deck.trainee = id;
+    state.goalsOff = [];
+    commit(true);
+    if (!id) { flash("Trainee cleared"); return; }
+    const goals = E.traineeGoals(state, scenario()).filter((g) => g.forced).length;
+    flash(D.trainee(id).n + " set as trainee" + (goals ? " · " + goals + " goal races marked" : ""));
   }
 
   function clearSlot(i) {
@@ -1068,7 +1118,12 @@
     $("#energy").max = state.maxEnergy;
     $("#energy").value = state.energy;
     $("#energyNum").value = state.energy;
-    $("#race").value = state.race || "";
+    // This turn's races that fit the trainee, then the generic grades.
+    const races = E.racesAt(state, state.turn);
+    const fans = (x) => Math.round(E.expectedFans(state, x)).toLocaleString("en-US");
+    $("#race").innerHTML = `<option value="">None</option>${races.length ? `<optgroup label="Races this turn">${races.map((r) => `<option value="named:${esc(r.n)}">${E.GRADE_LABEL[r.g]} ${esc(r.n)} · ${r.d}m ${r.s === 2 ? "dirt" : "turf"} · ~${fans(r)} fans</option>`).join("")}</optgroup>` : ""}<optgroup label="Other"><option value="op">OP / Pre-OP</option><option value="g3">G3</option><option value="g2">G2</option><option value="g1">G1</option></optgroup>`;
+    $("#race").value = state.raceName && races.some((r) => r.n === state.raceName) ? "named:" + state.raceName : state.race || "";
+    if (document.activeElement !== $("#fans")) $("#fans").value = state.fans || "";
     $("#badCondition").checked = !!state.badCondition;
     $("#trackStats").checked = !!state.trackStats;
 
@@ -1135,6 +1190,9 @@
         <button type="button" class="btn" id="doneBtn">Done, next turn ▶</button>
         <button type="button" class="btn ghost" id="undoBtn" ${(state.log || []).length ? "" : "disabled"}>Undo last</button>
       </div>`;
+    const fp = $("#fanPlan");
+    fp.hidden = !rec.fanPlan || rec.fanPlan.status === "met";
+    if (rec.fanPlan) { fp.textContent = E.fanPlanText(rec.fanPlan, sc); fp.className = "mini fanplan fp-" + rec.fanPlan.status; }
     $("#dockText").textContent = (a.prefix.length ? a.prefix.join(" → ") + " → " : "") + a.label;
     $("#dock").className = "dock k-" + kind + (a.stat ? " s-" + a.stat : "");
   }

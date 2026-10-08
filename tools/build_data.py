@@ -73,6 +73,10 @@ def main():
     effects = get("support_effects")
     trainees = get("character-cards")
     skills = get("skills")
+    objectives = get("ura-objectives")
+    race_list = get("races")
+    ura_races = get("ura-races")
+    race_fans = {x["id"]: {f["order"]: f["fans"] for f in x["fans"]} for x in get("race-fans")}
     events = fetch_events()
 
     effect_meta = {}
@@ -129,6 +133,47 @@ def main():
         want_skills.update(tr["us"] + tr["is"] + tr["as"])
         out_trainees.append(tr)
 
+    # Career objectives per character (GameTora's URA objectives; other scenarios use the same
+    # character goals except where the scenario sets its own). Each goal: turn (deadline, or the
+    # race's turn for a fixed race), condition type (1 = finish in the top N, 3 = fans), value,
+    # race choice (0 = one fixed race, else pick one of the races), race names. URA Finals goals
+    # (target type 3) are left to the scenario.
+    out_obj = {}
+    for o in objectives:
+        goals = []
+        for g in sorted(o["objectives"], key=lambda x: x.get("order", 0)):
+            if g.get("target_type") == 3:
+                continue
+            goals.append({
+                "t": g.get("turn"),
+                "c": g.get("cond_type"),
+                "v": g.get("cond_value"),
+                "ch": g.get("race_choice", 0),
+                "r": [r.get("name_en") or r.get("name_ja") for r in g.get("races", [])],
+            })
+        out_obj[o["char_id"]] = goals
+
+    # Career race calendar: every race you can enter on each turn (years 1-3), with grade
+    # (100 G1, 200 G2, 300 G3, 400 OP, 700 Pre-OP), fans for 1st to 5th, fans needed to enter,
+    # distance and surface (1 turf, 2 dirt). Turn = (year - 1) * 24 + (month - 1) * 2 + half.
+    by_instance = {r["id"]: r for r in race_list}
+    out_races = []
+    for x in ura_races:
+        r = by_instance.get(x.get("instance"))
+        if not r or x.get("year", 9) > 3 or r.get("grade") not in (100, 200, 300, 400, 700):
+            continue
+        fans = race_fans.get(x.get("fans_gain"), {})
+        out_races.append({
+            "t": (x["year"] - 1) * 24 + (x["month"] - 1) * 2 + x["half"],
+            "n": r.get("name_en") or r.get("name_ja"),
+            "g": r["grade"],
+            "f": [fans.get(i, 0) for i in range(1, 6)],
+            "need": x.get("fans_needed", 0),
+            "d": r.get("distance"),
+            "s": r.get("terrain"),
+        })
+    out_races.sort(key=lambda r: (r["t"], r["g"], r["n"]))
+
     skill_names = {}
     skill_cost = {}
     for s in skills:
@@ -145,6 +190,8 @@ def main():
         "trainees": out_trainees,
         "skills": skill_names,
         "skillCost": skill_cost,
+        "objectives": out_obj,
+        "races": out_races,
     }
     body = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     # Keep the old build date when nothing else changed, so scheduled rebuilds stay quiet.

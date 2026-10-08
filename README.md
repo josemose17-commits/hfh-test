@@ -32,6 +32,14 @@ Scenario-specific boosts that the formula doesn't cover (Unity training, island 
 - **Support cards**: filter by type, rarity, Global availability, limit break and whether you own the card, and sort by any effect. Tap a card for its effects at every limit break, its unique effect, hint skills, event skills and release dates.
 - **Trainees**: aptitudes, growth bonuses and unique skill.
 
+## Career goals
+
+Picking a trainee loads her career goals from GameTora (her objectives list): fixed goal races are marked as goal races on their turns (★ on the turn strip, and the coach races them), "pick one" goals that fall on the same turn (Oaks or Derby) count as a goal race either way, "pick one" goals on different turns show as options you choose by tapping ★ on that turn, and fan or race-count goals show on the turn plan as deadlines. You can unmark any goal turn with the goal button. Scenarios with their own goal races (L'Arc) keep those, and every scenario's finale stays as before.
+
+## Fan goals and races
+
+The **Optional race open** list shows the races on this turn from the career calendar (GameTora) that fit your trainee's aptitudes (B or better), with their expected fans; **Fans** tracks your fan count (type it from the game; Done on a race adds the expected fans, with your deck's Fan Bonus). When a fan goal is coming, the coach plans it with the real races before the deadline, counting your goal races and races you can only enter with more fans: it says **race now** when later races can't cover it (and adds the best race this turn if you didn't pick one), says racing now is **worth it** when it saves you races later or fits the plan for free, and says you can **keep training** when bigger races later do the job, listing them. If the goal can't be reached with races that fit, it tells you to race every chance, since missing a goal ends the run.
+
 ## My cards
 
 Mark the support cards you own and their limit break, with the **Owned** picker on any card or **Quick add** under **My cards** in the Support cards tab. They're saved in your browser. **Copy backup code** gives a short code (`UMA1:...`) you can keep or paste into **Restore** on another device. When you add a card you own to your deck, it starts at your limit break, and **Cards I own** limits the deck picker to your cards.
@@ -66,7 +74,7 @@ Unlike a racing deck, every target skill counts (not just the best 8), and **Sta
 ## Grand Concert
 
 A **Grand Concert songs** panel appears in this scenario:
-- Type your tokens from the lesson screen and tick songs as you learn them.
+- Tokens add up by themselves: each training card shows the token it gives (its usual type, with an estimated amount). Set the type and amount the training shows if they differ (friendship training gives a second type), and **Done** adds them, capped at 200 (+50 after each live). **Undo** takes them back. You can still type your tokens directly, and ticking a song takes its cost off.
 - It tracks Hype progress (3 songs since the last live guarantee a Great Success) and ranks the songs you can learn next by value per token.
 - The coach puts "Learn ..." in front of its recommendation when you can afford a good song.
 - Extra Stat Gain songs add their permanent bonus to the gain formula right away. Friendship Bonus songs start counting after the next live.

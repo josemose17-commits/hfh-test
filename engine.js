@@ -82,8 +82,195 @@
     return { id: "senior2", name: "Senior autumn", tip: "Close the remaining stat gaps. Stats over 1200 count half, so skill points matter more now." };
   }
 
+  // The trainee's career goals (GameTora objectives), as turn plan entries. Fixed goal races
+  // are forced; "pick one" goals are forced only when every option is on the same turn;
+  // fan and race-count goals are deadlines. Scenarios with their own goal races keep them.
+  function traineeGoals(state, sc) {
+    if (!Deck || !Deck.DATA || !Deck.DATA.objectives || !state || !state.deck || !state.deck.trainee || (sc && sc.goalTurns)) return [];
+    const t = Deck.trainee(state.deck.trainee);
+    const list = t && Deck.DATA.objectives[t.cid];
+    if (!list) return [];
+    const place = (g) => (g.v === 0 ? "enter" : g.v === 1 ? "win" : "top " + g.v);
+    const last = Math.min(72, (sc && sc.totalTurns) || 72);
+    const out = [];
+    for (let i = 0; i < list.length;) {
+      const g = list[i];
+      if (g.ch) {
+        let j = i;
+        while (j < list.length && list[j].ch) j++;
+        const grp = list.slice(i, j);
+        const turns = Array.from(new Set(grp.map((x) => x.t)));
+        const all = Array.from(new Set(grp.reduce((a, x) => a.concat(x.r), [])));
+        if (turns.length === 1) {
+          out.push({ turn: turns[0], forced: true, label: "Goal: " + all.join(" or ") + " (" + place(grp[0]) + ")", tip: "Career goal. Race whichever one your goal list shows." });
+        } else {
+          turns.forEach((tu) => {
+            const here = Array.from(new Set(grp.filter((x) => x.t === tu).reduce((a, x) => a.concat(x.r), [])));
+            out.push({ turn: tu, forced: false, choice: true, label: "Goal option: " + here.join(" or ") + " (" + place(grp.find((x) => x.t === tu)) + ")", tip: "Your goal is one of: " + all.join(", ") + ". Tap ★ on the turn of the race you pick." });
+          });
+        }
+        i = j;
+        continue;
+      }
+      if (g.c === 1 && g.r.length) out.push({ turn: g.t, forced: true, races: g.r, place: g.v, label: "Goal: " + g.r.join(" or ") + " (" + place(g) + ")", tip: g.t === 12 ? "Goal race: your debut." : "Career goal race." });
+      else if (g.c === 3) out.push({ turn: g.t, forced: false, fans: g.v, label: "Goal: " + g.v.toLocaleString("en-US") + " fans by this turn", tip: "Race optional races before this if you're short of fans." });
+      else out.push({ turn: g.t, forced: false, label: "Goal due", tip: "A career goal is due by this turn. Check the in-game goal list." });
+      i++;
+    }
+    return out.filter((x) => x.turn >= 1 && x.turn <= last);
+  }
+
+  // ---- Races and fans ----
+  // The career race calendar (GameTora) gives every race on each turn with its fans by place.
+  const GRADE_KEY = { 100: "g1", 200: "g2", 300: "g3", 400: "op", 700: "op" };
+  const GRADE_LABEL = { 100: "G1", 200: "G2", 300: "G3", 400: "OP", 700: "Pre-OP" };
+  const TYPICAL_FANS = { g1: 10500, g2: 5700, g3: 3800, op: 2300 }; // 1st place, median per grade
+  const APT_RANK = "GFEDCBAS";
+  const distIdx = (m) => (m <= 1400 ? 2 : m <= 1800 ? 3 : m <= 2400 ? 4 : 5);
+
+  // Races on a turn the trainee can run well (B aptitude or better for surface and distance).
+  function racesAt(state, turn) {
+    const all = (Deck && Deck.DATA && Deck.DATA.races) || [];
+    const t = state.deck && state.deck.trainee && Deck ? Deck.trainee(state.deck.trainee) : null;
+    return all.filter((r) => r.t === turn && (!t || (APT_RANK.indexOf(t.apt[r.s === 2 ? 1 : 0]) >= 5 && APT_RANK.indexOf(t.apt[distIdx(r.d)]) >= 5)));
+  }
+
+  function fanBonus(state) {
+    if (!Deck || !state.deck || !state.deck.slots) return 0;
+    return state.deck.slots.reduce((a, sl) => {
+      const c = sl && Deck.card(sl.id);
+      return a + (c ? Deck.baseEffects(c, Deck.levelFor(c, sl.lb))[16] || 0 : 0);
+    }, 0);
+  }
+
+  // Expected fans from a race: 60% a win and 40% about 3rd (a goal's placing is only the minimum).
+  function expectedFans(state, race) {
+    const f = race.f;
+    const base = 0.6 * f[0] + 0.4 * f[2];
+    return Math.round(base * (1 + fanBonus(state) / 100));
+  }
+
+  // The race a goal turn holds, from the goal list and the calendar.
+  function goalRaceAt(state, sc, turn) {
+    const g = traineeGoals(state, sc).find((x) => x.forced && x.turn === turn && x.races);
+    if (!g) return null;
+    const r = ((Deck && Deck.DATA && Deck.DATA.races) || []).find((x) => x.t === turn && g.races.indexOf(x.n) !== -1);
+    if (r) return { race: r, place: g.place };
+    // The debut isn't in the calendar: about 700 fans for a win.
+    if (g.races.some((n) => /Debut/.test(n))) return { race: { n: g.races[0], g: 900, f: [700, 280, 175, 105, 70] }, place: g.place };
+    return null;
+  }
+
+  const bestRaceAt = (state, turn, have) => racesAt(state, turn).filter((r) => (r.need || 0) <= have)
+    .map((r) => ({ race: r, fans: expectedFans(state, r) })).sort((a, b) => b.fans - a.fans)[0] || null;
+
+  // Fans from goal races on this turn (they happen anyway).
+  function fromGoalsBefore(state, sc, forced) {
+    const gr = forced.has(state.turn) ? goalRaceAt(state, sc, state.turn) : null;
+    return gr ? expectedFans(state, gr.race) : 0;
+  }
+
+  // Plans the next fan goal: how many fans are still needed after the goal races before it, and
+  // whether to race now, whether racing now is free (it doesn't add a race), or whether bigger
+  // races later cover it. status: met | covered | urgent | efficient | wait | short.
+  function fanPlan(state, sc) {
+    const goal = traineeGoals(state, sc).find((g) => g.fans && g.turn >= state.turn);
+    if (!goal) return null;
+    const have = state.fans || 0;
+    const plan = { goal, have, need: Math.max(0, goal.fans - have), turnsLeft: goal.turn - state.turn };
+    if (plan.need <= 0) return Object.assign(plan, { status: "met" });
+    const forced = forcedTurns(state, sc);
+    let fromGoals = 0;
+    for (let t = state.turn; t < goal.turn; t++) {
+      if (!forced.has(t)) continue;
+      const gr = goalRaceAt(state, sc, t);
+      if (gr) fromGoals += expectedFans(state, gr.race);
+    }
+    const left = plan.need - fromGoals;
+    plan.fromGoals = fromGoals;
+    plan.left = Math.max(0, left);
+    if (left <= 0) return Object.assign(plan, { status: "covered" });
+    // Later races, checking entry requirements against the fans you'd have by then. A race
+    // you can only enter after one more race (prior) costs that extra race too.
+    const laterFrom = (base) => {
+      const out = [];
+      let goalsSoFar = 0;
+      let unlockTurn = false; // an earlier free turn with an open race, to reach entry fans
+      for (let t = state.turn + 1; t < goal.turn; t++) {
+        if (forced.has(t)) { const gr = goalRaceAt(state, sc, t); if (gr) goalsSoFar += expectedFans(state, gr.race); continue; }
+        const all = racesAt(state, t).map((r) => ({ race: r, fans: expectedFans(state, r), prior: (r.need || 0) > base + goalsSoFar }));
+        const open = all.filter((x) => !x.prior).sort((a, b) => b.fans - a.fans);
+        const reach = all.filter((x) => !x.prior || unlockTurn).sort((a, b) => b.fans - a.fans);
+        if (reach.length) out.push(Object.assign({ turn: t }, reach[0]));
+        if (open.length) unlockTurn = true;
+      }
+      return out;
+    };
+    // Fewest races to cover n fans: biggest first, one per turn, plus one for a race that needs
+    // more fans to enter unless an earlier pick gets you there.
+    const count = (n, list) => {
+      const sorted = list.slice().sort((a, b) => b.fans - a.fans);
+      const used = new Set();
+      let k = 0, sum = 0;
+      for (const x of sorted) {
+        if (sum >= n) break;
+        if (used.has(x.turn)) continue;
+        used.add(x.turn);
+        sum += x.fans;
+        k += 1;
+        if (x.prior && !sorted.some((y) => used.has(y.turn) && y.turn < x.turn && y !== x)) k += 1;
+      }
+      return sum >= n ? k : Infinity;
+    };
+    const now = forced.has(state.turn) ? null : (state.raceName && racesAt(state, state.turn).find((r) => r.n === state.raceName)) || null;
+    const nowBest = forced.has(state.turn) ? null : now ? { race: now, fans: expectedFans(state, now) } : bestRaceAt(state, state.turn, have);
+    const later = laterFrom(have + fromGoalsBefore(state, sc, forced));
+    const laterIfRace = nowBest ? laterFrom(have + nowBest.fans + fromGoalsBefore(state, sc, forced)) : later;
+    const kLater = count(left, later);
+    const kNow = nowBest ? 1 + (left - nowBest.fans <= 0 ? 0 : count(left - nowBest.fans, laterIfRace)) : Infinity;
+    plan.now = nowBest;
+    plan.racesNeeded = Math.min(kLater, kNow);
+    // Races saved by racing now (each one is a turn you get back for training).
+    plan.saves = kLater !== Infinity && kNow !== Infinity ? Math.max(0, kLater - kNow) : 0;
+    if (kLater === Infinity) plan.status = nowBest && kNow < Infinity ? "urgent" : "short";
+    else if (nowBest && kNow <= kLater) plan.status = "efficient";
+    else plan.status = "wait";
+    later.sort((a, b) => b.fans - a.fans);
+    plan.picks = later.slice(0, Math.max(1, Math.min(4, kLater === Infinity ? 4 : kLater)));
+    plan.tight = kLater !== Infinity && new Set(later.map((x) => x.turn)).size - kLater <= 1;
+    // Few spare turns left: racing when you can is safer.
+    if (plan.status === "wait" && later.length - kLater <= 1 && nowBest) plan.status = "efficient";
+    return plan;
+  }
+
+  function fanPlanText(plan, sc) {
+    if (!plan) return "";
+    const n = (x) => Math.round(x).toLocaleString("en-US");
+    const head = "Fan goal: " + n(plan.goal.fans) + " by turn " + plan.goal.turn + " (" + turnInfo(plan.goal.turn, sc).text + "). You have " + n(plan.have) + ".";
+    if (plan.status === "met") return head + " Already reached.";
+    if (plan.status === "covered") return head + " Your goal races before then should cover the other " + n(plan.need) + ".";
+    const picks = (plan.picks || []).map((x) => x.race.n + " (turn " + x.turn + ", ~" + n(x.fans) + ")").join(", ");
+    const rest = n(plan.left) + " more needed" + (plan.fromGoals ? " after your goal races" : "");
+    if (plan.status === "urgent") return head + " " + rest + ", and later races can't cover it: race now (" + plan.now.race.n + ", ~" + n(plan.now.fans) + ").";
+    if (plan.status === "short") return head + " " + rest + ", more than the races that fit you before then can give. Missing a career goal ends the run, so race every chance you get" + (plan.now ? " (now: " + plan.now.race.n + ")" : "") + ", and race ones outside your best distance if you must.";
+    if (plan.status === "efficient") return head + " " + rest + ": racing now (" + plan.now.race.n + ", ~" + n(plan.now.fans) + ") " + (plan.saves ? "saves " + plan.saves + " race" + (plan.saves > 1 ? "s" : "") + " later, so it's worth a training turn." : "fits your plan without adding a race, so it's listed as an option against training.");
+    const why = plan.now ? "races later give as much or more" : "no race that fits you is on this turn";
+    return head + " " + rest + ": about " + plan.racesNeeded + " race(s) do it" + (picks ? " (" + picks + ")" : "") + ". " + (plan.tight ? "That's nearly every race that fits you before the deadline, so don't skip them. " : "") + "You can keep training now: " + why + ".";
+  }
+
+  // Goal race turns that come from the trainee's goals, minus any you unmarked.
+  function autoGoalTurns(state, sc) {
+    const off = new Set(state.goalsOff || []);
+    return new Set(traineeGoals(state, sc).filter((g) => g.forced && !off.has(g.turn)).map((g) => g.turn));
+  }
+
+  function isGoalTurn(state, sc, turn) {
+    return (state.goals || []).indexOf(turn) !== -1 || autoGoalTurns(state, sc).has(turn);
+  }
+
   function forcedTurns(state, sc) {
     const set = new Set(state.goals || []);
+    autoGoalTurns(state, sc).forEach((t) => set.add(t));
     if (sc.finale && sc.finale.forced) sc.finale.turns.forEach((t) => set.add(t));
     (sc.goalTurns || []).forEach((t) => set.add(t));
     return set;
@@ -92,13 +279,16 @@
   function eventsFor(turn, scenario, state) {
     const out = [];
     const evs = scenario.events || [];
-    if (turn === 12 && !evs.some((e) => e.turn === 12)) out.push({ turn, label: "Make Debut", tip: "Goal race." });
+    // The scenario's own debut entry already covers the trainee's debut goal.
+    const tg = traineeGoals(state, scenario).filter((g) => g.turn === turn && !(turn === 12 && evs.some((e) => e.turn === 12)));
+    if (turn === 12 && !evs.some((e) => e.turn === 12) && !tg.length) out.push({ turn, label: "Make Debut", tip: "Goal race." });
     const camps = campTurns(scenario);
     if (camps.indexOf(turn + 1) !== -1 && camps.indexOf(turn) === -1) out.push({ turn, label: "Camp next turn", tip: "Energy carried into camp is worth more than usual." });
     if (camps.indexOf(turn) !== -1 && camps.indexOf(turn - 1) === -1) out.push({ turn, label: "Summer camp starts", tip: "Four turns at max facility level." });
     evs.forEach((e) => { if (e.turn === turn) out.push(e); });
     if (scenario.finale && scenario.finale.forced && scenario.finale.turns.indexOf(turn) !== -1) out.push({ turn, label: scenario.finale.name, tip: scenario.finale.note });
-    if (state && (state.goals || []).indexOf(turn) !== -1) out.push({ turn, label: "Goal race", tip: "You marked this turn as a goal race." });
+    tg.forEach((g) => out.push({ turn, label: g.label, tip: g.tip }));
+    if (state && (state.goals || []).indexOf(turn) !== -1 && !tg.some((g) => g.forced)) out.push({ turn, label: "Goal race", tip: "You marked this turn as a goal race." });
     return out;
   }
 
@@ -344,6 +534,48 @@
     return b;
   }
 
+  // ---- Grand Concert performance tokens ----
+  // Each training gives tokens of its primary type most of the time (secondary or another type
+  // otherwise; the game shows which on the training), and friendship training gives a second
+  // type too. Amounts: GameTora gives 10 (Wit 6) at level 1 with no cards; more cards, scenario
+  // link cards and higher facility levels give more. The per-card amounts below are estimates.
+  const GL_LINK = ["Silence Suzuka", "Agnes Tachyon", "Smart Falcon", "Mihono Bourbon", "Light Hello"];
+  function tokenCap(state, sc) {
+    return 200 + 50 * (sc.lives || []).filter((t) => t < state.turn).length;
+  }
+  function facilityRainbows(f, state) {
+    if (Array.isArray(f.members) && f.members.length && Deck && state.deck) {
+      return f.members.filter((i) => {
+        const sl = state.deck.slots[i];
+        const c = sl && Deck.card(sl.id);
+        if (!c) return false;
+        const bond = sl.bond != null ? sl.bond : Deck.initialBond(c, Deck.levelFor(c, sl.lb));
+        return Deck.isRainbow(c, bond, f.stat);
+      }).length;
+    }
+    return f.rainbows || 0;
+  }
+  function tokenGain(f, state, sc) {
+    if (!sc.tokenOf || !sc.tokenOf[f.stat]) return [];
+    const ex = f.extras || {};
+    const L = facLevelFor(state, sc, f.stat);
+    let cards = f.cards || 0;
+    let links = 0;
+    if (Array.isArray(f.members) && f.members.length && Deck && state.deck) {
+      cards = f.members.length + (f.extra || 0);
+      links = f.members.filter((i) => { const sl = state.deck.slots[i]; const c = sl && Deck.card(sl.id); return c && GL_LINK.indexOf(c.n) !== -1; }).length;
+    }
+    const est = (f.stat === "wit" ? 6 : 10) + 2 * (L - 1) + 3 * cards + 2 * links;
+    const [pri, sec] = sc.tokenOf[f.stat];
+    const out = [{ type: ex.tokType != null && ex.tokType !== "" ? +ex.tokType : pri, amount: ex.tok != null && ex.tok !== "" ? +ex.tok : est, est: !(ex.tok != null && ex.tok !== "") }];
+    const rb = facilityRainbows(f, state) > 0;
+    if (rb || (ex.tok2 != null && ex.tok2 !== "")) {
+      const t2 = ex.tokType2 != null && ex.tokType2 !== "" ? +ex.tokType2 : (out[0].type === sec ? pri : sec);
+      out.push({ type: t2, amount: ex.tok2 != null && ex.tok2 !== "" ? +ex.tok2 : Math.round(est * 0.6), est: !(ex.tok2 != null && ex.tok2 !== ""), second: true });
+    }
+    return out;
+  }
+
   // ---- Grand Concert songs ----
   // Extra Stat Gain songs add a permanent flat bonus right away; Friendship Bonus songs start
   // working after the next live (lessons bought on a live turn count for that live).
@@ -561,6 +793,8 @@
         notes: [finale ? "Finale race turn." : "This turn holds a goal race. Missing it ends the career."],
         parts: { goal: 1e5 }, value: 1e5
       });
+      const gr = goalRaceAt(state, sc, state.turn);
+      if (gr) { const o = options[options.length - 1]; o.fans = expectedFans(state, gr.race, gr.place); o.label = "Run your goal race: " + gr.race.n; }
     } else {
       const camp = ctx.camp;
       const restParts = {
@@ -592,8 +826,14 @@
           notes: ["clears the bad condition before it costs more mood, energy or stats"], parts: p, value: sumParts(p)
         });
       }
-      if (state.race && RACES[state.race]) {
-        const r = RACES[state.race];
+      const plan = fanPlan(state, sc);
+      // A fan goal you can't make without racing now adds the best race this turn, even if
+      // you didn't pick one.
+      let raceKey = state.race;
+      let named = state.raceName ? racesAt(state, state.turn).find((x) => x.n === state.raceName) : null;
+      if (!raceKey && plan && (plan.status === "urgent" || plan.status === "short" || plan.status === "efficient") && plan.now) { named = plan.now.race; raceKey = GRADE_KEY[named.g]; }
+      if (raceKey && RACES[raceKey]) {
+        const r = RACES[raceKey];
         const rb = 1 + (ctx.deck ? ctx.deck.raceBonus : state.raceBonus || 0) / 100;
         const consec = (state.extras && state.extras.consec) || 0;
         const p = {
@@ -605,12 +845,18 @@
           risk: consec >= 3 ? -(1.2 + (consec - 3) * 1.3) * typ : consec === 2 ? -0.2 * typ : 0
         };
         const o = {
-          kind: "race", label: "Race (" + r.label + ")", energyDelta: -RACE_ENERGY, moodDelta: 0, prefix: [], consume: {},
-          notes: ["about " + Math.round(r.sp * rb) + " skill points if you win"], parts: p
+          kind: "race", label: named ? "Race: " + named.n + " (" + GRADE_LABEL[named.g] + ")" : "Race (" + r.label + ")", energyDelta: -RACE_ENERGY, moodDelta: 0, prefix: [], consume: {},
+          notes: ["about " + Math.round(r.sp * rb) + " skill points if you win"], parts: p,
+          fans: named ? expectedFans(state, named) : Math.round(TYPICAL_FANS[raceKey] * 0.8 * (1 + fanBonus(state) / 100))
         };
+        if (plan && plan.status !== "met" && plan.status !== "covered") {
+          const typ = ctx.typ;
+          p.fans += plan.status === "urgent" || plan.status === "short" ? 2.5 * typ : plan.status === "efficient" ? (0.35 + 0.9 * plan.saves) * typ : 0;
+          o.notes.push(plan.status === "wait" ? "the fan goal can wait for bigger races later" : "counts toward your fan goal (" + Math.round(plan.left).toLocaleString("en-US") + " still needed)");
+        }
         if (consec >= 3) o.notes.push(consec + " races in a row already; another one risks a bad condition or mood drop");
         if (hook.race) {
-          const x = hook.race(ctx, state.race) || {};
+          const x = hook.race(ctx, raceKey) || {};
           p.scenario = x.add || 0;
           if (x.note) o.notes.push(x.note);
         }
@@ -638,6 +884,8 @@
     const best = options[0];
     const second = options[1];
     const reasons = best.notes.slice();
+    const plan = fanPlan(state, scenario);
+    if (plan && plan.status !== "met" && (plan.status !== "covered" || plan.turnsLeft <= 6)) reasons.push(fanPlanText(plan, scenario));
     if (best.kind === "train") {
       const top = Object.entries(best.statGains).filter(([, g]) => g >= 1).sort((a, b) => b[1] - a[1]);
       reasons.unshift((best.gainEst ? "about " : "") + top.map(([s, g]) => STAT_LABELS[s] + " +" + Math.round(g)).join(", ") + (best.gainEst ? " (estimated)" : ""));
@@ -675,6 +923,7 @@
       typ: ctx.typ,
       calib: ctx.calib,
       phase: phaseFor(state.turn, scenario),
+      fanPlan: plan,
       events: eventsFor(state.turn, scenario, state),
       turn: turnInfo(state.turn, scenario)
     };
@@ -692,6 +941,7 @@
       Object.entries(option.statGains).forEach(([k, g]) => { if (s.stats[k] > 0) s.stats[k] = Math.round(s.stats[k] + g); });
     }
     s.extras.consec = option.kind === "race" ? (s.extras.consec || 0) + 1 : 0;
+    if (option.kind === "race" && option.fans) s.fans = Math.round((s.fans || 0) + option.fans);
     // Fixed scenario events at the end of this turn (e.g. URA's summer snack: +30 energy).
     const evE = (scenario.energyEvents && scenario.energyEvents[state.turn]) || 0;
     const evM = (scenario.moodEvents && scenario.moodEvents[state.turn]) || 0;
@@ -702,7 +952,7 @@
       else s.extras[k] = typeof v === "function" ? v(s.extras[k]) : v;
     });
     const hook = HOOKS[scenario.hook] || {};
-    if (hook.afterTurn) hook.afterTurn(s, option);
+    if (hook.afterTurn) hook.afterTurn(s, option, scenario);
     // Deck bonds: +7 for every card that trained with you this turn.
     if (option.kind === "train" && s.deck && s.deck.slots) {
       const fac = s.facilities.find((f) => f.stat === option.stat);
@@ -749,8 +999,9 @@
     }]).slice(-90);
     s.turn = Math.min(scenario.totalTurns, s.turn + 1);
     s.facilities = s.facilities.map((f) => ({ stat: f.stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 }));
-    s.goalRace = (s.goals || []).indexOf(s.turn) !== -1;
+    s.goalRace = isGoalTurn(s, scenario, s.turn);
     s.race = "";
+    s.raceName = "";
     return s;
   }
 
@@ -769,7 +1020,7 @@
   //  actions(ctx, trainingOptions) -> [option]           scenario-only actions
   //  items(ctx, options)  mutates or adds options for items and buffs used before acting
   //  failMult(ctx)        weight on failure risk
-  //  afterTurn(state, option)  bookkeeping when moving to the next turn
+  //  afterTurn(state, option, scenario)  bookkeeping when moving to the next turn
   function useOn(o, ctx, prefix, itemValue, note, consume) {
     o.prefix.push(prefix);
     o.parts.item = (o.parts.item || 0) + itemValue;
@@ -930,6 +1181,15 @@
     },
 
     grandlive: {
+      // Done on a training adds its performance tokens (what you typed, else the estimate).
+      afterTurn(s, option, sc) {
+        if (option.kind !== "train") return;
+        const f = s.facilities.find((x) => x.stat === option.stat);
+        if (!sc || !f) return;
+        s.gl = s.gl || { songs: {}, tokens: [0, 0, 0, 0, 0] };
+        const cap = tokenCap(s, sc);
+        tokenGain(f, s, sc).forEach((g) => { s.gl.tokens[g.type] = Math.min(cap, (s.gl.tokens[g.type] || 0) + Math.max(0, g.amount)); });
+      },
       items(ctx, options) {
         const best = options[0];
         if (!best || ctx.state.turn < 5) return;
@@ -1201,9 +1461,9 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
-    songBonuses, hypeStatus, songAdvice
+    songBonuses, hypeStatus, songAdvice, tokenGain, tokenCap, facilityRainbows
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;
