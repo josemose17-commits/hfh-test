@@ -418,3 +418,7 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 .comp-f { min-width: 74px; }
 .comp-f > span { display: flex; align-items: center; gap: 4px; }
 .comp-f select { border-top: 3px solid var(--c, var(--line)); }
+.tokrow { display: grid; gap: 4px; border-top: 1px dashed var(--line); padding-top: 6px; }
+.tokpick { display: flex; gap: 4px; align-items: center; }
+.tokpick select { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: var(--surface); font-size: .8rem; }
+.tokpick input { width: 52px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 5px; background: var(--surface); }

@@ -315,6 +315,11 @@
         f[k] = e.target.type === "checkbox" ? e.target.checked : numOrNull(e.target.value);
         if (k === "hint") e.target.closest("label").classList.toggle("on", f.hint);
       }
+      if (e.target.dataset.gltok) {
+        const k = e.target.dataset.gltok;
+        f.extras[k] = e.target.value === "" ? null : +e.target.value;
+        if (k === "tokType" || k === "tokType2") { box.outerHTML = facilityHTML(f, +box.dataset.idx); }
+      }
       if (e.target.dataset.lv) {
         const v = +e.target.value;
         if (v) state.facLevels[f.stat] = v; else delete state.facLevels[f.stat];
@@ -692,9 +697,23 @@
         ${deckOn() ? "" : `<label class="chk ${f.hint ? "on" : ""}"><input type="checkbox" data-k="hint" ${f.hint ? "checked" : ""}> Hint !</label>`}
         ${levelPicker(f)}
         ${facInputs.map((i) => extraField(i, f.extras)).join("")}
+        ${sc.tokenOf ? tokenRow(f, sc) : ""}
       </fieldset>`;
   }
 
+
+  // Grand Concert: the token(s) this training gives. Prefilled with its usual token and an
+  // estimate; type what the training shows and Done adds it to your tokens.
+  function tokenRow(f, sc) {
+    const g = E.tokenGain(f, state, sc);
+    const ex = f.extras || {};
+    const sel = (key, cur) => `<select data-gltok="${key}" aria-label="Token type">${sc.tokens.map((n, i) => `<option value="${i}" ${cur === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
+    const row = (x, k) => `<div class="tokpick"><span class="tok t${x.type}">${sc.tokens[x.type].slice(0, 2)}</span>${sel(k ? "tokType2" : "tokType", x.type)}<input type="number" inputmode="numeric" min="0" max="99" data-gltok="${k ? "tok2" : "tok"}" value="${ex[k ? "tok2" : "tok"] != null ? ex[k ? "tok2" : "tok"] : ""}" placeholder="~${x.amount}" aria-label="Token amount"></div>`;
+    return `<div class="tokrow" title="Tokens this training gives. Set the type and amount your screen shows; Done adds them to your tokens.">
+      <span class="pip-label">Tokens${g.length > 1 ? " (friendship: 2 types)" : ""}</span>
+      ${g.map((x, i) => row(x, i)).join("")}
+    </div>`;
+  }
 
   // ---- Deck (GameTora data) ----
   const cardByLabel = new Map();
@@ -740,7 +759,7 @@
     const top = adv.slice(0, 3);
     $("#songsBody").innerHTML = `
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
-      <p class="mini">Type your tokens from the lesson screen. Ticking a song records the turn and takes its cost off your tokens.</p>
+      <p class="mini">Tokens go up by themselves when you press <b>Done</b> on a training (set the token type and amount each training shows on its card; blank uses the estimate), capped at ${E.tokenCap(state, sc)} for now (+50 after each live). Ticking a song takes its cost off. You can still correct the numbers here.</p>
       <div class="song-status">
         ${hype && hype.next != null ? `<div><b>${hype.since}/3</b> songs since the last live. Next live: turn ${hype.next} (${esc(E.turnInfo(hype.next, sc).text)})${hype.need ? `, ${hype.need} more for a guaranteed Great Success.` : ", Hype gauge full."}</div>` : ""}
         <div>Active now: ${extras || "no extra stat gains yet"}${bon.fb ? ` · Friendship +${bon.fb}%` : ""}${bon.pendingFb ? ` · +${bon.pendingFb}% Friendship waiting for the next live` : ""}</div>

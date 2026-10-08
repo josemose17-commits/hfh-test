@@ -66,7 +66,7 @@ Unlike a racing deck, every target skill counts (not just the best 8), and **Sta
 ## Grand Concert
 
 A **Grand Concert songs** panel appears in this scenario:
-- Type your tokens from the lesson screen and tick songs as you learn them.
+- Tokens add up by themselves: each training card shows the token it gives (its usual type, with an estimated amount). Set the type and amount the training shows if they differ (friendship training gives a second type), and **Done** adds them, capped at 200 (+50 after each live). **Undo** takes them back. You can still type your tokens directly, and ticking a song takes its cost off.
 - It tracks Hype progress (3 songs since the last live guarantee a Great Success) and ranks the songs you can learn next by value per token.
 - The coach puts "Learn ..." in front of its recommendation when you can afford a good song.
 - Extra Stat Gain songs add their permanent bonus to the gain formula right away. Friendship Bonus songs start counting after the next live.

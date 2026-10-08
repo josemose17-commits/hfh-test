@@ -364,3 +364,21 @@ test("Beyond Dreams: use DREAMS training before the half year ends", () => {
   const r = pick(base({ turn: 47, energy: 70, extras: { dreamsLeft: 2 }, facilities: facs({ speed: { cards: 2, rainbows: 1 } }) }), "dreams");
   assert.match(r.action.label, /DREAMS/);
 });
+
+test("Grand Concert: Done adds the training's tokens (typed or estimated), capped, and Undo removes them", () => {
+  const gl = sc("grandlive");
+  const st = base({ turn: 10, gl: { songs: {}, tokens: [0, 0, 0, 0, 0] }, facLevels: {} });
+  st.facilities[0] = fac("speed", { cards: 2, rainbows: 1, members: [], hints: [] });
+  const opt = pick(st, "grandlive").ranked.find((o) => o.kind === "train" && o.stat === "speed");
+  const g = E.tokenGain(st.facilities[0], st, gl);
+  assert.strictEqual(g.length, 2, "friendship training gives two token types");
+  assert.strictEqual(g[0].type, 0); // Speed: Dance first
+  const after = E.advance(st, gl, opt);
+  assert.strictEqual(after.gl.tokens[0], g[0].amount);
+  assert.strictEqual(after.gl.tokens[g[1].type], g[1].amount);
+  assert.deepStrictEqual(E.undo(after).gl.tokens, [0, 0, 0, 0, 0]);
+  st.facilities[0].extras = { tokType: 4, tok: 30 };
+  st.gl.tokens = [0, 0, 0, 0, 190];
+  assert.strictEqual(E.advance(st, gl, opt).gl.tokens[4], 200, "capped at 200 before the first live");
+  assert.strictEqual(E.tokenCap(Object.assign({}, st, { turn: 40 }), gl), 300);
+});

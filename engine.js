@@ -344,6 +344,48 @@
     return b;
   }
 
+  // ---- Grand Concert performance tokens ----
+  // Each training gives tokens of its primary type most of the time (secondary or another type
+  // otherwise; the game shows which on the training), and friendship training gives a second
+  // type too. Amounts: GameTora gives 10 (Wit 6) at level 1 with no cards; more cards, scenario
+  // link cards and higher facility levels give more. The per-card amounts below are estimates.
+  const GL_LINK = ["Silence Suzuka", "Agnes Tachyon", "Smart Falcon", "Mihono Bourbon", "Light Hello"];
+  function tokenCap(state, sc) {
+    return 200 + 50 * (sc.lives || []).filter((t) => t < state.turn).length;
+  }
+  function facilityRainbows(f, state) {
+    if (Array.isArray(f.members) && f.members.length && Deck && state.deck) {
+      return f.members.filter((i) => {
+        const sl = state.deck.slots[i];
+        const c = sl && Deck.card(sl.id);
+        if (!c) return false;
+        const bond = sl.bond != null ? sl.bond : Deck.initialBond(c, Deck.levelFor(c, sl.lb));
+        return Deck.isRainbow(c, bond, f.stat);
+      }).length;
+    }
+    return f.rainbows || 0;
+  }
+  function tokenGain(f, state, sc) {
+    if (!sc.tokenOf || !sc.tokenOf[f.stat]) return [];
+    const ex = f.extras || {};
+    const L = facLevelFor(state, sc, f.stat);
+    let cards = f.cards || 0;
+    let links = 0;
+    if (Array.isArray(f.members) && f.members.length && Deck && state.deck) {
+      cards = f.members.length + (f.extra || 0);
+      links = f.members.filter((i) => { const sl = state.deck.slots[i]; const c = sl && Deck.card(sl.id); return c && GL_LINK.indexOf(c.n) !== -1; }).length;
+    }
+    const est = (f.stat === "wit" ? 6 : 10) + 2 * (L - 1) + 3 * cards + 2 * links;
+    const [pri, sec] = sc.tokenOf[f.stat];
+    const out = [{ type: ex.tokType != null && ex.tokType !== "" ? +ex.tokType : pri, amount: ex.tok != null && ex.tok !== "" ? +ex.tok : est, est: !(ex.tok != null && ex.tok !== "") }];
+    const rb = facilityRainbows(f, state) > 0;
+    if (rb || (ex.tok2 != null && ex.tok2 !== "")) {
+      const t2 = ex.tokType2 != null && ex.tokType2 !== "" ? +ex.tokType2 : (out[0].type === sec ? pri : sec);
+      out.push({ type: t2, amount: ex.tok2 != null && ex.tok2 !== "" ? +ex.tok2 : Math.round(est * 0.6), est: !(ex.tok2 != null && ex.tok2 !== ""), second: true });
+    }
+    return out;
+  }
+
   // ---- Grand Concert songs ----
   // Extra Stat Gain songs add a permanent flat bonus right away; Friendship Bonus songs start
   // working after the next live (lessons bought on a live turn count for that live).
@@ -702,7 +744,7 @@
       else s.extras[k] = typeof v === "function" ? v(s.extras[k]) : v;
     });
     const hook = HOOKS[scenario.hook] || {};
-    if (hook.afterTurn) hook.afterTurn(s, option);
+    if (hook.afterTurn) hook.afterTurn(s, option, scenario);
     // Deck bonds: +7 for every card that trained with you this turn.
     if (option.kind === "train" && s.deck && s.deck.slots) {
       const fac = s.facilities.find((f) => f.stat === option.stat);
@@ -769,7 +811,7 @@
   //  actions(ctx, trainingOptions) -> [option]           scenario-only actions
   //  items(ctx, options)  mutates or adds options for items and buffs used before acting
   //  failMult(ctx)        weight on failure risk
-  //  afterTurn(state, option)  bookkeeping when moving to the next turn
+  //  afterTurn(state, option, scenario)  bookkeeping when moving to the next turn
   function useOn(o, ctx, prefix, itemValue, note, consume) {
     o.prefix.push(prefix);
     o.parts.item = (o.parts.item || 0) + itemValue;
@@ -930,6 +972,15 @@
     },
 
     grandlive: {
+      // Done on a training adds its performance tokens (what you typed, else the estimate).
+      afterTurn(s, option, sc) {
+        if (option.kind !== "train") return;
+        const f = s.facilities.find((x) => x.stat === option.stat);
+        if (!sc || !f) return;
+        s.gl = s.gl || { songs: {}, tokens: [0, 0, 0, 0, 0] };
+        const cap = tokenCap(s, sc);
+        tokenGain(f, s, sc).forEach((g) => { s.gl.tokens[g.type] = Math.min(cap, (s.gl.tokens[g.type] || 0) + Math.max(0, g.amount)); });
+      },
       items(ctx, options) {
         const best = options[0];
         if (!best || ctx.state.turn < 5) return;
@@ -1203,7 +1254,7 @@
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
     turnInfo, phaseFor, eventsFor, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
-    songBonuses, hypeStatus, songAdvice
+    songBonuses, hypeStatus, songAdvice, tokenGain, tokenCap, facilityRainbows
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;
