@@ -117,6 +117,8 @@
       else out.push({ turn: g.t, forced: false, label: "Goal due", tip: "A career goal is due by this turn. Check the in-game goal list." });
       i++;
     }
+    // Trackblazer swaps the career goals for Grade Point goals; only the debut stays.
+    if (sc && sc.gradePoints) return out.filter((x) => x.turn === 12);
     return out.filter((x) => x.turn >= 1 && x.turn <= last);
   }
 
@@ -258,6 +260,84 @@
     return head + " " + rest + ": about " + plan.racesNeeded + " race(s) do it" + (picks ? " (" + picks + ")" : "") + ". " + (plan.tight ? "That's nearly every race that fits you before the deadline, so don't skip them. " : "") + "You can keep training now: " + why + ".";
   }
 
+  // ---- Trackblazer Grade Points ----
+  // Grade Points a win pays, by race grade (GameTora). Lower places pay less.
+  const GP_BY_G = { 100: 100, 200: 80, 300: 60, 400: 40, 700: 20 };
+  const GP_BY_KEY = { g1: 100, g2: 80, g3: 60, op: 40 };
+  const gpOf = (r) => GP_BY_G[r.g] || 20;
+
+  // The Grade Point goal in force on this turn. Each is due at the end of Late December; dirt
+  // specialists and sprint-only turf trainees get lower targets (sc.gradePoints).
+  function gradeGoal(state, sc) {
+    const gp = sc && sc.gradePoints;
+    if (!gp) return null;
+    const i = gp.due.findIndex((d) => d >= state.turn);
+    if (i === -1) return null;
+    const t = state.deck && state.deck.trainee && Deck ? Deck.trainee(state.deck.trainee) : null;
+    const ok = (a) => APT_RANK.indexOf(a) >= 5;
+    let kind = "turf";
+    if (t && ok(t.apt[1]) && !ok(t.apt[0])) kind = "dirt";
+    else if (t && ok(t.apt[2]) && !ok(t.apt[3]) && !ok(t.apt[4]) && !ok(t.apt[5])) kind = "sprint";
+    return { due: gp.due[i], goal: gp[kind][i], kind, n: i };
+  }
+
+  // Plans the Grade Point goal like fanPlan, counting wins: how many races still do it, and
+  // whether later races that fit the trainee can cover it. The coach keeps the count (gpNeed)
+  // as you race; type your real number in when you place lower than 1st.
+  // status: met | ok | tight | urgent | short.
+  function gradePlan(state, sc) {
+    const g = gradeGoal(state, sc);
+    if (!g) return null;
+    const x = state.extras || {};
+    const need = x.gpNeed != null && x.gpDue === g.due ? Math.max(0, +x.gpNeed || 0) : g.goal;
+    const plan = Object.assign({}, g, { need, turnsLeft: g.due - state.turn });
+    if (need <= 0) return Object.assign(plan, { status: "met" });
+    const forced = forcedTurns(state, sc);
+    const have = state.fans || 0;
+    const list = [];
+    for (let t = state.turn; t <= g.due; t++) {
+      if (forced.has(t)) continue;
+      let rs = racesAt(state, t);
+      if (t === state.turn) {
+        const picked = state.raceName && rs.find((r) => r.n === state.raceName);
+        rs = picked ? [picked] : rs.filter((r) => !have || (r.need || 0) <= have);
+      }
+      const best = rs.sort((a, b) => gpOf(b) - gpOf(a) || b.f[0] - a.f[0])[0];
+      if (best) list.push({ turn: t, race: best, gp: gpOf(best) });
+    }
+    const count = (n, arr) => {
+      if (n <= 0) return 0;
+      let k = 0, sum = 0;
+      for (const v of arr.map((a) => a.gp).sort((a, b) => b - a)) { sum += v; k += 1; if (sum >= n) return k; }
+      return Infinity;
+    };
+    const now = list.length && list[0].turn === state.turn ? list[0] : null;
+    const later = list.filter((a) => a.turn > state.turn);
+    const kLater = count(need, later);
+    plan.now = now;
+    plan.racesNeeded = Math.min(kLater, now ? 1 + count(need - now.gp, later) : Infinity);
+    plan.spare = kLater === Infinity ? 0 : later.length - kLater;
+    plan.picks = later.slice().sort((a, b) => b.gp - a.gp || a.turn - b.turn).slice(0, kLater === Infinity ? 4 : Math.min(4, kLater));
+    if (kLater === Infinity) plan.status = now ? "urgent" : "short";
+    else plan.status = plan.spare <= 2 ? "tight" : "ok";
+    return plan;
+  }
+
+  function gradePlanText(plan, sc) {
+    if (!plan) return "";
+    const kind = plan.kind === "dirt" ? " (dirt target)" : plan.kind === "sprint" ? " (sprint target)" : "";
+    const head = "Grade Points: " + plan.need + " of " + plan.goal + kind + " still needed by turn " + plan.due + " (" + turnInfo(plan.due, sc).text + ").";
+    if (plan.status === "met") return "Grade Point goal for this year is done. Extra points don't carry over, so race now for coins, stats and fans.";
+    const picks = (plan.picks || []).map((a) => a.race.n + " (turn " + a.turn + ", " + a.gp + ")").join(", ");
+    if (plan.status === "urgent") return head + " Later races that fit you can't cover it: race now (" + plan.now.race.n + ", " + plan.now.gp + " for a win).";
+    if (plan.status === "short") return head + " That's more than the races that fit you can pay, even winning them all. Missing it ends the run: race every turn you can, outside your best distance if you must.";
+    const n = plan.racesNeeded;
+    const spare = plan.spare === 0 ? "No spare race turns left before then, so don't skip any." : "Only " + plan.spare + " spare race turn" + (plan.spare === 1 ? "" : "s") + " left before then, so race when you can.";
+    return head + " " + (n === 1 ? "One win does it" : "About " + n + " wins do it") + (picks ? " (" + picks + ")" : "") + ". " +
+      (plan.status === "tight" ? spare : "Plenty of race turns left.") +
+      " Counting wins; lower places pay less, so fix the number if you place lower.";
+  }
+
   // Goal race turns that come from the trainee's goals, minus any you unmarked.
   function autoGoalTurns(state, sc) {
     const off = new Set(state.goalsOff || []);
@@ -280,8 +360,9 @@
     const out = [];
     const evs = scenario.events || [];
     // The scenario's own debut entry already covers the trainee's debut goal.
-    const tg = traineeGoals(state, scenario).filter((g) => g.turn === turn && !(turn === 12 && evs.some((e) => e.turn === 12)));
-    if (turn === 12 && !evs.some((e) => e.turn === 12) && !tg.length) out.push({ turn, label: "Make Debut", tip: "Goal race." });
+    const debutEv = evs.some((e) => e.turn === 12 && /debut/i.test(e.label));
+    const tg = traineeGoals(state, scenario).filter((g) => g.turn === turn && !(turn === 12 && debutEv));
+    if (turn === 12 && !debutEv && !tg.length) out.push({ turn, label: "Make Debut", tip: "Goal race." });
     const camps = campTurns(scenario);
     if (camps.indexOf(turn + 1) !== -1 && camps.indexOf(turn) === -1) out.push({ turn, label: "Camp next turn", tip: "Energy carried into camp is worth more than usual." });
     if (camps.indexOf(turn) !== -1 && camps.indexOf(turn - 1) === -1) out.push({ turn, label: "Summer camp starts", tip: "Four turns at max facility level." });
@@ -605,6 +686,51 @@
     return { next, prev, since, need: Math.max(0, 3 - since), turnsToLive: next != null ? next - state.turn : null };
   }
 
+  // ---- Grand Concert song plan (CM ace guide, with 5 songs in year one) ----
+  // Year one, before the 1st Promo Live: buy 5 songs, do 2 more technique lessons so the 6th
+  // shows up, and carry it over (buy it right after the live: it counts for the next live and
+  // saves a lesson). Every half year after: the carried song, 1 lesson, a song, 2 lessons, a
+  // song, 2 lessons, carry over. Before the Grand Live there's nothing to carry into, so that
+  // 4th song is bought too, for 18 songs (the special GIRLS' LEGEND U).
+  // Steps: technique lessons before each song this half (the game's lesson pattern).
+  const GL_FOCUS = { 1: ["yumewo", "growup"], 2: ["yumewo", "growup"], 3: ["daisuki", "fanfare"], 4: ["daisuki", "fanfare"] };
+  const GL_AVOID = { 0: ["ringring", "nigekiri"] };
+  function glPeriod(sc, turn) {
+    const i = sc.lives.findIndex((l) => turn <= l);
+    return i === -1 ? sc.lives.length - 1 : i;
+  }
+  function songPlan(state, sc) {
+    if (!sc.songs || state.turn < 5) return null;
+    const p = glPeriod(sc, state.turn);
+    const last = p === sc.lives.length - 1;
+    const steps = p === 0 ? [1, 2, 3, 4, 4] : last ? [0, 1, 2, 2] : [0, 1, 2];
+    const carry = last ? null : 2;
+    const cum = steps.reduce((a, x) => a.concat([(a.length ? a[a.length - 1] : 0) + x]), []);
+    const learned = (state.gl && state.gl.songs) || {};
+    const bought = Object.values(learned).filter((t) => glPeriod(sc, t) === p && t >= 5).length;
+    const lessons = ((state.gl && state.gl.lessons) || {})[p] || 0;
+    const live = sc.lives[p];
+    const plan = { period: p, target: steps.length, bought, lessons, live, last, focus: GL_FOCUS[p] || [], avoid: GL_AVOID[p] || [] };
+    const n = (x) => x + " technique lesson" + (x === 1 ? "" : "s");
+    if (bought < steps.length) {
+      const need = cum[bought] - lessons;
+      plan.step = need > 0 ? "lessons" : "song";
+      plan.text = p > 0 && bought === 0 && need <= 0
+        ? "Buy the song you carried over first (it saves a lesson)."
+        : need > 0 ? "Do " + n(need) + ", then buy song " + (bought + 1) + " of " + steps.length + " this half."
+          : "Buy song " + (bought + 1) + " of " + steps.length + " when it shows in your lessons.";
+    } else if (carry != null) {
+      const need = cum[cum.length - 1] + carry - lessons;
+      plan.step = need > 0 ? "lessons" : "hold";
+      plan.text = need > 0 ? "Plan's songs are done. Do " + n(need) + " until the next song shows, then hold it."
+        : "Hold the next song: buy it right after the live on turn " + live + ", so it counts for the next live and saves a lesson.";
+    } else {
+      plan.step = "done";
+      plan.text = "Plan done: that's 18 songs for the special GIRLS' LEGEND U. Extra songs still help.";
+    }
+    return plan;
+  }
+
   // Ranks songs you can learn now: value of the bonus over the rest of the run per token spent,
   // with a big push for songs that are still needed to fill the Hype gauge before the next live.
   function songAdvice(state, sc) {
@@ -621,9 +747,16 @@
       // Friendship %: about 45% of the remaining turns are friendship trainings worth ~30 weighted stats.
       if (song.fb) v += (song.fb / 100) * 0.45 * left * 30 * build.w.speed * 0.75;
       if (hype && hype.need > 0) v += 25;
+      // The plan's picks: the SP songs in year two, the +10% friendship songs in year three; skip
+      // the +Stamina and +Guts songs in year one.
+      const p = glPeriod(sc, state.turn);
+      const focus = (GL_FOCUS[p] || []).indexOf(song.id) !== -1;
+      const avoid = (GL_AVOID[p] || []).indexOf(song.id) !== -1;
+      if (focus) v *= 1.6;
+      if (avoid) v *= 0.3;
       const cost = song.cost.reduce((a, b) => a + b, 0);
       const short = song.cost.map((c, i) => Math.max(0, c - (tokens[i] || 0)));
-      return { song, value: v, perToken: v / Math.max(1, cost), affordable: short.every((x) => x === 0), short };
+      return { song, value: v, perToken: v / Math.max(1, cost), affordable: short.every((x) => x === 0), short, focus, avoid };
     }).sort((a, b) => (b.affordable - a.affordable) || (b.perToken - a.perToken));
   }
 
@@ -832,6 +965,12 @@
       let raceKey = state.race;
       let named = state.raceName ? racesAt(state, state.turn).find((x) => x.n === state.raceName) : null;
       if (!raceKey && plan && (plan.status === "urgent" || plan.status === "short" || plan.status === "efficient") && plan.now) { named = plan.now.race; raceKey = GRADE_KEY[named.g]; }
+      // Trackblazer runs on races, so the best race this turn that fits the trainee (most Grade
+      // Points, then fans) is always weighed against training.
+      if (!raceKey && sc.gradePoints && state.deck && state.deck.trainee) {
+        const pick = racesAt(state, state.turn).filter((x) => !state.fans || (x.need || 0) <= state.fans).sort((a, b) => gpOf(b) - gpOf(a) || b.f[0] - a.f[0])[0];
+        if (pick) { named = pick; raceKey = GRADE_KEY[pick.g]; }
+      }
       if (raceKey && RACES[raceKey]) {
         const r = RACES[raceKey];
         const rb = 1 + (ctx.deck ? ctx.deck.raceBonus : state.raceBonus || 0) / 100;
@@ -849,6 +988,7 @@
           notes: ["about " + Math.round(r.sp * rb) + " skill points if you win"], parts: p,
           fans: named ? expectedFans(state, named) : Math.round(TYPICAL_FANS[raceKey] * 0.8 * (1 + fanBonus(state) / 100))
         };
+        if (sc.gradePoints) { o.gp = named ? gpOf(named) : GP_BY_KEY[raceKey] || 20; o.raceName = named ? named.n : ""; }
         if (plan && plan.status !== "met" && plan.status !== "covered") {
           const typ = ctx.typ;
           p.fans += plan.status === "urgent" || plan.status === "short" ? 2.5 * typ : plan.status === "efficient" ? (0.35 + 0.9 * plan.saves) * typ : 0;
@@ -856,7 +996,7 @@
         }
         if (consec >= 3) o.notes.push(consec + " races in a row already; another one risks a bad condition or mood drop");
         if (hook.race) {
-          const x = hook.race(ctx, raceKey) || {};
+          const x = hook.race(ctx, raceKey, named) || {};
           p.scenario = x.add || 0;
           if (x.note) o.notes.push(x.note);
         }
@@ -886,6 +1026,8 @@
     const reasons = best.notes.slice();
     const plan = fanPlan(state, scenario);
     if (plan && plan.status !== "met" && (plan.status !== "covered" || plan.turnsLeft <= 6)) reasons.push(fanPlanText(plan, scenario));
+    const gplan = gradePlan(state, scenario);
+    if (gplan && gplan.status !== "met" && (gplan.status !== "ok" || best.kind === "race")) reasons.push(gradePlanText(gplan, scenario));
     if (best.kind === "train") {
       const top = Object.entries(best.statGains).filter(([, g]) => g >= 1).sort((a, b) => b[1] - a[1]);
       reasons.unshift((best.gainEst ? "about " : "") + top.map(([s, g]) => STAT_LABELS[s] + " +" + Math.round(g)).join(", ") + (best.gainEst ? " (estimated)" : ""));
@@ -924,6 +1066,7 @@
       calib: ctx.calib,
       phase: phaseFor(state.turn, scenario),
       fanPlan: plan,
+      gradePlan: gplan,
       events: eventsFor(state.turn, scenario, state),
       turn: turnInfo(state.turn, scenario)
     };
@@ -1115,14 +1258,31 @@
     },
 
     trackblazer: {
-      race(ctx, grade) {
-        const x = ctx.state.extras || {};
-        const gp = { g1: 100, g2: 80, g3: 60, op: 40 }[grade] || 30;
-        const need = +(x.gpNeed || 0);
+      race(ctx, grade, named) {
+        const gp = named ? gpOf(named) : GP_BY_KEY[grade] || 20;
+        const plan = gradePlan(ctx.state, ctx.sc);
         let add = 70 * COIN * ctx.typ; // expected coins over likely placements
-        if (need > 0) add += (Math.min(gp, need) / 100) * 0.6 * ctx.typ;
-        else add += 0.1 * ctx.typ;
-        return { add, note: "about " + gp + " Grade Points and 100 coins if you win" + (need > 0 ? " (" + need + " still needed)" : "") };
+        if (plan && plan.need > 0) {
+          const share = Math.min(gp, plan.need) / 100;
+          // A goal later races can't cover outweighs any training; a tight one adds a push, and
+          // with plenty of race turns left the points could come later anyway.
+          add += plan.status === "urgent" || plan.status === "short" ? 2.5 * ctx.typ : plan.status === "tight" ? (0.3 + 0.6 * share) * ctx.typ : 0.2 * share * ctx.typ;
+        } else add += 0.1 * ctx.typ;
+        // Guides keep race chains to 2, unless the 3rd ends the year.
+        const chain = ((ctx.state.extras || {}).consec || 0) === 2 && ctx.sc.gradePoints.due.indexOf(ctx.state.turn) === -1;
+        if (chain) add -= 0.4 * ctx.typ;
+        return { add, note: (chain ? "this would be a 3rd race in a row; guides keep chains to 2 unless the 3rd ends the year. " : "") + "about " + gp + " Grade Points and 100 coins if you win" + (plan && plan.need > 0 ? " (" + plan.need + " still needed by turn " + plan.due + ")" : "") };
+      },
+      // Keeps the Grade Point count: a race takes its points off what's still needed (counting a
+      // win), and each Late December deadline starts the next goal (surplus doesn't carry over).
+      afterTurn(s, option, sc) {
+        const plan = gradePlan(s, sc);
+        if (!plan) return;
+        if (option.kind === "race" && option.gp && !option.forced) {
+          s.extras.gpNeed = Math.max(0, plan.need - option.gp);
+          s.extras.gpDue = plan.due;
+        }
+        if (s.turn === plan.due) { delete s.extras.gpNeed; delete s.extras.gpDue; }
       },
       items(ctx, options) {
         const x = ctx.state.extras || {};
@@ -1181,6 +1341,21 @@
     },
 
     grandlive: {
+      // Turns 5-11 (to the debut): chase Light Hello and the cards closest to friendship; focus one
+      // or two cards so they rainbow as soon as possible instead of spreading bond around.
+      facility(f, ctx) {
+        const t = ctx.state.turn;
+        if (t < 5 || t > 11 || !ctx.deck || !Array.isArray(f.members)) return null;
+        let add = 0;
+        const notes = [];
+        f.members.forEach((i) => {
+          const sl = ctx.deck.slots[i];
+          if (!sl) return;
+          if (sl.card.n === "Light Hello") { add += 0.3 * ctx.typ; notes.push("Light Hello is here (chase her events before the debut)"); }
+          else if (sl.card.ty !== "friend" && sl.bond >= 50 && sl.bond < 80) { add += 0.12 * ctx.typ; notes.push(sl.card.n + " is close to friendship (" + Math.round(sl.bond) + ")"); }
+        });
+        return add ? { add, note: notes.join("; ") } : null;
+      },
       // Done on a training adds its performance tokens (what you typed, else the estimate).
       afterTurn(s, option, sc) {
         if (option.kind !== "train") return;
@@ -1191,12 +1366,37 @@
         tokenGain(f, s, sc).forEach((g) => { s.gl.tokens[g.type] = Math.min(cap, (s.gl.tokens[g.type] || 0) + Math.max(0, g.amount)); });
       },
       items(ctx, options) {
+        const t = ctx.state.turn;
+        // Opening, turns 1-4: build bonds, Wit and rest, and go into turn 5 (when lessons open)
+        // with as much energy as possible. A common opening is Train x3, then Rest.
+        if (t <= 4) {
+          options.forEach((o) => {
+            if (o.kind === "train") {
+              const fac = ctx.state.facilities.find((x) => x.stat === o.stat) || {};
+              const unbonded = Array.isArray(fac.members) && ctx.deck ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
+              o.value += (o.stat === "wit" ? 0.15 : 0) * ctx.typ + 0.08 * unbonded * ctx.typ;
+            }
+          });
+          // Turn 4: go into turn 5 as full as possible (Train x3, then Rest).
+          const rest = options.find((o) => o.kind === "rest");
+          if (rest && t === 4 && ctx.E < 85) {
+            const top = Math.max.apply(null, options.filter((o) => o !== rest).map((o) => o.value));
+            if (ctx.E <= 65) rest.value = Math.max(rest.value, top + 0.1 * ctx.typ);
+            else rest.value += 2 * ctx.typ * (0.85 - ctx.E / 100);
+            rest.notes.push("go into turn 5 with as much energy as you can: lessons open and the run starts in earnest");
+          }
+          options.sort((a, b) => b.value - a.value);
+          options[0].notes.push("opening: raise bonds, take Wit, rest, and keep energy high going into turn 5 (common: Train x3, then Rest)");
+          return;
+        }
         const best = options[0];
-        if (!best || ctx.state.turn < 5) return;
+        if (!best) return;
         const adv = songAdvice(ctx.state, ctx.sc);
-        const buy = adv.find((a) => a.affordable);
+        const plan = songPlan(ctx.state, ctx.sc);
+        const buy = adv.find((a) => a.affordable && !a.avoid);
         const hype = hypeStatus(ctx.state, ctx.sc);
-        if (buy) {
+        if (plan) best.notes.push("song plan: " + plan.text);
+        if (buy && plan && plan.step === "song") {
           best.prefix.unshift("Learn " + buy.song.name + " (no turn used)");
           best.notes.push("you can afford a song now; lessons don't use a turn");
         }
@@ -1217,6 +1417,9 @@
         if (!w) return;
         const trains = options.filter((o) => o.kind === "train");
         const mood = ctx.state.mood;
+        const t = ctx.state.turn;
+        // Year-end race after this turn (all stats +10/+15/+20): Red adds 35% to race stats.
+        const yearEnd = { 24: 10, 48: 15, 72: 20 }[t] || 0;
         const tries = trains.map((o) => {
           let v;
           if (w === "red") {
@@ -1224,8 +1427,9 @@
             const moodUp = MOOD_MULT[4] / MOOD_MULT[mood];
             let mv = 0;
             for (let i = mood; i < 4; i++) mv += ctx.moodStep(i);
-            v.parts.item = o.parts.stats * (moodUp * 1.2 - 1) + mv;
+            v.parts.item = o.parts.stats * (moodUp * 1.2 - 1) + mv + 0.35 * 5 * yearEnd * ctx.avgW;
             v.notes.push("+50 energy, mood to max and the facility trains past level 5 this turn");
+            if (yearEnd) v.notes.push("the year-end race after this turn pays 35% more stats with Red active (it can't be used on the race screen)");
           } else if (w === "blue") {
             v = variant(o);
             v.parts.item = o.cards * (0.12 * ctx.typ + 3 * ctx.avgW);
@@ -1241,7 +1445,26 @@
           v.value = sumParts(v.parts);
           return v;
         }).sort((a, b) => b.value - a.value);
-        if (tries[0]) options.push(tries[0]);
+        const best = tries[0];
+        if (!best) return;
+        // Use it right away (no fragments drop while you hold 8), unless camp is a turn or two
+        // off: guides save it for camp, where it's worth more.
+        const soon = ctx.camp ? 0 : isCamp(t + 1, ctx.sc) ? 1 : isCamp(t + 2, ctx.sc) ? 2 : 0;
+        if (soon && !(w === "red" && yearEnd)) {
+          // Held, it pays about as much as now, scaled to camp's bigger trainings, minus the
+          // fragments that don't drop meanwhile.
+          const ratio = typAt(t + soon, ctx.sc, ctx.calib) / ctx.typ;
+          best.parts.item -= Math.max(0, best.parts.item) * ratio * (1 - 0.08 * soon);
+          const plain = trains.slice().sort((a, b) => b.value - a.value)[0];
+          const note = "camp starts in " + soon + " turn" + (soon > 1 ? "s" : "") + "; guides save the Wisdom for camp, where it's worth more";
+          best.notes.push(note);
+          if (plain) plain.notes.push("hold the " + w + " Wisdom: " + note);
+        } else {
+          best.parts.item += 0.1 * ctx.typ;
+          best.notes.push("no fragments drop while you hold 8, so use it now");
+        }
+        best.value = sumParts(best.parts);
+        options.push(best);
       }
     },
 
@@ -1256,10 +1479,16 @@
       actions(ctx) {
         const m = (ctx.state.extras && ctx.state.extras.ss) || 0;
         if (!m || ctx.camp) return [];
+        // Energy sets the win chance (game8): sure above ~20%, shaky below, worse below ~10%;
+        // a loss halves the stats.
+        const pct = (100 * ctx.E) / ctx.maxE;
+        const win = pct >= 30 ? 1 : pct > 20 ? 0.95 : pct > 10 ? 0.8 : 0.6;
+        const notes = ["uses a turn but no energy; trains every stat and pays Supporter Points", m < 5 ? "waiting for 5 members makes it stronger and can trigger an SSS Match" : "5 members: run it now (holding only leaves more gauges stuck at full)"];
+        if (win < 1) notes.push("energy is low enough that the match can be lost, which halves the stats; rest first if you can");
         return [{
           kind: "scenario", label: "SS Match (" + m + " member" + (m > 1 ? "s" : "") + ")",
-          parts: { scenario: 0.28 * ctx.typ * m + 0.1 * ctx.typ + (m >= 5 ? 0.3 * ctx.typ : 0) },
-          notes: ["uses a turn but no energy; trains every stat and pays Supporter Points", m < 5 ? "waiting for 5 members makes it stronger and can trigger an SSS Match" : "5 members: chance of an SSS Match"],
+          parts: { scenario: (0.28 * ctx.typ * m + 0.1 * ctx.typ + (m >= 5 ? 0.3 * ctx.typ : 0)) * (win + (1 - win) * 0.5) },
+          notes,
           consume: { ss: 0 }
         }];
       }
@@ -1318,7 +1547,9 @@
           return v;
         }).filter(Boolean).sort((a, b) => b.value - a.value);
         const best = tries[0];
-        if (best && (best.rainbows >= 2 || best.raw >= 1.2 * ctx.typ || ctx.camp || tier === 4)) options.push(best);
+        // Cooking Points give a lasting training bonus, so Junior cooks whenever it can.
+        if (best && t <= 24 && !(best.rainbows >= 2 || best.raw >= 1.2 * ctx.typ)) best.notes.push("Junior: cook whenever you can; Cooking Points boost training for the rest of the run");
+        if (best && (best.rainbows >= 2 || best.raw >= 1.2 * ctx.typ || ctx.camp || tier === 4 || t <= 24)) options.push(best);
       }
     },
 
@@ -1328,8 +1559,11 @@
       },
       items(ctx, options) {
         const best = bestTraining(options);
-        if (ctx.state.extras && ctx.state.extras.overdrive && best && isStrong(best, ctx)) {
-          useOn(best, ctx, "Fire Overdrive", best.parts.stats * 0.3, "Overdrive on a strong training", { overdrive: false });
+        const t = ctx.state.turn;
+        // Super Overdrive in the URA Finals can't use stored charges, so spend them by Late December.
+        const flush = t >= 69 && t <= 72;
+        if (ctx.state.extras && ctx.state.extras.overdrive && best && (isStrong(best, ctx) || flush)) {
+          useOn(best, ctx, "Fire Overdrive", best.parts.stats * 0.3, flush && !isStrong(best, ctx) ? "spend stored Overdrive before the URA Finals: Super Overdrive there can't use it" : "Overdrive on a strong training", { overdrive: false });
         }
       }
     },
@@ -1358,15 +1592,19 @@
         const t = ctx.state.turn;
         if (!tickets || ctx.camp || t > 72) return [];
         const friendFacs = trains.filter((o) => o.rainbows > 0).length;
+        // You hold only 1 ticket until Senior Early September (turn 65), when 2 more arrive.
+        // Classic: use it before camp. Senior spring: keep it through camp to enter the last
+        // half year with 3, unless the turn is exceptional.
         let ok;
-        if (t >= 61) ok = friendFacs >= 2 || ctx.turnsLeft <= tickets + 1;
-        else if (t >= 49) ok = tickets > 3 ? friendFacs >= 2 : friendFacs >= 4;
-        else ok = friendFacs >= 3 || (tickets > 3 && friendFacs >= 2);
+        if (t >= 65) ok = friendFacs >= 2 || ctx.turnsLeft <= tickets + 1;
+        else if (t >= 49) ok = friendFacs >= 4;
+        else ok = friendFacs >= 3 || (t >= 33 && t <= 36);
         if (t <= 24 && friendFacs < 3) ok = false;
         if (!ok) return [];
         const total = trains.reduce((a, o) => a + o.parts.stats + o.parts.sp, 0);
         const notes = [friendFacs + " facilities with friendship", "no energy cost and can't fail"];
-        if (t >= 49 && t < 61) notes.push("still worth it while banking tickets for the last half year");
+        if (t >= 33 && t <= 36 && friendFacs < 3) notes.push("use it before summer camp");
+        if (t >= 49 && t < 65) notes.push("an exceptional turn; otherwise keep the ticket through camp for 3 in the last half year");
         return [{ kind: "scenario", label: "Island Training", parts: { scenario: total * 0.5 + friendFacs * 0.1 * ctx.typ }, notes, consume: { tickets: (v) => Math.max(0, (v || 0) - 1) } }];
       }
     },
@@ -1432,18 +1670,27 @@
         const delta = -energyCost(best.stat, t, ctx.sc);
         // Only 2 per half year: spending one now gives up using it on a better turn later
         // (camp, high energy), unless the half year is about to end.
-        const reserve = urgent ? 0 : ctx.camp ? 0.3 * ctx.typ : 0.9 * ctx.typ;
+        let reserve = urgent ? 0 : ctx.camp ? 0.3 * ctx.typ : 0.9 * ctx.typ;
         const gain = (best.parts.stats + best.parts.sp) * 1.6;
         const moodDrop = ctx.state.mood > 0 ? ctx.moodStep(ctx.state.mood - 1) : 0;
+        const notes = ["every card and member joins every facility", urgent ? left + " left and the half year ends on turn " + end + ": use it or lose it" : good ? "high-value turn" : "energy is low, so consider saving it"];
+        // game8: early on, use it when all three gauges are full; from Classic camp on, not on
+        // turns when members rank up (the gains hit the cap).
+        const rankUps = ctx.state.facilities.reduce((a, f) => a + ((f.extras && f.extras.fullgauge) || 0), 0);
+        if (t <= 36 && x.allFull) { reserve -= 0.4 * ctx.typ; notes.push("all three gauges are full: the best early DREAMS turn"); }
+        if (t >= 37 && rankUps && !urgent) { reserve += 0.5 * ctx.typ * rankUps; notes.push("a member ranks up this turn; guides avoid DREAMS training then (gains hit the cap)"); }
         return [{
           kind: "scenario", label: "DREAMS training (" + STAT_LABELS[best.stat] + ")", energyDelta: delta, fail: best.fail,
           parts: { scenario: gain - reserve, energy: ctx.energyValue(delta), risk: -(best.fail / 100) * (gain + 0.5 * ctx.typ + moodDrop) },
-          notes: ["every card and member joins every facility", urgent ? left + " left and the half year ends on turn " + end + ": use it or lose it" : good ? "high-value turn" : "energy is low, so consider saving it"],
+          notes,
           consume: { dreamsLeft: (v) => Math.max(0, (v != null ? +v : 2) - 1) }
         }];
       },
       afterTurn(s) {
-        if ([12, 24, 36, 48, 60].indexOf(s.turn) !== -1) s.extras.dreamsLeft = 2;
+        // 2 per half year; Senior June's meeting refills 4 for the last half year.
+        if ([12, 24, 36, 48].indexOf(s.turn) !== -1) s.extras.dreamsLeft = 2;
+        if (s.turn === 60) s.extras.dreamsLeft = 4;
+        s.extras.allFull = false;
       }
     },
 
@@ -1452,8 +1699,11 @@
         const x = ctx.state.extras || {};
         const best = bestTraining(options);
         if (!best || !x.tasting) return;
-        if (isStrong(best, ctx) || (x.tips || 0) >= 9 || ctx.camp) {
-          useOn(best, ctx, "Hold a tasting session", best.parts.stats * 0.25, (x.tips || 0) >= 9 ? "tips are near the 10 cap" : "tasting right before a friendship training", { tasting: false });
+        // Tips reset after each Late December, so the last turns of a year use them up.
+        const t = ctx.state.turn;
+        const yearEnd = (x.tips || 0) > 0 && [24, 48, 72].some((d) => d - t >= 0 && d - t <= 2);
+        if (isStrong(best, ctx) || (x.tips || 0) >= 9 || ctx.camp || yearEnd) {
+          useOn(best, ctx, "Hold a tasting session", best.parts.stats * 0.25, yearEnd && !isStrong(best, ctx) ? "tips reset after Late December, so use them now" : (x.tips || 0) >= 9 ? "tips are near the 10 cap" : "tasting right before a friendship training", { tasting: false });
         }
       }
     }
@@ -1461,9 +1711,9 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
-    songBonuses, hypeStatus, songAdvice, tokenGain, tokenCap, facilityRainbows
+    songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;

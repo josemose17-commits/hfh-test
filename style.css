@@ -428,3 +428,5 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 #race { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
 .status .row-wrap > .field.grow { flex: 1 1 180px; min-width: 0; }
 #fans { width: 110px; }
+.song-plan { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; background: var(--surface); }
+.song-plan .plan-next { font-weight: 600; }

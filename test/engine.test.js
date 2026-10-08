@@ -252,12 +252,33 @@ test("Grand Concert songs add extra stat gains and a delayed friendship bonus", 
   assert.strictEqual(h.need, 2);
 });
 
-test("Grand Concert recommends an affordable song before acting", () => {
-  const s = base({ turn: 10, gl: { songs: {}, tokens: [40, 0, 0, 30, 0] } });
+test("Grand Concert follows the song plan: lessons first, then an affordable song (not the +Guts one in year one)", () => {
+  const gl = sc("grandlive");
+  const s = base({ turn: 10, gl: { songs: {}, tokens: [40, 0, 0, 30, 0], lessons: {} } });
+  const plan = E.songPlan(s, gl);
+  assert.strictEqual(plan.target, 5);
+  assert.strictEqual(plan.step, "lessons", "year one starts with 1 technique lesson before the first song");
+  assert.doesNotMatch(pick(s, "grandlive").headline, /Learn/);
+  s.gl.lessons = { 0: 1 };
   const r = pick(s, "grandlive");
   assert.match(r.headline, /Learn .* \(no turn used\)/);
-  const adv = E.songAdvice(s, sc("grandlive"));
-  assert.ok(adv[0].affordable);
+  assert.doesNotMatch(r.headline, /Nigekiri/, "the +Guts song (also affordable) is skipped in year one");
+  const adv = E.songAdvice(s, gl);
+  assert.ok(adv.find((a) => a.song.id === "nigekiri").avoid);
+});
+
+test("Grand Concert song plan: 5 songs and a carry-over in year one, 3 + carry after, 18 by the Grand Live", () => {
+  const gl = sc("grandlive");
+  const at = (turn, songs, lessons) => E.songPlan(base({ turn, gl: { songs, tokens: [0, 0, 0, 0, 0], lessons } }), gl);
+  const five = { kiseki: 6, tachiichi: 8, gothisway: 12, runrun: 16, zensoku: 20 };
+  assert.strictEqual(at(22, five, { 0: 14 }).step, "lessons", "2 more lessons until the 6th song shows");
+  assert.strictEqual(at(22, five, { 0: 16 }).step, "hold", "then hold it for after the live");
+  const y2 = at(25, five, {});
+  assert.strictEqual(y2.target, 3);
+  assert.match(y2.text, /carried over first/);
+  assert.deepStrictEqual(y2.focus, ["yumewo", "growup"]);
+  assert.strictEqual(at(61, five, {}).target, 4, "the last half buys the 4th song instead of carrying it");
+  assert.deepStrictEqual(at(50, five, {}).focus, ["daisuki", "fanfare"]);
 });
 
 test("hint cards add value and extra bond; Friend outings become an option", () => {
@@ -437,4 +458,79 @@ test("race calendar: races on a turn fit the trainee's aptitudes", () => {
   const races = E.racesAt(base({ deck: { trainee: urara.id, slots: [] } }), 50);
   assert.ok(races.every((r) => r.s === 2), "only dirt races for a dirt-only trainee");
   assert.ok(E.racesAt(base({}), 27).some((r) => r.n === "Kisaragi Sho"));
+});
+
+test("Grand Concert opening: turn 4 rests when energy is 65 or less, so turn 5 starts full", () => {
+  const gl = sc("grandlive");
+  const s = (energy) => base({ turn: 4, energy, mood: 2, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} }, facilities: facs({ speed: { cards: 1, unbonded: 1 }, wit: { cards: 1, unbonded: 1 } }) });
+  assert.strictEqual(E.recommend(s(60), gl).action.kind, "rest");
+  assert.strictEqual(E.recommend(s(95), gl).action.kind, "train");
+  assert.ok(E.eventsFor(12, gl, { goals: [] }).some((e) => e.label === "Reset check"));
+  assert.ok(E.eventsFor(12, gl, { goals: [] }).some((e) => /Debut/.test(e.label)), "the debut still shows");
+});
+
+test("Trackblazer: Grade Point goals replace career goals, count down on races and reset each December", () => {
+  const D = require("../deck.js");
+  const tb = sc("trackblazer");
+  const tr = (n) => D.DATA.trainees.find((t) => t.n === n).id;
+  const sw = (o) => base(Object.assign({ deck: { trainee: tr("Special Week"), slots: [] }, fans: 30000 }, o));
+  assert.deepStrictEqual(E.traineeGoals(sw({}), tb).map((g) => g.turn), [12], "only the debut stays a goal race");
+  assert.strictEqual(E.gradeGoal(sw({ turn: 20 }), tb).goal, 60);
+  assert.strictEqual(E.gradeGoal(base({ turn: 30, deck: { trainee: tr("Haru Urara"), slots: [] } }), tb).goal, 200, "dirt target");
+  assert.strictEqual(E.gradeGoal(base({ turn: 30, deck: { trainee: tr("Curren Chan"), slots: [] } }), tb).goal, 200, "sprint-only target");
+  // 200 still needed on turn 46: the races left after this turn pay at most 180, so race now.
+  const late = sw({ turn: 46, extras: { gpNeed: 200, gpDue: 48 } });
+  const rec = E.recommend(late, tb);
+  assert.strictEqual(rec.gradePlan.status, "urgent");
+  assert.strictEqual(rec.action.kind, "race");
+  const after = E.advance(late, tb, rec.action);
+  assert.strictEqual(after.extras.gpNeed, 200 - rec.action.gp);
+  // A typed count from another year doesn't apply.
+  assert.strictEqual(E.gradePlan(sw({ turn: 50, extras: { gpNeed: 20, gpDue: 48 } }), tb).need, 300);
+  // The deadline turn resets the count for next year's goal.
+  const dec = E.advance(sw({ turn: 48, extras: { gpNeed: 0, gpDue: 48 } }), tb, { kind: "rest", energyDelta: 50, moodDelta: 0, prefix: [], notes: [], consume: {} });
+  assert.strictEqual(dec.extras.gpNeed, undefined);
+  assert.strictEqual(E.gradePlan(dec, tb).need, 300);
+});
+
+test("Grand Masters: Wisdom waits for a camp that's a turn away, and Red counts the year-end race", () => {
+  const gm = sc("grandmasters");
+  const s = (turn, wisdom) => base({ turn, energy: 90, extras: { wisdom }, facilities: facs({ speed: { cards: 3, rainbows: 1 }, power: { cards: 1 } }) });
+  assert.ok(/Wisdom/.test(E.recommend(s(30, "yellow"), gm).headline), "uses it right away");
+  assert.ok(!/Wisdom/.test(E.recommend(s(36, "yellow"), gm).headline), "holds it for camp");
+  const red = E.recommend(s(24, "red"), gm);
+  assert.ok(/Red Wisdom/.test(red.headline));
+  assert.ok(red.action.notes.some((n) => /year-end race/.test(n)));
+});
+
+test("future scenarios: guide rules (SS Match energy, DREAMS refills, island tickets, Overdrive, tips, cooking)", () => {
+  // L'Arc: an SS Match at very low energy can be lost, so it's worth less.
+  const larc = sc("larc");
+  const ss = (energy) => E.evaluate(base({ turn: 20, energy, extras: { ss: 5 } }), larc).options.find((o) => /SS Match/.test(o.label));
+  assert.ok(ss(8).value < ss(80).value);
+  assert.ok(ss(8).notes.some((n) => /halves/.test(n)));
+  // Beyond Dreams: 4 DREAMS trainings after Senior June's meeting; avoid them on rank-up turns later on.
+  const dreams = sc("dreams");
+  const rest = { kind: "rest", energyDelta: 50, moodDelta: 0, prefix: [], notes: [], consume: {} };
+  assert.strictEqual(E.advance(base({ turn: 60, extras: {} }), dreams, rest).extras.dreamsLeft, 4);
+  assert.strictEqual(E.advance(base({ turn: 48, extras: {} }), dreams, rest).extras.dreamsLeft, 2);
+  const dr = (fullgauge) => E.evaluate(base({ turn: 52, energy: 90, extras: { dreamsLeft: 2 }, facilities: facs({ speed: { cards: 2, rainbows: 1, extras: { members: 2, fullgauge } } }) }), dreams).options.find((o) => /DREAMS/.test(o.label));
+  assert.ok(dr(1).value < dr(0).value, "a rank-up turn makes DREAMS training worth less");
+  // Island: Senior spring keeps the one ticket unless the turn is exceptional; Classic uses it before camp.
+  const isl = sc("island");
+  const island = (turn, rb) => E.evaluate(base({ turn, extras: { tickets: 1 }, facilities: facs({ speed: { cards: 2, rainbows: rb ? 1 : 0 }, stamina: { cards: 2, rainbows: rb ? 1 : 0 }, power: { cards: 2, rainbows: rb ? 1 : 0 } }) }), isl).options.some((o) => o.label === "Island Training");
+  assert.ok(!island(52, true), "3 friendship facilities isn't enough to spend it in Senior spring");
+  assert.ok(island(36, false), "Classic: use it before camp");
+  // Mecha: stored Overdrive is spent before the URA Finals.
+  assert.match(E.recommend(base({ turn: 71, extras: { overdrive: true }, facilities: facs({ speed: { cards: 1 } }) }), sc("mecha")).headline, /Overdrive/);
+  // Trecen-ken: tips reset after Late December, so a tasting is held then.
+  const tips = (turn) => E.recommend(base({ turn, extras: { tips: 4, tasting: true }, facilities: facs({ speed: { cards: 2 } }) }), sc("ramen")).headline;
+  assert.match(tips(47), /tasting/);
+  assert.doesNotMatch(tips(43), /tasting/, "mid-year it waits for a friendship training");
+  // Great Food Festival: Junior cooks even on an ordinary training (Cooking Points last all run).
+  const cook = (turn) => E.recommend(base({ turn, energy: 90, extras: { dish: "1" }, facilities: facs({ speed: { cards: 1 } }) }), sc("cooking")).headline;
+  assert.match(cook(5), /Cook/);
+  assert.doesNotMatch(cook(30), /Cook/);
+  // Onsen: the Junior reset check shows on the plan.
+  assert.ok(E.eventsFor(21, sc("onsen"), { goals: [] }).some((e) => e.label === "Reset check"));
 });
