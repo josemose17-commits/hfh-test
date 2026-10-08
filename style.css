@@ -425,3 +425,6 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 .fanplan { border-left: 3px solid var(--gold); padding-left: 8px; }
 .fanplan.fp-urgent, .fanplan.fp-short { border-color: var(--bad); color: var(--fg); }
 .fanplan.fp-efficient { border-color: var(--accent); }
+#race { width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis; }
+.status .row-wrap > .field.grow { flex: 1 1 180px; min-width: 0; }
+#fans { width: 110px; }
