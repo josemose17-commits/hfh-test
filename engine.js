@@ -82,8 +82,57 @@
     return { id: "senior2", name: "Senior autumn", tip: "Close the remaining stat gaps. Stats over 1200 count half, so skill points matter more now." };
   }
 
+  // The trainee's career goals (GameTora objectives), as turn plan entries. Fixed goal races
+  // are forced; "pick one" goals are forced only when every option is on the same turn;
+  // fan and race-count goals are deadlines. Scenarios with their own goal races keep them.
+  function traineeGoals(state, sc) {
+    if (!Deck || !Deck.DATA || !Deck.DATA.objectives || !state || !state.deck || !state.deck.trainee || (sc && sc.goalTurns)) return [];
+    const t = Deck.trainee(state.deck.trainee);
+    const list = t && Deck.DATA.objectives[t.cid];
+    if (!list) return [];
+    const place = (g) => (g.v === 0 ? "enter" : g.v === 1 ? "win" : "top " + g.v);
+    const last = Math.min(72, (sc && sc.totalTurns) || 72);
+    const out = [];
+    for (let i = 0; i < list.length;) {
+      const g = list[i];
+      if (g.ch) {
+        let j = i;
+        while (j < list.length && list[j].ch) j++;
+        const grp = list.slice(i, j);
+        const turns = Array.from(new Set(grp.map((x) => x.t)));
+        const all = Array.from(new Set(grp.reduce((a, x) => a.concat(x.r), [])));
+        if (turns.length === 1) {
+          out.push({ turn: turns[0], forced: true, label: "Goal: " + all.join(" or ") + " (" + place(grp[0]) + ")", tip: "Career goal. Race whichever one your goal list shows." });
+        } else {
+          turns.forEach((tu) => {
+            const here = Array.from(new Set(grp.filter((x) => x.t === tu).reduce((a, x) => a.concat(x.r), [])));
+            out.push({ turn: tu, forced: false, choice: true, label: "Goal option: " + here.join(" or ") + " (" + place(grp.find((x) => x.t === tu)) + ")", tip: "Your goal is one of: " + all.join(", ") + ". Tap ★ on the turn of the race you pick." });
+          });
+        }
+        i = j;
+        continue;
+      }
+      if (g.c === 1 && g.r.length) out.push({ turn: g.t, forced: true, label: "Goal: " + g.r.join(" or ") + " (" + place(g) + ")", tip: g.t === 12 ? "Goal race: your debut." : "Career goal race." });
+      else if (g.c === 3) out.push({ turn: g.t, forced: false, label: "Goal: " + g.v.toLocaleString("en-US") + " fans by this turn", tip: "Race optional races before this if you're short of fans." });
+      else out.push({ turn: g.t, forced: false, label: "Goal due", tip: "A career goal is due by this turn. Check the in-game goal list." });
+      i++;
+    }
+    return out.filter((x) => x.turn >= 1 && x.turn <= last);
+  }
+
+  // Goal race turns that come from the trainee's goals, minus any you unmarked.
+  function autoGoalTurns(state, sc) {
+    const off = new Set(state.goalsOff || []);
+    return new Set(traineeGoals(state, sc).filter((g) => g.forced && !off.has(g.turn)).map((g) => g.turn));
+  }
+
+  function isGoalTurn(state, sc, turn) {
+    return (state.goals || []).indexOf(turn) !== -1 || autoGoalTurns(state, sc).has(turn);
+  }
+
   function forcedTurns(state, sc) {
     const set = new Set(state.goals || []);
+    autoGoalTurns(state, sc).forEach((t) => set.add(t));
     if (sc.finale && sc.finale.forced) sc.finale.turns.forEach((t) => set.add(t));
     (sc.goalTurns || []).forEach((t) => set.add(t));
     return set;
@@ -92,13 +141,16 @@
   function eventsFor(turn, scenario, state) {
     const out = [];
     const evs = scenario.events || [];
-    if (turn === 12 && !evs.some((e) => e.turn === 12)) out.push({ turn, label: "Make Debut", tip: "Goal race." });
+    // The scenario's own debut entry already covers the trainee's debut goal.
+    const tg = traineeGoals(state, scenario).filter((g) => g.turn === turn && !(turn === 12 && evs.some((e) => e.turn === 12)));
+    if (turn === 12 && !evs.some((e) => e.turn === 12) && !tg.length) out.push({ turn, label: "Make Debut", tip: "Goal race." });
     const camps = campTurns(scenario);
     if (camps.indexOf(turn + 1) !== -1 && camps.indexOf(turn) === -1) out.push({ turn, label: "Camp next turn", tip: "Energy carried into camp is worth more than usual." });
     if (camps.indexOf(turn) !== -1 && camps.indexOf(turn - 1) === -1) out.push({ turn, label: "Summer camp starts", tip: "Four turns at max facility level." });
     evs.forEach((e) => { if (e.turn === turn) out.push(e); });
     if (scenario.finale && scenario.finale.forced && scenario.finale.turns.indexOf(turn) !== -1) out.push({ turn, label: scenario.finale.name, tip: scenario.finale.note });
-    if (state && (state.goals || []).indexOf(turn) !== -1) out.push({ turn, label: "Goal race", tip: "You marked this turn as a goal race." });
+    tg.forEach((g) => out.push({ turn, label: g.label, tip: g.tip }));
+    if (state && (state.goals || []).indexOf(turn) !== -1 && !tg.some((g) => g.forced)) out.push({ turn, label: "Goal race", tip: "You marked this turn as a goal race." });
     return out;
   }
 
@@ -791,7 +843,7 @@
     }]).slice(-90);
     s.turn = Math.min(scenario.totalTurns, s.turn + 1);
     s.facilities = s.facilities.map((f) => ({ stat: f.stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 }));
-    s.goalRace = (s.goals || []).indexOf(s.turn) !== -1;
+    s.goalRace = isGoalTurn(s, scenario, s.turn);
     s.race = "";
     return s;
   }
@@ -1252,7 +1304,7 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     songBonuses, hypeStatus, songAdvice, tokenGain, tokenCap, facilityRainbows
   };

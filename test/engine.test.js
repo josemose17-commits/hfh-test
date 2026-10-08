@@ -382,3 +382,34 @@ test("Grand Concert: Done adds the training's tokens (typed or estimated), cappe
   assert.strictEqual(E.advance(st, gl, opt).gl.tokens[4], 200, "capped at 200 before the first live");
   assert.strictEqual(E.tokenCap(Object.assign({}, st, { turn: 40 }), gl), 300);
 });
+
+test("trainee goals: fixed goal races are marked on their turns, choices only when they share a turn", () => {
+  const D = require("../deck.js");
+  const tr = (name) => D.DATA.trainees.find((t) => t.n === name);
+  const ura = sc("ura");
+  const sw = base({ turn: 27, deck: { trainee: tr("Special Week").id, slots: [] } });
+  const auto = E.autoGoalTurns(sw, ura);
+  [12, 27, 34, 44, 56, 70, 72].forEach((t) => assert.ok(auto.has(t), "turn " + t));
+  assert.ok(E.forcedTurns(sw, ura).has(34));
+  assert.ok(E.eventsFor(34, ura, sw).some((e) => /Japanese Derby/.test(e.label)));
+  // On a goal turn the coach races.
+  sw.goalRace = true;
+  assert.strictEqual(E.recommend(sw, ura).action.kind, "race");
+  // Daiwa Scarlet: Oaks or Derby, both on turn 34, so turn 34 is a goal race either way.
+  const dw = base({ deck: { trainee: tr("Daiwa Scarlet").id, slots: [] } });
+  assert.ok(E.autoGoalTurns(dw, ura).has(34));
+  // Unmarking a trainee goal works through goalsOff.
+  assert.ok(!E.autoGoalTurns(Object.assign({}, sw, { goalsOff: [34] }), ura).has(34));
+  // L'Arc keeps its own fixed goals.
+  assert.strictEqual(E.traineeGoals(sw, sc("larc")).length, 0);
+});
+
+test("trainee goals: 'pick one' goals on different turns are options, not forced", () => {
+  const D = require("../deck.js");
+  const fm = D.DATA.trainees.find((t) => t.n === "Fine Motion");
+  const st = base({ deck: { trainee: fm.id, slots: [] } });
+  const goals = E.traineeGoals(st, sc("ura"));
+  const opts = goals.filter((g) => g.choice);
+  assert.ok(opts.length >= 2 && opts.every((g) => !g.forced));
+  assert.ok(goals.some((g) => g.forced && g.turn === 64), "Sapporo Kinen stays a fixed goal");
+});

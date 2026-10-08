@@ -41,6 +41,7 @@
       badCondition: false,
       race: "",
       goals: [],
+      goalsOff: [],
       extras: {},
       stats: {},
       log: [],
@@ -352,7 +353,7 @@
         const v = e.target.value.trim();
         const t = traineeByLabel.get(v);
         if (t && t.id === state.deck.trainee) return;
-        if (t) { state.deck.trainee = t.id; commit(true); flash(t.n + " set as trainee"); }
+        if (t) { setTrainee(t.id); }
         else if (!v) { state.deck.trainee = null; commit(true); }
         else flash("No trainee matches that name. Pick one from the list.");
       });
@@ -495,7 +496,7 @@
       const add = e.target.closest("[data-add-card]");
       if (add) { addToDeck(+add.dataset.addCard); return; }
       const use = e.target.closest("[data-use-trainee]");
-      if (use) { state.deck.trainee = +use.dataset.useTrainee; commit(true); flash(D.trainee(state.deck.trainee).n + " set as trainee"); return; }
+      if (use) { setTrainee(+use.dataset.useTrainee); return; }
       const more = e.target.closest("[data-more]");
       if (more) { db().limit += 60; renderDbList(); return; }
       const row = e.target.closest("[data-db-row]");
@@ -533,12 +534,8 @@
         const v = e.target.value.trim();
         const tr = traineeByLabel.get(v);
         if ((tr && tr.id !== state.deck.trainee) || (!v && state.deck.trainee)) {
-          state.deck.trainee = tr ? tr.id : null;
           if (tr) tier().deck = tier().deck.filter((x) => D.card(x.id).cid !== tr.cid);
-          save();
-          renderDeck();
-          renderTab();
-          flash(tr ? tr.n + " set as trainee" : "Trainee cleared");
+          setTrainee(tr ? tr.id : null);
         }
         return;
       }
@@ -586,15 +583,25 @@
   function setTurn(t) {
     state.turn = t;
     clampTurn();
-    state.goalRace = (state.goals || []).indexOf(state.turn) !== -1;
+    state.goalRace = E.isGoalTurn(state, scenario(), state.turn);
     commit(true);
   }
 
+  // A goal from the trainee's goal list is unmarked through goalsOff; others through goals.
   function toggleGoal() {
-    const g = new Set(state.goals || []);
-    if (g.has(state.turn)) g.delete(state.turn); else g.add(state.turn);
-    state.goals = Array.from(g).sort((a, b) => a - b);
-    state.goalRace = g.has(state.turn);
+    const sc = scenario();
+    const t = state.turn;
+    const auto = E.traineeGoals(state, sc).some((x) => x.forced && x.turn === t);
+    if (auto) {
+      const off = new Set(state.goalsOff || []);
+      if (off.has(t)) off.delete(t); else off.add(t);
+      state.goalsOff = Array.from(off);
+    } else {
+      const g = new Set(state.goals || []);
+      if (g.has(t)) g.delete(t); else g.add(t);
+      state.goals = Array.from(g).sort((a, b) => a - b);
+    }
+    state.goalRace = E.isGoalTurn(state, sc, t);
     commit(true);
   }
 
@@ -646,13 +653,14 @@
   // Value edits refresh only the outputs, so a field being typed in keeps focus.
   function commit(full) {
     state.example = false;
+    state.goalRace = E.isGoalTurn(state, scenario(), state.turn);
     save();
     if (full) render(); else renderOutputs();
   }
 
   function renderStrip() {
     const sc = scenario();
-    const evTurns = new Set((sc.events || []).map((e) => e.turn).concat(sc.finale.turns, [12]));
+    const evTurns = new Set((sc.events || []).map((e) => e.turn).concat(sc.finale.turns, [12], E.traineeGoals(state, sc).map((g) => g.turn)));
     const goals = new Set(E.forcedTurns(state, sc));
     const logged = new Set((state.log || []).map((l) => l.turn));
     let html = "";
@@ -667,12 +675,14 @@
     const ti = E.turnInfo(state.turn, sc);
     $("#turnNum").textContent = "Turn " + state.turn + " / " + sc.totalTurns;
     $("#turnText").innerHTML = esc(ti.text) + (E.isCamp(state.turn, sc) ? ' <span class="chip camp">summer camp</span>' : "");
-    const isGoal = (state.goals || []).indexOf(state.turn) !== -1;
+    const isGoal = E.isGoalTurn(state, sc, state.turn);
     const forcedFinale = sc.finale.forced && sc.finale.turns.indexOf(state.turn) !== -1;
     const g = $("#goalToggle");
     g.setAttribute("aria-pressed", String(isGoal || forcedFinale));
     g.disabled = forcedFinale;
-    g.textContent = forcedFinale ? "★ Finale race" : isGoal ? "★ Goal race (tap to unmark)" : "☆ Mark goal race";
+    const tg = E.traineeGoals(state, sc).find((x) => x.turn === state.turn);
+    const raceName = tg ? tg.label.replace(/^Goal( option)?: /, "") : "";
+    g.textContent = forcedFinale ? "★ Finale race" : isGoal ? "★ Goal race" + (tg && tg.forced ? ": " + raceName : "") + " (tap to unmark)" : tg && tg.choice ? "☆ Pick this goal: " + raceName : "☆ Mark goal race";
   }
 
   function pipsHTML(k, v, label, cls) {
@@ -907,6 +917,16 @@
     const info = E.deckInfo(state);
     $("#deckSummary").textContent = (t ? t.n + " · " : "") + (used ? used + " card" + (used > 1 ? "s" : "") + (info ? " · race bonus " + info.raceBonus + "%" : "") : "Optional: set your deck for exact gains");
     if (!used && !t) $("#deckPanel").open = $("#deckPanel").open || false;
+  }
+
+  // Picking a trainee also loads her career goals into the turn plan.
+  function setTrainee(id) {
+    state.deck.trainee = id;
+    state.goalsOff = [];
+    commit(true);
+    if (!id) { flash("Trainee cleared"); return; }
+    const goals = E.traineeGoals(state, scenario()).filter((g) => g.forced).length;
+    flash(D.trainee(id).n + " set as trainee" + (goals ? " · " + goals + " goal races marked" : ""));
   }
 
   function clearSlot(i) {

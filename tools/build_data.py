@@ -73,6 +73,7 @@ def main():
     effects = get("support_effects")
     trainees = get("character-cards")
     skills = get("skills")
+    objectives = get("ura-objectives")
     events = fetch_events()
 
     effect_meta = {}
@@ -129,6 +130,26 @@ def main():
         want_skills.update(tr["us"] + tr["is"] + tr["as"])
         out_trainees.append(tr)
 
+    # Career objectives per character (GameTora's URA objectives; other scenarios use the same
+    # character goals except where the scenario sets its own). Each goal: turn (deadline, or the
+    # race's turn for a fixed race), condition type (1 = finish in the top N, 3 = fans), value,
+    # race choice (0 = one fixed race, else pick one of the races), race names. URA Finals goals
+    # (target type 3) are left to the scenario.
+    out_obj = {}
+    for o in objectives:
+        goals = []
+        for g in sorted(o["objectives"], key=lambda x: x.get("order", 0)):
+            if g.get("target_type") == 3:
+                continue
+            goals.append({
+                "t": g.get("turn"),
+                "c": g.get("cond_type"),
+                "v": g.get("cond_value"),
+                "ch": g.get("race_choice", 0),
+                "r": [r.get("name_en") or r.get("name_ja") for r in g.get("races", [])],
+            })
+        out_obj[o["char_id"]] = goals
+
     skill_names = {}
     skill_cost = {}
     for s in skills:
@@ -145,6 +166,7 @@ def main():
         "trainees": out_trainees,
         "skills": skill_names,
         "skillCost": skill_cost,
+        "objectives": out_obj,
     }
     body = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     # Keep the old build date when nothing else changed, so scheduled rebuilds stay quiet.

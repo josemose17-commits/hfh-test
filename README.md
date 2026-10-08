@@ -32,6 +32,10 @@ Scenario-specific boosts that the formula doesn't cover (Unity training, island 
 - **Support cards**: filter by type, rarity, Global availability, limit break and whether you own the card, and sort by any effect. Tap a card for its effects at every limit break, its unique effect, hint skills, event skills and release dates.
 - **Trainees**: aptitudes, growth bonuses and unique skill.
 
+## Career goals
+
+Picking a trainee loads her career goals from GameTora (her objectives list): fixed goal races are marked as goal races on their turns (★ on the turn strip, and the coach races them), "pick one" goals that fall on the same turn (Oaks or Derby) count as a goal race either way, "pick one" goals on different turns show as options you choose by tapping ★ on that turn, and fan or race-count goals show on the turn plan as deadlines. You can unmark any goal turn with the goal button. Scenarios with their own goal races (L'Arc) keep those, and every scenario's finale stays as before.
+
 ## My cards
 
 Mark the support cards you own and their limit break, with the **Owned** picker on any card or **Quick add** under **My cards** in the Support cards tab. They're saved in your browser. **Copy backup code** gives a short code (`UMA1:...`) you can keep or paste into **Restore** on another device. When you add a card you own to your deck, it starts at your limit break, and **Cards I own** limits the deck picker to your cards.
