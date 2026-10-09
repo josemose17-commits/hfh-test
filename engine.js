@@ -671,7 +671,9 @@
     if (rule === "discipline") return t <= 20 ? 1 : t <= 34 ? 2 : t <= 46 ? 3 : t <= 58 ? 4 : 5;
     const log = state.log || [];
     const loggedTurns = new Set(log.map((l) => l.turn));
-    const trains = log.filter((l) => l.kind === "train");
+    // Summer camp facilities are all level 5 for the camp only: training there doesn't count
+    // toward the facility's real level.
+    const trains = log.filter((l) => l.kind === "train" && !isCamp(l.turn, sc));
     const mine = trains.filter((l) => l.stat === stat).length;
     const forced = forcedTurns(state, sc);
     let unlogged = 0;

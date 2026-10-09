@@ -779,3 +779,16 @@ test("New Year: the turn plan says energy can be spent before it", () => {
   assert.ok(ev.some((e) => /New Year/.test(e.label) && /\+20 energy/.test(e.tip)));
   assert.ok(E.eventsFor(48, sc("ura"), base({ turn: 48 })).some((e) => /\+30 energy/.test(e.tip)));
 });
+
+test("summer camp trainings don't raise facility levels", () => {
+  // Every turn up to 41 logged: Speed on the 4 Classic camp turns, rests otherwise.
+  const log = [];
+  for (let t = 1; t <= 40; t++) log.push(E.isCamp(t) ? { turn: t, kind: "train", stat: "speed" } : { turn: t, kind: "rest", stat: null });
+  const s = base({ turn: 41, log });
+  assert.strictEqual(E.facLevelFor(s, sc("ura"), "speed"), 1);
+  // The same 4 Speed trainings outside camp do level it up.
+  const log2 = log.map((l) => (l.turn >= 30 && l.turn <= 33 ? { turn: l.turn, kind: "train", stat: "speed" } : l.kind === "train" ? { turn: l.turn, kind: "rest", stat: null } : l));
+  assert.strictEqual(E.facLevelFor(base({ turn: 41, log: log2 }), sc("ura"), "speed"), 2);
+  // During camp itself every facility is level 5.
+  assert.strictEqual(E.facLevelFor(base({ turn: 38, log }), sc("ura"), "speed"), 5);
+});
