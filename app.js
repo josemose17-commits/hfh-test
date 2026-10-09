@@ -203,6 +203,7 @@
           <details class="panel stats" id="statsPanel">
             <summary><h2>Stats and caps</h2><span class="mini">Optional. Lets the coach stop pushing stats that are capped or already enough.</span></summary>
             <div class="table-wrap"><table class="stat-table" id="statTable"></table></div>
+            <p class="mini" id="statNote"></p>
             <label class="chip-toggle"><input type="checkbox" id="trackStats"> Add training gains to these when I press Done</label>
           </details>
         </section>
@@ -1232,11 +1233,15 @@
 
     const build = E.BUILDS[state.build];
     const tg = state.targets || {};
-    $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th>Cap</th><th title="Your target for this stat. The coach values a stat less once it's past this.">Target</th></tr></thead><tbody>${E.STATS.map((s, i) => `
+    // Cap: the game's limit for the stat in this scenario. Target: your goal for the build (left
+    // blank, the build's, never above the cap).
+    const capOf = (s, i) => state.caps[s] || sc.caps[i];
+    $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th title="The most this stat can reach in this scenario. Inheritance and some events raise it, so type the game's number if yours is higher.">Cap<small>limit</small></th><th title="Where you want this stat for your build. The coach values a stat less once it's past this.">Target<small>goal</small></th></tr></thead><tbody>${E.STATS.map((s, i) => `
       <tr class="s-${s}"><th scope="row">${E.STAT_LABELS[s]}</th>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cur" min="0" max="2500" value="${state.stats[s] || ""}" placeholder="—" aria-label="Current ${E.STAT_LABELS[s]}"></td>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cap" min="0" max="2500" value="${state.caps[s] || ""}" placeholder="${sc.caps[i]}" aria-label="${E.STAT_LABELS[s]} cap"></td>
-        <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="target" min="0" max="2500" value="${tg[s] || ""}" placeholder="${build.target[s]}" aria-label="${E.STAT_LABELS[s]} target"></td></tr>`).join("")}</tbody>`;
+        <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="target" min="0" max="2500" value="${tg[s] || ""}" placeholder="${Math.min(build.target[s], capOf(s, i))}" aria-label="${E.STAT_LABELS[s]} target"></td></tr>`).join("")}</tbody>`;
+    $("#statNote").textContent = "Cap is the game's limit for each stat in " + sc.name + ": training can't take it higher (inheritance and some events raise it). Target is your goal for a " + build.label + " build: past it the coach values that stat less. A target above the cap counts as the cap. Stats over 1200 count half in races, so most targets stop near 1200.";
   }
 
   function syncLight() {

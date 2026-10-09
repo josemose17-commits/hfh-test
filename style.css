@@ -162,7 +162,11 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 .stats summary::-webkit-details-marker { display: none; }
 .stats summary h2::before { content: "▸ "; color: var(--muted); }
 .stats[open] summary h2::before { content: "▾ "; }
-.stat-table input { width: 84px; padding: 5px 6px; text-align: right; }
+.stat-table input { width: 100%; max-width: 84px; min-width: 52px; padding: 5px 6px; text-align: right; }
+.stat-table th, .stat-table td { padding: 6px 6px; }
+.stat-table th small { display: block; font-size: .66rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+#statsPanel { min-width: 0; max-width: 100%; }
+#statsPanel .table-wrap { max-width: 100%; }
 .stat-table th[scope="row"] { color: var(--c); font-family: var(--font-display); font-size: 1rem; }
 
 /* The call */

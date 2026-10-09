@@ -452,7 +452,7 @@
     const ctx = {
       state, sc, calib, caps,
       w: build.w,
-      // Your own targets (the Stats table) override the build's.
+      // Your own targets (the Stats table) override the build's; none goes past the cap.
       target: Object.assign({}, build.target, state.targets || {}),
       stats: state.stats || {},
       E: clamp(Math.round(state.energy), 0, state.maxEnergy || 100),
@@ -461,6 +461,7 @@
       turnsLeft: sc.totalTurns - state.turn,
       typ: typAt(state.turn, sc, calib)
     };
+    STATS.forEach((k) => { ctx.target[k] = Math.min(ctx.target[k], caps[k]); });
     ctx.deck = deckInfo(state);
     ctx.songs = songBonuses(state, sc);
     ctx.boost = sc.train ? scenarioBoost(state, sc) : 1;
