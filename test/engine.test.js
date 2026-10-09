@@ -565,3 +565,73 @@ test("friend card outings: game8 data per card, the best choice for this turn, a
   const st = base({ energy: 25, deck: deck(30052, 2) });
   assert.strictEqual(E.advance(st, sc("ura"), outing({ energy: 25, deck: deck(30052, 2) })).deck.slots[0].dates.done, 3);
 });
+
+test("outings scale to the card's LB, raise max energy, count stats, and stop at 5 without data", () => {
+  const ura = sc("ura");
+  const deck = (id, lb, done) => ({ slots: [{ id, lb, bond: 90, dates: { unlocked: true, done } }] });
+  const outing = (st) => E.evaluate(st, ura).options.find((x) => x.outing != null);
+  // Light Hello's 1st outing: +40 energy at LB4 (game8), +35 at LB0 (Event Recovery 60% vs 40%).
+  assert.match(outing(base({ energy: 30, deck: deck(30052, 4, 0) })).notes[0], /\+40 energy/);
+  const lb0 = base({ energy: 30, deck: deck(30052, 0, 0) });
+  assert.match(outing(lb0).notes[0], /\+35 energy/);
+  const after = E.advance(lb0, ura, outing(lb0));
+  assert.strictEqual(after.maxEnergy, 104, "+4 max energy");
+  // Tracked stats take the outing's gains.
+  const tracked = base({ energy: 30, trackStats: true, stats: { guts: 400 }, deck: deck(30052, 0, 1) });
+  assert.strictEqual(E.advance(tracked, ura, outing(tracked)).stats.guts, 412);
+  // A card without outing data stops after 5.
+  assert.strictEqual(outing(base({ deck: deck(10021, 4, 5) })), undefined);
+});
+
+test("your own target stats replace the build's", () => {
+  const ura = sc("ura");
+  const st = (targets) => base({ stats: { speed: 1100 }, targets, facilities: facs({ speed: { cards: 1, gain: 20 } }) });
+  const v = (t) => E.evaluate(st(t), ura).options.find((o) => o.stat === "speed").parts.stats;
+  assert.ok(v({ speed: 1000 }) < v({ speed: 1500 }), "past your target, Speed counts less");
+});
+
+test("Chairman Akikawa: training with her is worth more before the bond check and raises her bond", () => {
+  const gl = sc("grandlive");
+  assert.ok(gl.inputs.some((i) => i.id === "aki") && gl.inputs.some((i) => i.id === "akiBond"));
+  const st = (turn, bond, aki) => base({ turn, extras: { akiBond: bond }, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} }, facilities: facs({ guts: { cards: 1, extras: { aki } } }) });
+  const guts = (s) => E.evaluate(s, gl).options.find((o) => o.stat === "guts");
+  assert.ok(guts(st(50, 30, true)).value > guts(st(50, 30, false)).value);
+  assert.ok(guts(st(50, 30, true)).notes.some((n) => /Akikawa is here/.test(n)));
+  assert.ok(!guts(st(56, 30, true)).notes.some((n) => /Akikawa/.test(n)), "after the check it doesn't matter");
+  assert.strictEqual(E.advance(st(50, 30, true), gl, guts(st(50, 30, true))).extras.akiBond, 37);
+});
+
+test("Grand Concert: trainings count the tokens they give toward the songs you still need", () => {
+  const gl = sc("grandlive");
+  const st = (tokens) => base({ turn: 40, gl: { songs: {}, tokens, lessons: {} }, facilities: facs({ guts: { cards: 2 } }) });
+  const guts = (s) => E.evaluate(s, gl).options.find((o) => o.stat === "guts");
+  const none = guts(st([0, 0, 0, 0, 0]));
+  assert.ok(none.notes.some((n) => /Visual toward/.test(n)));
+  const full = guts(st([200, 200, 200, 200, 200]));
+  assert.ok(none.value > full.value, "tokens you don't need add nothing");
+});
+
+test("support card events from the wiki: chain and other events, ranges by LB, best choice ranked", () => {
+  const CE = require("../data/card-events.js");
+  assert.ok(CE.meta.license.indexOf("CC BY-SA") === 0);
+  const kb = E.cardEvents(30028); // SSR Kitasan Black
+  assert.strictEqual(kb.chain.length, 3);
+  assert.ok(kb.other.length >= 2);
+  const ev = kb.chain[1]; // Paying It Forward: energy, or a Speed + hint gamble
+  const tired = E.rankEventChoices(base({ energy: 10 }), sc("ura"), ev, 4);
+  assert.strictEqual(tired.length, 2);
+  assert.match(tired[0].text, /energy/);
+  assert.ok(/on success/.test(E.eventText(ev.c[1], 4)));
+  // Light Hello's unlock event: keep the outings, even though the other choice gives Wit +40.
+  const lhUnlock = E.cardEvents(30052).other.find((e) => (e.c || []).some((c) => c.unlock));
+  const pick = E.rankEventChoices(base({ energy: 90 }), sc("ura"), lhUnlock, 4);
+  assert.match(pick[0].text, /unlocks outings/);
+  assert.match(pick[1].text, /locks outings/);
+  // A range like [10, 16] reads as 10 at LB0 and 16 at LB4.
+  const ranged = Object.values(CE.events).find((e) => (e.c || []).some((c) => Array.isArray(c.e)));
+  if (ranged) {
+    const c = ranged.c.find((x) => Array.isArray(x.e));
+    assert.match(E.eventText(c, 0), new RegExp("\\+" + c.e[0] + " energy"));
+    assert.match(E.eventText(c, 4), new RegExp("\\+" + c.e[1] + " energy"));
+  }
+});

@@ -9,6 +9,7 @@
 (function (root) {
   const Deck = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
   const Dates = root.UmaDates || (typeof require !== "undefined" ? require("./data/dates.js") : null);
+  const CardEvents = root.UmaCardEvents || (typeof require !== "undefined" ? require("./data/card-events.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const STAT_LABELS = { speed: "Speed", stamina: "Stamina", power: "Power", guts: "Guts", wit: "Wit" };
   const MOODS = ["Awful", "Bad", "Normal", "Good", "Great"];
@@ -451,7 +452,8 @@
     const ctx = {
       state, sc, calib, caps,
       w: build.w,
-      target: build.target,
+      // Your own targets (the Stats table) override the build's.
+      target: Object.assign({}, build.target, state.targets || {}),
       stats: state.stats || {},
       E: clamp(Math.round(state.energy), 0, state.maxEnergy || 100),
       maxE: state.maxEnergy || 100,
@@ -761,6 +763,100 @@
     }).sort((a, b) => (b.affordable - a.affordable) || (b.perToken - a.perToken));
   }
 
+  // Tokens a training gives toward the songs still to buy: each useful token is worth its share
+  // of the song it goes to (only up to what that song still lacks, and below the token cap).
+  function songTokenValue(f, ctx) {
+    const st = ctx.state;
+    const sc = ctx.sc;
+    if (!sc.songs || !sc.tokenOf || st.turn < 5 || st.turn > 72) return null;
+    const plan = songPlan(st, sc);
+    if (plan && plan.step === "done") return null;
+    const wanted = songAdvice(st, sc).filter((a) => !a.avoid && !a.affordable)
+      .sort((a, b) => (b.focus - a.focus) || (b.perToken - a.perToken)).slice(0, 2);
+    if (!wanted.length) return null;
+    const have = (st.gl && st.gl.tokens) || [0, 0, 0, 0, 0];
+    const cap = tokenCap(st, sc);
+    let add = 0;
+    const bits = [];
+    tokenGain(f, st, sc).forEach((g) => {
+      let left = Math.max(0, Math.min(g.amount, cap - (have[g.type] || 0)));
+      let used = 0;
+      wanted.forEach((w) => {
+        const take = Math.min(left, w.short[g.type] || 0);
+        if (take <= 0) return;
+        add += take * w.perToken * 0.5;
+        used += take;
+        left -= take;
+      });
+      if (used) bits.push("+" + Math.round(used) + " " + sc.tokens[g.type]);
+    });
+    if (!add) return null;
+    // Tokens come with most trainings anyway, so they tip close calls rather than decide.
+    return { add: Math.min(add, 0.4 * ctx.typ), note: bits.join(", ") + " toward " + wanted.map((w) => w.song.name).join(" / ") };
+  }
+
+  // ---- Support card events (Umamusume Wiki) ----
+  // Each card's chain and other events, with every choice's results. Values listed as a range
+  // ("Energy +10-16") go from LB0 to LB4; success/failure results are counted half each.
+  function cardEvents(cardId) {
+    const c = CardEvents && CardEvents.cards && CardEvents.cards[cardId];
+    if (!c) return null;
+    const list = (ids) => (ids || []).map((id) => Object.assign({ id }, CardEvents.events[id] || { n: "Event " + id }));
+    return { chain: list(c.chain), other: list(c.other) };
+  }
+
+  function atLB(v, lb) {
+    return Array.isArray(v) ? Math.round(v[0] + ((v[1] - v[0]) * (lb != null ? lb : 4)) / 4) : v;
+  }
+
+  function evOutcome(o, lb) {
+    if (!o) return null;
+    const out = {};
+    ["e", "me", "mo", "sp", "b", "r", "rn"].forEach((k) => { if (o[k] != null) out[k] = atLB(o[k], lb); });
+    if (o.s) out.s = o.s.map((g) => atLB(g, lb));
+    ["h", "g", "cure", "x", "unlock", "end"].forEach((k) => { if (o[k] != null) out[k] = o[k]; });
+    return out;
+  }
+
+  // One choice's parts: what it always gives, plus half of success and half of failure.
+  function eventChoiceParts(ch, ctx, lb) {
+    const base = dateParts(evOutcome(ch, lb), ctx);
+    if (ch.g) base.hint = (base.hint || 0) + ch.g.length * 0.5 * ctx.typ;
+    [ch.ok, ch.ng].forEach((o) => {
+      if (!o) return;
+      const p = dateParts(evOutcome(o, lb), ctx);
+      Object.keys(p).forEach((k) => { base[k] = (base[k] || 0) + 0.5 * p[k]; });
+    });
+    return base;
+  }
+
+  function eventText(ch, lb) {
+    const o = evOutcome(ch, lb) || {};
+    const bits = [];
+    const main = dateText(o);
+    if (main) bits.push(main);
+    if (o.b) bits.push("bond " + (o.b > 0 ? "+" : "") + o.b);
+    (ch.g || []).forEach((id) => bits.push("gets " + skillName(id)));
+    if (ch.unlock) bits.push("unlocks outings");
+    if (ch.ok) bits.push("on success: " + (eventText(ch.ok, lb) || "nothing"));
+    if (ch.ng) bits.push("on failure: " + (eventText(ch.ng, lb) || "nothing"));
+    return bits.join(", ");
+  }
+
+  // Ranks an event's choices for this turn. Returns [{ i, text, label, value }], best first.
+  function rankEventChoices(state, sc, ev, lb) {
+    if (!ev || !ev.c || !ev.c.length) return [];
+    const ctx = makeCtx(state, sc);
+    // On an outing unlock event, the other choice locks the card's outings for the run: worth
+    // about one strong turn per outing lost.
+    const unlockEvent = ev.c.some((ch) => ch.unlock);
+    return ev.c.map((ch, i) => {
+      const locks = unlockEvent && !ch.unlock;
+      const value = sumParts(eventChoiceParts(ch, ctx, lb)) - (locks ? 5 * ctx.typ : 0);
+      return { i, label: ch.t || "", text: eventText(ch, lb) + (locks ? ", locks outings" : ""), value };
+    }).sort((a, b) => b.value - a.value);
+  }
+
   // ---- Friend / Group card outings ("dates") ----
   // Cards in data/dates.js use game8's values for each outing: the coach values every choice
   // (energy, max energy, mood, stats, skill points, hints, curing a bad condition) and picks
@@ -829,6 +925,30 @@
     return n || "skill #" + id;
   }
 
+  // Multipliers that turn game8's values (at info.lv, full limit break when not stated) into
+  // this card's: Event Recovery (effect 25) for energy, Event Effectiveness (26) for the rest.
+  function dateScale(sl, info) {
+    if (!Deck || !Deck.baseEffects) return { e: 1, s: 1 };
+    const at = (lv) => Deck.baseEffects(sl.card, lv) || {};
+    const now = at(sl.level);
+    const ref = at(info.lv || 50);
+    return {
+      e: (1 + (now[25] || 0) / 100) / (1 + (ref[25] || 0) / 100),
+      s: (1 + (now[26] || 0) / 100) / (1 + (ref[26] || 0) / 100)
+    };
+  }
+
+  function scaleDate(o, k) {
+    if (!o) return o;
+    const out = Object.assign({}, o);
+    if (o.opts) out.opts = o.opts.map((x) => scaleDate(x, k));
+    if (o.e > 0 && o.e < 100) out.e = Math.round(o.e * k.e);
+    if (o.s) out.s = o.s.map((g) => (g > 0 ? Math.round(g * k.s) : g));
+    if (o.sp > 0) out.sp = Math.round(o.sp * k.s);
+    if (o.r) out.r = Math.round(o.r * k.s);
+    return out;
+  }
+
   function outingOptions(ctx) {
     const { state, deck, typ } = ctx;
     if (!deck || ctx.camp || state.goalRace) return [];
@@ -838,8 +958,11 @@
       if (!d.unlocked) return null;
       const n = (d.done || 0) + 1;
       const info = dateCard(sl.card.id);
-      const known = info && info.dates[n - 1];
-      if (info && n > info.dates.length) return null; // every outing done
+      if (n > (info ? info.dates.length : 5)) return null; // every outing done
+      const raw0 = info && info.dates[n - 1];
+      // game8 lists values at one card level: rescale them by this card's Event Recovery
+      // (energy) and Event Effectiveness (stats, SP) at its own level.
+      const known = raw0 ? scaleDate(raw0, dateScale(sl, info)) : null;
       const base = { kind: "recreation", outing: sl.idx, prefix: [], consume: {} };
       if (known) {
         const tries = known.opts.map((c) => ({ c, parts: known.roll ? choiceParts(known, ctx) : choiceParts(c, ctx) }))
@@ -848,10 +971,13 @@
         const out = pick.c.roll ? pick.c.opts[0] : pick.c;
         const notes = ["outing " + n + " of " + info.dates.length + " with " + sl.card.n + ": " + dateText(pick.c)];
         if (!known.roll && tries.length > 1) notes.push("pick the choice that gives that; the other " + (tries.length > 2 ? "choices give " : "one gives ") + tries.slice(1).map((x) => dateText(x.c)).join("; or "));
-        if (info.lv !== 50) notes.push("values from game8 at " + (info.lv ? "Lv" + info.lv : "an unstated level") + "; yours may differ a little");
+        if (out.me) notes.push("max energy goes up to " + (ctx.maxE + out.me));
+        const statGains = {};
+        DATE_STATS.forEach((k, i) => { const g = ((out.s || [])[i] || 0) + (out.r ? (out.r * (out.rn || 1)) / 5 : 0); if (g) statGains[k] = g; });
         return Object.assign(base, {
           label: "Outing with " + sl.card.n + " (" + n + "/" + info.dates.length + ")",
           energyDelta: out.e || 0, moodDelta: Math.max(-state.mood, Math.min(4 - state.mood, out.mo || 0)),
+          maxEnergyDelta: out.me || 0, statGains,
           notes, parts: pick.parts, value: pick.value
         });
       }
@@ -966,9 +1092,39 @@
       if (r.fail0) { o.fail = 0; o.failEst = false; }
       if (r.note) o.notes.push(r.note);
     }
+    const aki = akikawaValue(f, ctx);
+    if (aki) { o.parts.bond += aki.add; o.notes.push(aki.note); }
     o.raw = o.parts.stats + o.parts.sp + o.parts.bond + o.parts.hint + o.parts.scenario;
     scoreRisk(o, ctx);
     return o;
+  }
+
+  // ---- Chairman Akikawa ----
+  // In scenarios with her bond check (sc.akikawa: [[turn, bond needed], ...]) she shows up on
+  // trainings; training with her raises her bond (about +7, like a support card). The unique
+  // skill level-up needs it (green, 60+, by Senior Early April in URA-style scenarios).
+  const AKI_PER_TRAINING = 7;
+
+  function akikawaCheck(state, sc) {
+    if (!sc.akikawa) return null;
+    const bond = +((state.extras && state.extras.akiBond) || 0);
+    const next = sc.akikawa.find(([t, need]) => t >= state.turn && bond < need);
+    return next ? { turn: next[0], need: next[1], bond, short: next[1] - bond } : null;
+  }
+
+  function akikawaValue(f, ctx) {
+    if (!(f.extras && f.extras.aki)) return null;
+    const chk = akikawaCheck(ctx.state, ctx.sc);
+    if (!chk) return null;
+    const trainings = Math.ceil(chk.short / AKI_PER_TRAINING);
+    const turnsLeft = chk.turn - ctx.state.turn + 1;
+    // She's on a training only now and then (about 1 turn in 4), so few turns left makes each
+    // chance count more. A missed check costs a unique skill level.
+    const urgency = Math.min(3, trainings / Math.max(1, turnsLeft / 4));
+    return {
+      add: (0.1 + 0.15 * urgency) * ctx.typ,
+      note: "Akikawa is here: her bond " + chk.bond + " → " + Math.min(100, chk.bond + AKI_PER_TRAINING) + " (needs " + chk.need + " by turn " + chk.turn + " for the unique skill level-up)"
+    };
   }
 
   // Energy and failure parts of a training (re-run when an item changes cost or failure).
@@ -1158,11 +1314,17 @@
   // Applies a chosen option and moves to the next turn. Returns the new state (does not mutate).
   function advance(state, scenario, option) {
     const s = JSON.parse(JSON.stringify(state));
+    // An outing that raises max energy (Light Hello's first: +4) counts before the energy it gives.
+    if (option.maxEnergyDelta) s.maxEnergy = (s.maxEnergy || 100) + option.maxEnergyDelta;
     const maxE = s.maxEnergy || 100;
     s.extras = s.extras || {};
     s.energy = clamp(Math.round(s.energy + (option.energyDelta || 0)), 0, maxE);
     s.mood = clamp(s.mood + (option.moodDelta || 0), 0, 4);
-    if (option.kind === "train" && s.trackStats && option.statGains) {
+    if (option.kind === "train" && scenario.akikawa) {
+      const fac = s.facilities.find((x) => x.stat === option.stat);
+      if (fac && fac.extras && fac.extras.aki) s.extras.akiBond = Math.min(100, (+s.extras.akiBond || 0) + AKI_PER_TRAINING);
+    }
+    if ((option.kind === "train" || option.outing != null) && s.trackStats && option.statGains) {
       s.stats = s.stats || {};
       Object.entries(option.statGains).forEach(([k, g]) => { if (s.stats[k] > 0) s.stats[k] = Math.round(s.stats[k] + g); });
     }
@@ -1426,11 +1588,13 @@
     grandlive: {
       // Turns 5-11 (to the debut): chase Light Hello and the cards closest to friendship; focus one
       // or two cards so they rainbow as soon as possible instead of spreading bond around.
+      // Every turn: the performance tokens a training gives count toward the next song you need.
       facility(f, ctx) {
         const t = ctx.state.turn;
-        if (t < 5 || t > 11 || !ctx.deck || !Array.isArray(f.members)) return null;
-        let add = 0;
-        const notes = [];
+        const tok = songTokenValue(f, ctx);
+        if (t < 5 || t > 11 || !ctx.deck || !Array.isArray(f.members)) return tok;
+        let add = tok ? tok.add : 0;
+        const notes = tok ? [tok.note] : [];
         f.members.forEach((i) => {
           const sl = ctx.deck.slots[i];
           if (!sl) return;
@@ -1794,7 +1958,7 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, dateCard, dateText, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
   };

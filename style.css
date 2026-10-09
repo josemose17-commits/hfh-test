@@ -438,3 +438,13 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 .dates-list li { margin: 2px 0; overflow-wrap: anywhere; }
 .dates-list li.done { color: var(--muted); text-decoration: line-through; }
 .dates-list li.next { font-weight: 600; }
+
+/* Support card events */
+.events { margin: 4px 0 0; }
+.events summary { cursor: pointer; font-size: 0.85rem; }
+.ev-sec { margin: 6px 0 2px; font-weight: 600; }
+.ev-list { margin: 0; padding-left: 1.4em; font-size: 0.85rem; }
+.ev-list li { margin: 4px 0; overflow-wrap: anywhere; }
+.ev-choice { margin: 2px 0 0; color: var(--muted); }
+.ev-choice.best { color: var(--fg); }
+.ev-label { font-style: italic; }

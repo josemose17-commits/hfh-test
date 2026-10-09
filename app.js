@@ -350,6 +350,7 @@
       const s = e.target.dataset.stat; if (!s) return;
       const v = numOrNull(e.target.value);
       if (e.target.dataset.kind === "cap") { if (v) state.caps[s] = v; else delete state.caps[s]; }
+      else if (e.target.dataset.kind === "target") { state.targets = state.targets || {}; if (v) state.targets[s] = v; else delete state.targets[s]; }
       else { if (v) state.stats[s] = v; else delete state.stats[s]; }
       commit();
     });
@@ -955,6 +956,7 @@
           <button type="button" class="btn ghost small square" data-date-adj="${i}" data-v="1" aria-label="One more outing">+</button>
           ${datesHTML(c, sl)}
         </div>` : ""}
+        ${eventsHTML(c, sl)}
         <div class="slot-fx">${keyEffects(c, lvl)}</div>
       </div>`;
     }).join("");
@@ -1134,6 +1136,35 @@
     </div>`;
   }
 
+  // A card's training events (Umamusume Wiki): its chain, then its other events, with what each
+  // choice gives at this card's LB and the best choice for this turn marked.
+  function eventsHTML(c, sl) {
+    const ev = E.cardEvents(c.id);
+    if (!ev) return "";
+    const friend = c.ty === "friend" || c.ty === "group";
+    // Friend and group chains are their outings, listed under Outings.
+    const lists = [[friend && E.dateCard(c.id) ? [] : ev.chain, "Chain"], [ev.other, "Other events"]].filter(([l]) => l.length);
+    if (!lists.length) return "";
+    const total = lists.reduce((a, [l]) => a + l.length, 0);
+    const known = lists.reduce((a, [l]) => a + l.filter((e) => e.c).length, 0);
+    const sc = scenario();
+    const item = (e, n, chain) => {
+      const head = `<b>${esc(e.n)}</b>${chain ? ` <span class="mini">(${n + 1}/${ev.chain.length})</span>` : ""}`;
+      if (!e.c) return `<li>${head} <span class="mini">· no results on the wiki yet</span></li>`;
+      const ranked = E.rankEventChoices(state, sc, e, sl.lb);
+      const best = ranked.length > 1 && ranked[0].value - ranked[1].value > 0.5 ? ranked[0].i : null;
+      const rows = e.c.map((ch, i) => {
+        const r = ranked.find((x) => x.i === i);
+        return `<div class="ev-choice${i === best ? " best" : ""}">${e.c.length > 1 ? `<span class="ev-label">${i === best ? "★ " : ""}${esc(ch.t || "Choice " + (i + 1))}</span> ` : ""}${esc(r ? r.text : "")}</div>`;
+      }).join("");
+      return `<li>${head}${rows}</li>`;
+    };
+    return `<details class="events"><summary>Events (${total}${known < total ? ", " + known + " with results" : ""})</summary>
+      ${lists.map(([l, name]) => `<div class="mini ev-sec">${name}</div><ol class="ev-list">${l.map((e, n) => item(e, n, name === "Chain")).join("")}</ol>`).join("")}
+      <p class="mini">★ is the better choice for this turn. Ranges are by LB, shown at this card's. From the <a href="https://umamusu.wiki/" target="_blank" rel="noopener">Umamusume Wiki</a> (CC BY-SA 4.0).</p>
+    </details>`;
+  }
+
   // A friend or group card's outings (game8 values): how they unlock, then each outing.
   function datesHTML(c, sl) {
     const info = E.dateCard(c.id);
@@ -1143,12 +1174,20 @@
       : u.both ? `Outings unlock with the event “${esc(u.name)}”, whichever choice you pick.`
       : `Outings unlock with the event “${esc(u.name)}”: take the choice that gives ${esc(E.dateText(u.keep))}. The other (${esc(E.dateText(u.lose))}) locks them.`;
     const done = (sl.dates && sl.dates.done) || 0;
-    const row = (d, n) => d ? (d.roll ? esc(E.dateText(d)) : d.opts.map((o) => esc(E.dateText(o))).join(" <i>or</i> ")) : "not listed on game8";
-    const lv = info.lv === 50 ? "at full limit break" : info.lv ? "at Lv" + info.lv : "at a level game8 doesn't state";
+    const card = { card: c, level: D.levelFor(c, sl.lb) };
+    const k = E.dateScale(card, info);
+    const ev = E.cardEvents(c.id);
+    const names = ev && ev.chain.length === info.dates.length ? ev.chain.map((e) => e.n) : [];
+    const row = (d0, n) => {
+      const d = d0 && E.scaleDate(d0, k);
+      const text = d ? (d.roll ? esc(E.dateText(d)) : d.opts.map((o) => esc(E.dateText(o))).join(" <i>or</i> ")) : "not listed on game8";
+      return (names[n] ? `<b>${esc(names[n])}</b>: ` : "") + text;
+    };
+    const lv = "rescaled to this card's LB" + (info.lv ? "" : " (game8 doesn't state its level; taken as full limit break)");
     return `<details class="dates"><summary>Outings (${info.dates.length})</summary>
       <p class="mini">${how}${u.note ? " " + esc(u.note) : ""}</p>
       <ol class="dates-list">${info.dates.map((d, n) => `<li class="${n < done ? "done" : n === done ? "next" : ""}">${row(d, n)}</li>`).join("")}</ol>
-      <p class="mini">Values from <a href="https://game8.jp/umamusume/${info.page}" target="_blank" rel="noopener">game8</a> ${lv}${info.partial ? "; game8 lists only some of this card's outings" : ""}.</p>
+      <p class="mini">Values from <a href="https://game8.jp/umamusume/${info.page}" target="_blank" rel="noopener">game8</a>, ${lv}${info.partial ? "; game8 lists only some of this card's outings" : ""}.</p>
     </details>`;
   }
 
@@ -1190,11 +1229,12 @@
     renderSongs();
 
     const build = E.BUILDS[state.build];
-    $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th>Cap</th><th>Enough at</th></tr></thead><tbody>${E.STATS.map((s, i) => `
+    const tg = state.targets || {};
+    $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th>Cap</th><th title="Your target for this stat. The coach values a stat less once it's past this.">Target</th></tr></thead><tbody>${E.STATS.map((s, i) => `
       <tr class="s-${s}"><th scope="row">${E.STAT_LABELS[s]}</th>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cur" min="0" max="2500" value="${state.stats[s] || ""}" placeholder="—" aria-label="Current ${E.STAT_LABELS[s]}"></td>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cap" min="0" max="2500" value="${state.caps[s] || ""}" placeholder="${sc.caps[i]}" aria-label="${E.STAT_LABELS[s]} cap"></td>
-        <td class="num">${build.target[s]}</td></tr>`).join("")}</tbody>`;
+        <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="target" min="0" max="2500" value="${tg[s] || ""}" placeholder="${build.target[s]}" aria-label="${E.STAT_LABELS[s]} target"></td></tr>`).join("")}</tbody>`;
   }
 
   function syncLight() {
