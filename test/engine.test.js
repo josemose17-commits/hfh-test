@@ -724,12 +724,23 @@ test("Grand Concert: rest on turn 4 (9 turns to the debut) unless energy is very
   assert.notStrictEqual(high.action.kind, "rest");
 });
 
-test("Grand Concert: Light Hello's training comes first before the debut, wherever she is", () => {
+test("Grand Concert: train with Light Hello the first time she shows up, wherever she is", () => {
   const gl = sc("grandlive");
-  const st = (guts) => base({ turn: 6, energy: 95, mood: 2, deck: openDeck(), facilities: dfac({ speed: { members: [0, 1] }, guts, wit: { members: [2] } }) });
+  const st = (guts, o) => base(Object.assign({ turn: 6, energy: 95, mood: 2, deck: openDeck(), facilities: dfac({ speed: { members: [0, 1] }, guts, wit: { members: [2] } }) }, o));
   const r = E.recommend(st({ members: [5] }), gl);
   assert.strictEqual(r.action.stat, "guts");
-  assert.ok(r.reasons.some((n) => /Light Hello is here/.test(n)));
+  assert.ok(r.reasons.some((n) => /Light Hello is here for the first time/.test(n)));
+  // Her first-training event is applied on Done: +7 training and +10 event bond, mood +1.
+  const next = E.advance(st({ members: [5] }), gl, r.action);
+  const lh = next.deck.slots[5];
+  assert.ok(lh.met);
+  assert.strictEqual(lh.bond, E.deckInfo({ deck: openDeck() }).slots[5].bond + 17);
+  assert.strictEqual(next.mood, 3);
+  // Later on, even well after the debut, it's still her first time if you haven't trained with her.
+  assert.strictEqual(E.recommend(st({ members: [5] }, { turn: 20 }), gl).action.stat, "guts");
+  // Once you've trained with her, she's a normal card again.
+  const metDeck = openDeck(); metDeck.slots[5].met = true;
+  assert.strictEqual(E.recommend(st({ members: [5] }, { deck: metDeck }), gl).action.stat, "speed");
   // Not when her training's failure is above your limit.
   const risky = E.recommend(st({ members: [5], fail: 30 }), gl);
   assert.notStrictEqual(risky.action.stat, "guts");
