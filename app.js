@@ -161,7 +161,7 @@
               <div id="traineeInfo" class="trainee-info"></div>
               <div class="slots" id="slots"></div>
               <div class="row-wrap"><button type="button" class="btn ghost small" id="allBond">All cards +5 bond</button><span class="mini">For events or items that raise every card's bond (e.g. Trackblazer's Grilled Carrots).</span></div>
-              <p class="mini">Bonds start at each card's initial value. Pressing Done adds 7 for every card you trained with, plus about 5 for a card that had a hint (!). Card events also raise bond: tap <b>+5</b> or <b>+10</b> when one happens, or tap the gauge color the game shows (orange = 80+, friendship unlocked). For Friend and Group cards like Light Hello, tick <b>Outings unlocked</b> once the game offers outings with her and the coach will weigh them against training.</p>
+              <p class="mini">Bonds start at each card's initial value. Pressing Done adds 7 for every card you trained with, plus about 5 for a card that had a hint (!). Card events also raise bond: tap <b>+5</b> or <b>+10</b> when one happens, or tap the gauge color the game shows (orange = 80+, friendship unlocked). For Friend and Group cards like Light Hello, tick <b>Outings unlocked</b> once the game offers outings with her and the coach will weigh them against training. Open a card's <b>Outings</b> list to see which event unlocks them and what each outing gives.</p>
             </div>
           </details>
           <datalist id="traineeList"></datalist><datalist id="cardList"></datalist><datalist id="cardListAll"></datalist>
@@ -350,6 +350,7 @@
       const s = e.target.dataset.stat; if (!s) return;
       const v = numOrNull(e.target.value);
       if (e.target.dataset.kind === "cap") { if (v) state.caps[s] = v; else delete state.caps[s]; }
+      else if (e.target.dataset.kind === "target") { state.targets = state.targets || {}; if (v) state.targets[s] = v; else delete state.targets[s]; }
       else { if (v) state.stats[s] = v; else delete state.stats[s]; }
       commit();
     });
@@ -739,8 +740,9 @@
   function tokenRow(f, sc) {
     const g = E.tokenGain(f, state, sc);
     const ex = f.extras || {};
-    const sel = (key, cur) => `<select data-gltok="${key}" aria-label="Token type">${sc.tokens.map((n, i) => `<option value="${i}" ${cur === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
-    const row = (x, k) => `<div class="tokpick"><span class="tok t${x.type}">${sc.tokens[x.type].slice(0, 2)}</span>${sel(k ? "tokType2" : "tokType", x.type)}<input type="number" inputmode="numeric" min="0" max="99" data-gltok="${k ? "tok2" : "tok"}" value="${ex[k ? "tok2" : "tok"] != null ? ex[k ? "tok2" : "tok"] : ""}" placeholder="~${x.amount}" aria-label="Token amount"></div>`;
+    // The picker's left edge takes the token's colour (no separate badge, so it fits narrow columns).
+    const sel = (key, cur) => `<select class="t${cur}" data-gltok="${key}" aria-label="Token type">${sc.tokens.map((n, i) => `<option value="${i}" ${cur === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
+    const row = (x, k) => `<div class="tokpick">${sel(k ? "tokType2" : "tokType", x.type)}<input type="number" inputmode="numeric" min="0" max="99" data-gltok="${k ? "tok2" : "tok"}" value="${ex[k ? "tok2" : "tok"] != null ? ex[k ? "tok2" : "tok"] : ""}" placeholder="~${x.amount}" aria-label="Token amount"></div>`;
     return `<div class="tokrow" title="Tokens this training gives. Set the type and amount your screen shows; Done adds them to your tokens.">
       <span class="pip-label">Tokens${g.length > 1 ? " (friendship: 2 types)" : ""}</span>
       ${g.map((x, i) => row(x, i)).join("")}
@@ -854,7 +856,8 @@
       const on = (f.members || []).indexOf(si) !== -1;
       const hint = on && (f.hints || []).indexOf(si) !== -1;
       const rb = D.isRainbow(c, bond, f.stat);
-      return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}${hint ? " hint" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""} · tap again to mark a hint (!)">${hint ? '<b class="bang">!</b>' : ""}${esc(shortName(c))}${bond < 80 ? `<small>${Math.round(bond)}</small>` : ""}</button>`;
+      // Every chip keeps the same size from turn to turn: name (cut short if needed), then the bond.
+      return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}${hint ? " hint" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""} · tap again to mark a hint (!)">${hint ? '<b class="bang">!</b>' : ""}<span class="mname">${esc(shortName(c))}</span><small class="${bond >= 80 ? "full" : ""}">${Math.round(bond)}</small></button>`;
     }).join("");
     return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>
       ${pipsHTML("extra", f.extra || 0, "Others (not in deck)", "c")}`;
@@ -950,10 +953,12 @@
         </div>
         ${c.ty === "friend" || c.ty === "group" ? `<div class="slot-dates">
           <label class="chip-toggle small"><input type="checkbox" data-date-unlock="${i}" ${sl.dates && sl.dates.unlocked ? "checked" : ""}> Outings unlocked</label>
-          <span class="mini">Outings done: <b>${(sl.dates && sl.dates.done) || 0}</b></span>
+          <span class="mini">Outings done: <b>${(sl.dates && sl.dates.done) || 0}</b>${E.dateCard(c.id) ? " of " + E.dateCard(c.id).dates.length : ""}</span>
           <button type="button" class="btn ghost small square" data-date-adj="${i}" data-v="-1" aria-label="One fewer outing">−</button>
           <button type="button" class="btn ghost small square" data-date-adj="${i}" data-v="1" aria-label="One more outing">+</button>
+          ${datesHTML(c, sl)}
         </div>` : ""}
+        ${eventsHTML(c, sl)}
         <div class="slot-fx">${keyEffects(c, lvl)}</div>
       </div>`;
     }).join("");
@@ -1133,6 +1138,61 @@
     </div>`;
   }
 
+  // A card's training events (Umamusume Wiki): its chain, then its other events, with what each
+  // choice gives at this card's LB and the best choice for this turn marked.
+  function eventsHTML(c, sl) {
+    const ev = E.cardEvents(c.id);
+    if (!ev) return "";
+    const friend = c.ty === "friend" || c.ty === "group";
+    // Friend and group chains are their outings, listed under Outings.
+    const lists = [[friend && E.dateCard(c.id) ? [] : ev.chain, "Chain"], [ev.other, "Other events"]].filter(([l]) => l.length);
+    if (!lists.length) return "";
+    const total = lists.reduce((a, [l]) => a + l.length, 0);
+    const known = lists.reduce((a, [l]) => a + l.filter((e) => e.c).length, 0);
+    const sc = scenario();
+    const item = (e, n, chain) => {
+      const head = `<b>${esc(e.n)}</b>${chain ? ` <span class="mini">(${n + 1}/${ev.chain.length})</span>` : ""}`;
+      if (!e.c) return `<li>${head} <span class="mini">· no results on the wiki yet</span></li>`;
+      const ranked = E.rankEventChoices(state, sc, e, sl.lb);
+      const best = ranked.length > 1 && ranked[0].value - ranked[1].value > 0.5 ? ranked[0].i : null;
+      const rows = e.c.map((ch, i) => {
+        const r = ranked.find((x) => x.i === i);
+        return `<div class="ev-choice${i === best ? " best" : ""}">${e.c.length > 1 ? `<span class="ev-label">${i === best ? "★ " : ""}${esc(ch.t || "Choice " + (i + 1))}</span> ` : ""}${esc(r ? r.text : "")}</div>`;
+      }).join("");
+      return `<li>${head}${rows}</li>`;
+    };
+    return `<details class="events"><summary>Events (${total}${known < total ? ", " + known + " with results" : ""})</summary>
+      ${lists.map(([l, name]) => `<div class="mini ev-sec">${name}</div><ol class="ev-list">${l.map((e, n) => item(e, n, name === "Chain")).join("")}</ol>`).join("")}
+      <p class="mini">★ is the better choice for this turn. Ranges are by LB, shown at this card's. From the <a href="https://umamusu.wiki/" target="_blank" rel="noopener">Umamusume Wiki</a> (CC BY-SA 4.0).</p>
+    </details>`;
+  }
+
+  // A friend or group card's outings (game8 values): how they unlock, then each outing.
+  function datesHTML(c, sl) {
+    const info = E.dateCard(c.id);
+    if (!info) return `<p class="mini dates-note">No outing data for this card yet; the coach uses typical values.</p>`;
+    const u = info.unlock;
+    const how = u.auto ? `Outings unlock with the event “${esc(u.name)}” (no choice).`
+      : u.both ? `Outings unlock with the event “${esc(u.name)}”, whichever choice you pick.`
+      : `Outings unlock with the event “${esc(u.name)}”: take the choice that gives ${esc(E.dateText(u.keep))}. The other (${esc(E.dateText(u.lose))}) locks them.`;
+    const done = (sl.dates && sl.dates.done) || 0;
+    const card = { card: c, level: D.levelFor(c, sl.lb) };
+    const k = E.dateScale(card, info);
+    const ev = E.cardEvents(c.id);
+    const names = ev && ev.chain.length === info.dates.length ? ev.chain.map((e) => e.n) : [];
+    const row = (d0, n) => {
+      const d = d0 && E.scaleDate(d0, k);
+      const text = d ? (d.roll ? esc(E.dateText(d)) : d.opts.map((o) => esc(E.dateText(o))).join(" <i>or</i> ")) : "not listed on game8";
+      return (names[n] ? `<b>${esc(names[n])}</b>: ` : "") + text;
+    };
+    const lv = "rescaled to this card's LB" + (info.lv ? "" : " (game8 doesn't state its level; taken as full limit break)");
+    return `<details class="dates"><summary>Outings (${info.dates.length})</summary>
+      <p class="mini">${how}${u.note ? " " + esc(u.note) : ""}</p>
+      <ol class="dates-list">${info.dates.map((d, n) => `<li class="${n < done ? "done" : n === done ? "next" : ""}">${row(d, n)}</li>`).join("")}</ol>
+      <p class="mini">Values from <a href="https://game8.jp/umamusume/${info.page}" target="_blank" rel="noopener">game8</a>, ${lv}${info.partial ? "; game8 lists only some of this card's outings" : ""}.</p>
+    </details>`;
+  }
+
   function extraField(i, bag) {
     const v = bag[i.id] != null ? bag[i.id] : (i.default != null ? i.default : (i.type === "check" ? false : i.type === "select" ? i.options[0][0] : 0));
     const help = i.help ? ` title="${esc(i.help)}"` : "";
@@ -1171,11 +1231,12 @@
     renderSongs();
 
     const build = E.BUILDS[state.build];
-    $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th>Cap</th><th>Enough at</th></tr></thead><tbody>${E.STATS.map((s, i) => `
+    const tg = state.targets || {};
+    $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th>Cap</th><th title="Your target for this stat. The coach values a stat less once it's past this.">Target</th></tr></thead><tbody>${E.STATS.map((s, i) => `
       <tr class="s-${s}"><th scope="row">${E.STAT_LABELS[s]}</th>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cur" min="0" max="2500" value="${state.stats[s] || ""}" placeholder="—" aria-label="Current ${E.STAT_LABELS[s]}"></td>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cap" min="0" max="2500" value="${state.caps[s] || ""}" placeholder="${sc.caps[i]}" aria-label="${E.STAT_LABELS[s]} cap"></td>
-        <td class="num">${build.target[s]}</td></tr>`).join("")}</tbody>`;
+        <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="target" min="0" max="2500" value="${tg[s] || ""}" placeholder="${build.target[s]}" aria-label="${E.STAT_LABELS[s]} target"></td></tr>`).join("")}</tbody>`;
   }
 
   function syncLight() {

@@ -11,7 +11,8 @@ Open `index.html` in a browser. It needs no build step or server, and it saves y
 3. Optional but recommended: type each training's **Gain** (the green numbers added up) and **Fail %**. Left blank, both are estimated from card counts and energy, and the estimate shows in the box.
 4. The coach names the action and any item or buff to use first. It explains why, says what it beat and by how much, and predicts your energy and mood afterwards. Tap any row in **All options** to see its breakdown.
 5. Press **Done, next turn**. The turn is logged, energy and mood carry forward, and the training inputs reset. If you did something else, press **I did this** on that option. **Undo last** steps back.
-6. Mark goal races with **☆ Mark goal race** on their turns. The coach then runs them and plans energy around them. Finale races are marked for you where they are fixed.
+6. Under **Stats**, type your current stats and, if you like, your own **Target** for each (left blank, the build's targets apply). Past a target the coach values that stat less, so it steers you toward reaching every target.
+7. Mark goal races with **☆ Mark goal race** on their turns. The coach then runs them and plans energy around them. Finale races are marked for you where they are fixed.
 
 Shortcuts: ← and → change turns.
 
@@ -22,7 +23,8 @@ Open **Trainee and deck** and type your trainee and up to 6 support cards. Names
 - each training shows your cards as chips. Tap the ones that appear there, and add **Others** for characters not in your deck;
 - tap a card once for "here" and twice for "here with a hint (!)". Friendship (rainbow) is detected from each card's type and bond;
 - bonds go up by 7 for each training together and about 5 more for a hint. Card events are logged with the **+5** / **+10** buttons, or by tapping the gauge color the game shows (Blue, Green, Orange 80+, Max);
-- Friend and Group cards (Light Hello and others) track outings. Once **Outings unlocked** is ticked, "Outing with ..." is weighed against training as its own option;
+- Friend and Group cards (Light Hello and others) track outings. Once **Outings unlocked** is ticked, "Outing with ..." is weighed against training as its own option. Each card's **Outings** list (from game8's card pages) shows which event unlocks them and which choice keeps them, then every outing with what each choice gives; the coach uses those values and tells you which choice to pick for this turn (the energy one when you're tired, the stat one when you're not). Covered: SSR Tazuna (both), Riko Kashimoto, Sasami Anshinzawa, Light Hello, SR Aoi Kiryuin, The Throne's Assemblage, Team Sirius (only its last outing is listed), and the JP friend and group cards (Mei Satake, Ryoka Tsurugi, Yayoi Akikawa, Tucker Bryne, Kiyoko Hoshina, Casino Drive, Ancestors & Guides, Carvers of History, Embodiment of Legends). Other cards (the R friend cards) use typical values, for up to 5 outings. Outing values are rescaled to your card's LB (its Event Recovery for energy, Event Effectiveness for stats), an outing that raises max energy raises it in the coach too (Light Hello's first: 104), and with **Track stats** on, outing stats are added to your current stats;
+- every card has an **Events** list from the Umamusume Wiki: its event chain and other events, what each choice gives (ranges by LB shown at your card's), and a ★ on the better choice for this turn (the energy choice when you're tired, the stat choice when you're not). About 80% of Global cards have every event's results on the wiki; events without results yet show their title only;
 - gains, skill points, energy cost and failure come from the game's training formula with your cards' real effects at their level: stat bonus, friendship, mood effect, training effectiveness, card count, your trainee's growth bonuses, plus energy cost reduction, failure protection and conditional unique effects such as bond-gated bonuses;
 - your race bonus is added up from your cards automatically.
 
@@ -78,6 +80,7 @@ A **Grand Concert songs** panel appears in this scenario:
 - **Song plan** (a CM ace guide, with 5 songs in year one): year one, buy 5 songs, do 2 more technique lessons so the 6th shows, and carry it over to right after the 1st Promo Live; every half year after, buy the carried song, 1 lesson, a song, 2 lessons, a song, 2 lessons, carry over (3 songs a half year); before the Grand Live, buy that 4th song too for 18 songs. Count your technique lessons with **+ technique lesson** and the panel says what's next ("Do 2 technique lessons, then buy song 3 of 5", "Hold the next song for after the live"). The coach only suggests buying a song when the plan says so, favours the two skill point songs in year two and the two +10% friendship songs in year three, and skips the +Stamina and +Guts songs in year one.
 - **Opening and resets**: turns 1-4 favour bonds, Wit and a rest so you go into turn 5 with high energy (common: Train x3, then Rest); turns 5-11 favour trainings with Light Hello and the cards closest to friendship. Reset checks sit on the debut (a rainbowing card or Light Hello's +20 event) and the end of year one (5 songs and the 6th held). Resets are normal here for CM aces (around 85%).
 - It tracks Hype progress (3 songs since the last live guarantee a Great Success) and ranks the songs you can learn next by value per token.
+- Trainings count the tokens they give toward the songs you still need (only what those songs lack, and under the token cap), so between two close trainings the coach takes the one that gets your next song sooner.
 - The coach puts "Learn ..." in front of its recommendation when you can afford a good song.
 - Extra Stat Gain songs add their permanent bonus to the gain formula right away. Friendship Bonus songs start counting after the next live.
 - Key turns: lessons unlock on turn 5, Promo Lives on turns 24/36/48/60, the lyrics event in Early November of Senior year (16+ songs), and the Grand Live on turn 72 (18+ songs for the special Girls' Legend U).
@@ -85,6 +88,8 @@ A **Grand Concert songs** panel appears in this scenario:
 ## Scenario-specific rules
 
 Each scenario's rules come from GameTora's scenario articles:
+
+- **Chairman Akikawa** (URA Finale, Grand Concert, Grand Masters, Island, Trackblazer): tick **Akikawa here** on the training she's on. Training with her adds about 7 to her bond (**Akikawa bond** keeps the count), and before her bond check (green, 60+, by Senior Early April; Trackblazer: 20, 40 and 60 at each Late December) that training is worth more, the more so when few turns are left.
 
 - **URA Finale**: Happy Meek duel rewards; Akikawa's +30 energy snack at the end of Late July (years 2 and 3), counted in camp rest decisions; the Early March mood event; fan milestones.
 - **Unity Cup**: Special Training by white-flame count, exact Spirit Burst and Extreme Spirit Burst values (Wit bursts +5 energy, Extreme sets failure to 0%), a burst counter for Team Zenith's Senior Late November event, facility levels from team rank, URA Finals at the end.
@@ -170,6 +175,8 @@ When releasing a change to the site, bump the `?v=` number on the file links in 
 ## Files
 
 - `scenarios.js`: scenario data (mechanics, caps, base training values, key turns, deck advice, extra inputs).
+- `data/dates.js`: Friend and Group card outings (unlock event and each outing's rewards), from game8's card pages.
+- `data/card-events.js`: every support card's training events and their results, from the Umamusume Wiki (CC BY-SA 4.0). Built by `tools/build_card_events.py`, refreshed daily.
 - `data/gametora.js`: generated card, trainee and skill data. `tools/build_data.py` rebuilds it.
 - `deck.js`: card effects at any level, unique effects and the training gain formula.
 - `engine.js`: scoring, the energy lookahead, turn advance and undo. Pure functions, shared by the page and the tests.
@@ -182,6 +189,6 @@ When releasing a change to the site, bump the `?v=` number on the file links in 
 
 ## Limits
 
-These are estimates, not a game simulator. Support card event effects and Friend/Group outing rewards use approximate values (bond +5 per hint or outing, outings about +20 energy, +1 mood and a few stats). Exact per-event values need GameTora's training event data. Card effects and level-1 base training values come from GameTora's data. The increase per facility level, rest amounts, race rewards and scenario-specific bonuses are approximations. Real gains and failure rates from your screen always beat the built-in estimates. Turns marked "approx." are best-effort, so trust the in-game goal list when they disagree. The newest JP scenarios are based on launch-period guides.
+These are estimates, not a game simulator. Support card event effects use approximate values (bond +5 per hint or outing). Friend and Group outings use game8's values at the card level game8 lists (usually full limit break, so a lower-LB card gives a little less); outings that roll a great success or can fail are counted half and half, since the odds aren't published. Card effects and level-1 base training values come from GameTora's data. The increase per facility level, rest amounts, race rewards and scenario-specific bonuses are approximations. Real gains and failure rates from your screen always beat the built-in estimates. Turns marked "approx." are best-effort, so trust the in-game goal list when they disagree. The newest JP scenarios are based on launch-period guides.
 
 The deck optimizer ranks decks with a simplified career simulation, not a full game simulator: card events, outings and scenario-specific mechanics are approximate, so treat close results (a few percent apart) as ties. Skill values are for one fixed stat line per distance with no other skills, like the Umalator's default chart. Your own uma's numbers can differ, which is what the paste box is for. Global dates past the announced cups are estimates.

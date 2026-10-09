@@ -18,6 +18,7 @@
   const SCENARIOS = [
     {
       id: "ura",
+      akikawa: [[55, 60]],
       name: "URA Finale",
       jpName: "新設！URAファイナルズ",
       status: "global",
@@ -110,6 +111,7 @@
     },
     {
       id: "trackblazer",
+      akikawa: [[24, 20], [48, 40], [72, 60]],
       name: "Trackblazer: Start of the Climax",
       jpName: "Make a new track!! ～クライマックス開幕～",
       aka: "Climax, MANT",
@@ -173,6 +175,7 @@
     },
     {
       id: "grandlive",
+      akikawa: [[55, 60]],
       name: "Grand Concert",
       jpName: "つなげ、照らせ、ひかれ。私たちのグランドライブ",
       aka: "Grand Live",
@@ -252,6 +255,7 @@
     },
     {
       id: "grandmasters",
+      akikawa: [[55, 60]],
       name: "Grand Masters",
       jpName: "グランドマスターズ -継ぐ者達へ-",
       status: "global-soon",
@@ -536,6 +540,7 @@
     },
     {
       id: "island",
+      akikawa: [[55, 60]],
       name: "Welcome to the Island",
       jpName: "無人島へようこそ -DESIGN YOUR ISLAND-",
       aka: "Island",
@@ -744,6 +749,14 @@
   };
 
   const api = { SCENARIOS, STATUS_LABELS };
+  // Chairman Akikawa: a check on each training she's on, and her bond, where her bond matters.
+  SCENARIOS.forEach((s) => {
+    if (!s.akikawa) return;
+    s.inputs = s.inputs.concat([
+      { id: "aki", label: "Akikawa here", scope: "facility", type: "check", help: "Chairman Akikawa is on this training. Training with her raises her bond (about +7)." },
+      { id: "akiBond", label: "Akikawa bond", scope: "turn", type: "number", max: 100, help: "Her bond gauge (green is 60+). The coach adds 7 each time you train with her." }
+    ]);
+  });
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaScenarios = api;
 })(typeof window !== "undefined" ? window : globalThis);

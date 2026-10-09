@@ -1,5 +1,5 @@
 # Daily data refresh: new support cards, trainees, Global release dates and event data from
-# GameTora and Euophrys' tier list. If anything changed and the tests pass, it commits to main
+# GameTora, Euophrys' tier list and the Umamusume Wiki. If anything changed and the tests pass, it commits to main
 # (bumping the ?v= cache version in index.html) and asks GitHub Pages to rebuild the site.
 name: Update game data
 
@@ -37,6 +37,12 @@ jobs:
 
       - name: Rebuild Euophrys tier list data
         run: node tools/build_euophrys.mjs
+
+      # Players add event results to the wiki over time. If the wiki can't be reached, the
+      # last data is kept.
+      - name: Rebuild support card events (Umamusume Wiki)
+        continue-on-error: true
+        run: python3 tools/build_card_events.py
 
       - name: Check for changes
         id: diff

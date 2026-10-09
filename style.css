@@ -136,13 +136,13 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 .extras .nf input { width: 72px; }
 
 .fac-head { display: flex; justify-content: space-between; align-items: center; }
-.facilities { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px; }
-.fac { margin: 0; background: var(--surface); border: 1px solid var(--line); border-top: 5px solid var(--c, var(--accent)); border-radius: var(--r); padding: 8px 8px 10px; display: grid; gap: 7px; min-width: 0; }
+.facilities { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 10px; }
+.fac { min-inline-size: 0; margin: 0; background: var(--surface); border: 1px solid var(--line); border-top: 5px solid var(--c, var(--accent)); border-radius: var(--r); padding: 8px 8px 10px; display: grid; gap: 7px; min-width: 0; }
 .fac legend { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; text-transform: uppercase; color: var(--c); padding: 0 4px; }
-.nums { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.nf { display: grid; gap: 2px; min-width: 0; }
+.nums { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+.nf { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; min-width: 0; }
 .nf span { font-size: .72rem; color: var(--muted); }
-.nf input, .nf select { width: 100%; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
+.nf input, .nf select { width: 100%; min-width: 0; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); }
 .nf input { text-align: right; }
 .nf input::placeholder { color: var(--muted); opacity: .9; }
 .pips { display: grid; gap: 2px; }
@@ -283,10 +283,13 @@ tr.phase-row b { color: var(--fg); font-family: var(--font-display); font-size: 
 .fx.dim { color: var(--muted); font-style: italic; }
 
 /* Cards on a training */
-.mchips { display: flex; flex-wrap: wrap; gap: 4px; }
-.mchip { position: relative; border: 2px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 6px; font-size: .74rem; cursor: pointer; line-height: 1.2; color: var(--muted); min-height: 30px; }
-.mchip::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--c); margin-right: 4px; vertical-align: middle; }
-.mchip small { margin-left: 4px; font-family: var(--font-mono); font-size: .66rem; opacity: .8; }
+/* A fixed grid, so each card sits in the same place on every training and every turn. */
+.mchips { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 92px), 1fr)); gap: 4px; }
+.mchip { position: relative; display: flex; align-items: center; min-width: 0; border: 2px solid var(--line); background: var(--surface); border-radius: 6px; padding: 3px 6px; font-size: .74rem; cursor: pointer; line-height: 1.2; color: var(--muted); min-height: 30px; text-align: left; }
+.mchip .mname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mchip::before { content: ""; flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--c); margin-right: 4px; vertical-align: middle; }
+.mchip small { flex: none; margin-left: 4px; font-family: var(--font-mono); font-size: .66rem; opacity: .8; }
+.mchip small.full { color: var(--gold); opacity: 1; font-weight: 700; }
 .mchip.on { border-color: var(--c); color: var(--fg); background: var(--surface-2); font-weight: 600; }
 .mchip.rb { box-shadow: 0 0 0 2px var(--gold); }
 .mchip.rb.on { background: linear-gradient(135deg, color-mix(in srgb, var(--gold) 22%, var(--surface)), var(--surface-2)); }
@@ -315,7 +318,7 @@ tr.phase-row b { color: var(--fg); font-family: var(--font-display); font-size: 
 .gauge.on { border-color: var(--gc); background: var(--surface-2); font-weight: 700; }
 .chip-toggle.small { padding: 2px 10px; min-height: 28px; font-size: .8rem; }
 .mchip.hint { border-style: solid; }
-.mchip .bang { display: inline-grid; place-items: center; width: 14px; height: 14px; margin-right: 3px; border-radius: 50%; background: var(--bad); color: #fff; font-size: .62rem; font-weight: 800; vertical-align: middle; }
+.mchip .bang { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; margin-right: 3px; border-radius: 50%; background: var(--bad); color: #fff; font-size: .62rem; font-weight: 800; vertical-align: middle; }
 
 /* Grand Concert songs */
 .songs summary { cursor: pointer; display: grid; gap: 2px; list-style: none; }
@@ -418,10 +421,11 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 .comp-f { min-width: 74px; }
 .comp-f > span { display: flex; align-items: center; gap: 4px; }
 .comp-f select { border-top: 3px solid var(--c, var(--line)); }
-.tokrow { display: grid; gap: 4px; border-top: 1px dashed var(--line); padding-top: 6px; }
-.tokpick { display: flex; gap: 4px; align-items: center; }
-.tokpick select { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: var(--surface); font-size: .8rem; }
-.tokpick input { width: 52px; border: 1px solid var(--line); border-radius: 6px; padding: 3px 5px; background: var(--surface); }
+.tokrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; border-top: 1px dashed var(--line); padding-top: 6px; }
+.tokpick { display: flex; gap: 4px; align-items: center; min-width: 0; }
+.tokpick select { flex: 1; min-width: 0; border: 1px solid var(--line); border-left: 4px solid var(--tc, var(--line)); border-radius: 6px; padding: 3px; background: var(--surface); font-size: .8rem; }
+.tokpick select.t0 { --tc: var(--guts); } .tokpick select.t1 { --tc: var(--stamina); } .tokpick select.t2 { --tc: var(--speed); } .tokpick select.t3 { --tc: var(--power); } .tokpick select.t4 { --tc: var(--wit); }
+.tokpick input { flex: none; width: 48px; font-size: .8rem; border: 1px solid var(--line); border-radius: 6px; padding: 3px 4px; background: var(--surface); }
 .fanplan { border-left: 3px solid var(--gold); padding-left: 8px; }
 .fanplan.fp-urgent, .fanplan.fp-short { border-color: var(--bad); color: var(--fg); }
 .fanplan.fp-efficient { border-color: var(--accent); }
@@ -430,3 +434,23 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 #fans { width: 110px; }
 .song-plan { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; background: var(--surface); }
 .song-plan .plan-next { font-weight: 600; }
+
+/* Friend and group card outings */
+.slot-dates .dates, .slot-dates .dates-note { flex-basis: 100%; margin: 4px 0 0; }
+.dates summary { cursor: pointer; font-size: 0.85rem; }
+.dates-list { margin: 4px 0; padding-left: 1.4em; font-size: 0.85rem; }
+.dates-list li { margin: 2px 0; overflow-wrap: anywhere; }
+.dates-list li.done { color: var(--muted); text-decoration: line-through; }
+.dates-list li.next { font-weight: 600; }
+
+/* Support card events */
+.events { margin: 4px 0 0; }
+.events summary { cursor: pointer; font-size: 0.85rem; }
+.ev-sec { margin: 6px 0 2px; font-weight: 600; }
+.ev-list { margin: 0; padding-left: 1.4em; font-size: 0.85rem; }
+.ev-list li { margin: 4px 0; overflow-wrap: anywhere; }
+.ev-choice { margin: 2px 0 0; color: var(--muted); }
+.ev-choice.best { color: var(--fg); }
+.ev-label { font-style: italic; }
+
+.fac > * { min-width: 0; }
