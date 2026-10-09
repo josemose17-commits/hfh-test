@@ -734,3 +734,48 @@ test("Grand Concert: Light Hello's training comes first before the debut, wherev
   const risky = E.recommend(st({ members: [5], fail: 30 }), gl);
   assert.notStrictEqual(risky.action.stat, "guts");
 });
+
+test("Unity Cup opening: Recreation for mood by uma.guide's turn points, Riko's first training", () => {
+  const u = sc("unity");
+  // Kitasan Black, Silence Suzuka, Curren Chan, Nishino Flower, Gold Ship, SSR Riko Kashimoto.
+  const deck = (bonds) => ({ trainee: null, slots: [30028, 30002, 30068, 30082, 30004, 30036].map((id, i) => ({ id, lb: 4, bond: bonds ? bonds[i] : null })) });
+  const st = (o) => base(Object.assign({ turn: 2, energy: 80, mood: 2, deck: deck() }, o));
+  // Nothing above 3 points at Normal mood after a training: Recreation.
+  const weak = E.recommend(st({ facilities: dfac({ speed: { members: [1] }, stamina: { members: [4] }, wit: { members: [3] } }) }), u);
+  assert.strictEqual(weak.action.kind, "recreation");
+  // Four cards building bond on one training: train.
+  const strong = E.recommend(st({ deck: deck([null, null, null, null, null, 30]), facilities: dfac({ speed: { members: [1, 3, 4, 5] } }) }), u);
+  assert.strictEqual(strong.action.kind, "train");
+  // A focus card (Curren Chan, Wit) on a training beats the Recreation rule.
+  const focus = E.recommend(st({ facilities: dfac({ wit: { members: [2] }, speed: { members: [1] } }) }), u);
+  assert.strictEqual(focus.action.stat, "wit");
+  // Great mood already: no Recreation push.
+  const great = E.recommend(st({ mood: 4, facilities: dfac({ speed: { members: [1] }, stamina: { members: [4] } }) }), u);
+  assert.notStrictEqual(great.action.kind, "recreation");
+  // Riko joins on turn 5: her first training (below Great) comes first, later ones don't.
+  const riko = E.recommend(st({ turn: 6, mood: 3, facilities: dfac({ speed: { members: [1, 3] }, guts: { members: [5] } }) }), u);
+  assert.strictEqual(riko.action.stat, "guts");
+  assert.ok(riko.reasons.some((n) => /Riko Kashimoto is here/.test(n)));
+  const later = E.recommend(st({ turn: 6, mood: 3, deck: deck([null, null, null, null, null, 60]), facilities: dfac({ speed: { members: [1, 3] }, guts: { members: [5] } }) }), u);
+  assert.strictEqual(later.action.stat, "speed");
+  // Unity's base values since the July 2026 update.
+  assert.deepStrictEqual(u.train.power, [0, 4, 9, 0, 0, 4, -20]);
+});
+
+test("Trackblazer opening: Wit before the debut, and the debut costs energy", () => {
+  const tb = sc("trackblazer");
+  const r = E.recommend(base({ turn: 12, goalRace: true, energy: 40 }), tb);
+  assert.strictEqual(r.action.kind, "race");
+  assert.strictEqual(r.after.energy, 25);
+  const ev = E.evaluate(base({ turn: 3, facilities: facs({ speed: { gain: 12, fail: 0 }, wit: { gain: 12, fail: 0 } }) }), tb).options;
+  assert.ok(ev.find((o) => o.stat === "wit").parts.opening > 0);
+  assert.ok(!ev.find((o) => o.stat === "speed").parts.opening);
+  // Other scenarios' goal races stay free.
+  assert.strictEqual(E.recommend(base({ turn: 12, goalRace: true, energy: 40 }), sc("unity")).after.energy, 40);
+});
+
+test("New Year: the turn plan says energy can be spent before it", () => {
+  const ev = E.eventsFor(24, sc("ura"), base({ turn: 24 }));
+  assert.ok(ev.some((e) => /New Year/.test(e.label) && /\+20 energy/.test(e.tip)));
+  assert.ok(E.eventsFor(48, sc("ura"), base({ turn: 48 })).some((e) => /\+30 energy/.test(e.tip)));
+});

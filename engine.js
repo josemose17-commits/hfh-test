@@ -370,6 +370,8 @@
     if (camps.indexOf(turn + 1) !== -1 && camps.indexOf(turn) === -1) out.push({ turn, label: "Camp next turn", tip: "Energy carried into camp is worth more than usual." });
     if (camps.indexOf(turn) !== -1 && camps.indexOf(turn - 1) === -1) out.push({ turn, label: "Summer camp starts", tip: "Four turns at max facility level." });
     evs.forEach((e) => { if (e.turn === turn) out.push(e); });
+    const ny = NEW_YEAR[turn + 1];
+    if (ny && turn + 1 <= scenario.totalTurns) out.push({ turn, label: "New Year next turn", tip: "The New Year event at the start of next turn offers +" + ny.e + " energy (or stats or " + ny.sp + " skill points), so spending energy now costs little: take the energy if you're low, the stats if you're not." });
     if (scenario.finale && scenario.finale.forced && scenario.finale.turns.indexOf(turn) !== -1) out.push({ turn, label: scenario.finale.name, tip: scenario.finale.note });
     tg.forEach((g) => out.push({ turn, label: g.label, tip: g.tip }));
     if (state && (state.goals || []).indexOf(turn) !== -1 && !tg.some((g) => g.forced)) out.push({ turn, label: "Goal race", tip: "You marked this turn as a goal race." });
@@ -573,6 +575,11 @@
     return (0.1 / MOOD_MULT[from]) * sum * 0.6 + raceBoost;
   }
 
+  // Start-of-turn New Year events, common to every scenario: Classic Early January's New Year's
+  // Resolutions (Energy +20, Stat +10 or 20 SP) and Senior Early January's Shrine Visit (Energy
+  // +30, all stats +5 or 35 SP), then a raffle.
+  const NEW_YEAR = { 25: { e: 20, stats: 10, sp: 20 }, 49: { e: 30, stats: 25, sp: 35 } };
+
   // Lookahead: V[e] = expected value of the turns after this one, starting with energy e.
   function continuation(state, sc, calib) {
     const maxE = state.maxEnergy || 100;
@@ -580,6 +587,8 @@
     const clampE = (e) => (e < 0 ? 0 : e > maxE ? maxE : Math.round(e));
     const avgCost = ["speed", "stamina", "power", "guts"].reduce((a, st) => a + baseCost(st, sc), 0) / 4;
     const witBase = baseCost("wit", sc);
+    const bw = (BUILDS[state.build] || BUILDS.medium).w;
+    const avgW = STATS.reduce((a, st) => a + bw[st], 0) / STATS.length;
     let next = new Float64Array(maxE + 1);
     for (let t = sc.totalTurns; t > state.turn; t--) {
       const cur = new Float64Array(maxE + 1);
@@ -590,7 +599,7 @@
       const cost = avgCost + 1.5 * (lv - 1);
       const witDelta = witBase < 0 ? -witBase : -(witBase + 1.5 * (lv - 1));
       for (let e = 0; e <= maxE; e++) {
-        if (forced.has(t)) { cur[e] = next[clampE(e + regen)]; continue; }
+        if (forced.has(t)) { cur[e] = next[clampE(e - (sc.goalRaceEnergy || 0) + regen)]; continue; }
         const rest = next[clampE(e + restGain + regen)];
         const fw = estimateFail("wit", e) / 100;
         const wit = 0.4 * typ - fw * 0.9 * typ + next[clampE(e + witDelta + regen)];
@@ -603,6 +612,14 @@
           v += DRAWS[i][1] * Math.max(train, wit, rest);
         }
         cur[e] = v;
+      }
+      // New Year (Classic and Senior Early January): the event at the start of the turn offers
+      // energy (+20, then +30) or stats/skill points, so arriving low on energy costs little.
+      const ny = NEW_YEAR[t];
+      if (ny && t <= sc.totalTurns) {
+        const w = cur.slice();
+        const alt = Math.max(ny.stats * avgW, ny.sp * SP_VALUE);
+        for (let e = 0; e <= maxE; e++) cur[e] = Math.max(w[clampE(e + ny.e)], w[e] + alt);
       }
       next = cur;
     }
@@ -685,8 +702,6 @@
   // otherwise; the game shows which on the training), and friendship training gives a second
   // type too. Amounts: GameTora gives 10 (Wit 6) at level 1 with no cards; more cards, scenario
   // link cards and higher facility levels give more. The per-card amounts below are estimates.
-  // Grand Concert turn 4: at or above this energy, the opening rest can be skipped.
-  const GL_REST_SKIP = 85;
   const GL_LINK = ["Silence Suzuka", "Agnes Tachyon", "Smart Falcon", "Mihono Bourbon", "Light Hello"];
   function tokenCap(state, sc) {
     return 200 + 50 * (sc.lives || []).filter((t) => t < state.turn).length;
@@ -1113,6 +1128,94 @@
     return turn <= 12 ? 13 - turn : 0;
   }
 
+  // ---- Scenario openings (sc.opening in scenarios.js) ----
+  //   early:      { to, wit, bond, note }  through turn `to`, favour Wit (wit x typ) and each card
+  //               still building bond (bond x typ)
+  //   rest:       { turn, below, note }    rest on this turn unless energy is at least `below`
+  //   chase:      { name, from, to, firstMood, note }  a scenario card that joins later: from
+  //               `from` to `to` her training comes first wherever she is (within your failure
+  //               limit); with firstMood only her first training, and only below Great mood
+  //               (it gives +1 mood)
+  //   recreation: { from, to, note }  early Recreation for mood, by uma.guide's turn points (each
+  //               card building bond, Wit, a hint, a white flame 1; a Spirit Burst 2): Recreation
+  //               wins when no training scores above 1 on a full bar or at Good mood, or above 3
+  //               at Normal mood once you've trained (its 10-30 energy isn't wasted then)
+  function chaseSlot(ctx, name) {
+    if (!ctx.deck) return null;
+    return ctx.deck.used.find((s) => s.card.n === name) || null;
+  }
+  function onTraining(ctx, o, idx) {
+    const fac = ctx.state.facilities.find((x) => x.stat === o.stat);
+    return !!(fac && Array.isArray(fac.members) && fac.members.indexOf(idx) !== -1);
+  }
+  function applyOpening(ctx, options) {
+    const op = ctx.sc.opening;
+    const t = ctx.state.turn;
+    if (!op || options.some((o) => o.forced)) return;
+    const typ = ctx.typ;
+    const trains = options.filter((o) => o.kind === "train");
+    const bump = (o, add) => { o.parts.opening = (o.parts.opening || 0) + add; o.value = sumParts(o.parts); };
+    if (op.early && t <= op.early.to) {
+      trains.forEach((o) => {
+        const fac = ctx.state.facilities.find((x) => x.stat === o.stat) || {};
+        const unbonded = Array.isArray(fac.members) && fac.members.length && ctx.deck
+          ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
+        const add = ((o.stat === "wit" ? op.early.wit || 0 : 0) + (op.early.bond || 0) * unbonded) * typ;
+        if (add) bump(o, add);
+      });
+    }
+    if (op.recreation && t >= op.recreation.from && t <= op.recreation.to && ctx.state.mood < 4) {
+      const rec = options.find((o) => o.kind === "recreation");
+      const points = (o) => {
+        const fac = ctx.state.facilities.find((x) => x.stat === o.stat) || {};
+        const x = fac.extras || {};
+        const deckMode = Array.isArray(fac.members) && fac.members.length && ctx.deck;
+        const bonding = deckMode ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
+        const hints = deckMode ? (fac.hints || []).length : fac.hint ? 1 : 0;
+        // Your Wit/Speed focus cards come first, so a training with one always counts as strong.
+        const focus = deckMode ? ctx.focus.filter((fc) => fc.bond < 100 && fac.members.indexOf(fc.idx) !== -1).length : 0;
+        return bonding + hints + (o.stat === "wit" ? 1 : 0) + (x.flames > 0 ? 1 : 0) + 2 * (x.burst || 0) + 3 * focus;
+      };
+      const best = Math.max.apply(null, trains.map(points).concat([0]));
+      const full = ctx.E >= ctx.maxE - 5;
+      const limit = full || ctx.state.mood >= 3 ? 1 : 3;
+      if (rec && best <= limit) {
+        const top = Math.max.apply(null, options.filter((o) => o !== rec).map((o) => o.value));
+        if (rec.value <= top) bump(rec, top - rec.value + 0.1 * typ);
+        rec.notes.unshift((op.recreation.note || "opening: Recreation for mood") + " (no training scores above " + limit + " here)");
+      }
+    }
+    const ch = op.chase;
+    const slot = ch ? chaseSlot(ctx, ch.name) : null;
+    if (slot && t >= ch.from && t <= ch.to) {
+      const hers = trains.filter((o) => onTraining(ctx, o, slot.idx)).sort((a, b) => b.value - a.value)[0];
+      const first = slot.bond <= Deck.initialBond(slot.card, slot.level);
+      if (hers && ch.firstMood && !(first && ctx.state.mood < 4)) {
+        // Only her first training counts, and only below Great mood.
+      } else if (hers) {
+        if (hers.fail <= ctx.state.risk) {
+          const top = Math.max.apply(null, options.filter((o) => o !== hers).map((o) => o.value));
+          if (hers.value <= top) bump(hers, top - hers.value + 0.1 * typ);
+          hers.notes.unshift(ch.name + " is here: " + (ch.note || (ch.firstMood ? "your first training with her gives +1 mood, so take it while you're below Great" : "her training comes first, whichever training she's on")));
+        } else {
+          hers.notes.unshift(ch.name + " is here, but failure (" + hers.fail + "%) is above your limit");
+        }
+      }
+    }
+    if (op.rest && t === op.rest.turn) {
+      const rest = options.find((o) => o.kind === "rest");
+      if (rest && ctx.E < op.rest.below) {
+        const top = Math.max.apply(null, options.filter((o) => o !== rest).map((o) => o.value));
+        if (rest.value <= top + 0.5 * typ) bump(rest, top + 0.5 * typ - rest.value);
+        rest.notes.unshift((t <= 12 ? turnsToDebut(t) + " turns to your debut: rest. " : "Rest. ") + (op.rest.note || "") + " (rest is the pick below " + op.rest.below + " energy)");
+      } else if (rest) {
+        rest.notes.push("energy is " + ctx.E + ", high enough to skip the opening rest");
+      }
+    }
+    options.sort((a, b) => b.value - a.value);
+    if (op.early && t <= op.early.to && op.early.note && options[0]) options[0].notes.push(op.early.note);
+  }
+
   function sumParts(p) {
     return Object.keys(p).reduce((a, k) => a + p[k], 0);
   }
@@ -1270,8 +1373,8 @@
       options.push({
         kind: "race", forced: true,
         label: finale ? "Race: " + sc.finale.name : "Run your goal race",
-        energyDelta: 0, moodDelta: 0, prefix: [], consume: {},
-        notes: [finale ? "Finale race turn." : "This turn holds a goal race. Missing it ends the career.", "goal races don't cost energy"],
+        energyDelta: sc.goalRaceEnergy ? -sc.goalRaceEnergy : 0, moodDelta: 0, prefix: [], consume: {},
+        notes: [finale ? "Finale race turn." : "This turn holds a goal race. Missing it ends the career.", sc.goalRaceEnergy ? "in this scenario goal races cost energy too (about " + sc.goalRaceEnergy + ")" : "goal races don't cost energy"],
         parts: { goal: 1e5 }, value: 1e5
       });
       const gr = goalRaceAt(state, sc, state.turn);
@@ -1359,12 +1462,13 @@
       hook.items(ctx, options);
       options.sort((a, b) => b.value - a.value);
     }
+    applyOpening(ctx, options);
     return { options, ctx };
   }
 
   const PART_LABELS = {
     stats: "stat gains", sp: "skill points", bond: "bond building", hint: "skill hint", scenario: "scenario bonus",
-    energy: "energy", mood: "mood", risk: "failure risk", condition: "curing the condition", fans: "fans", item: "item or buff", goal: "goal race"
+    energy: "energy", mood: "mood", risk: "failure risk", condition: "curing the condition", fans: "fans", item: "item or buff", goal: "goal race", opening: "the scenario's opening plan"
   };
 
   function recommend(state, scenario) {
@@ -1722,52 +1826,7 @@
         tokenGain(f, s, sc).forEach((g) => { s.gl.tokens[g.type] = Math.min(cap, (s.gl.tokens[g.type] || 0) + Math.max(0, g.amount)); });
       },
       items(ctx, options) {
-        const t = ctx.state.turn;
-        // Opening, turns 1-4: build bonds, Wit and rest, and go into turn 5 (when lessons open)
-        // with as much energy as possible. A common opening is Train x3, then Rest.
-        if (t <= 4) {
-          options.forEach((o) => {
-            if (o.kind === "train") {
-              const fac = ctx.state.facilities.find((x) => x.stat === o.stat) || {};
-              const unbonded = Array.isArray(fac.members) && ctx.deck ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
-              o.value += (o.stat === "wit" ? 0.15 : 0) * ctx.typ + 0.08 * unbonded * ctx.typ;
-            }
-          });
-          // Turn 4 (9 turns to the debut): rest, unless energy is already very high. Light Hello
-          // shows up from turn 5 and her training comes first wherever she is, so go in full.
-          const rest = options.find((o) => o.kind === "rest");
-          if (rest && t === 4) {
-            if (ctx.E < GL_REST_SKIP) {
-              const top = Math.max.apply(null, options.filter((o) => o !== rest).map((o) => o.value));
-              rest.value = Math.max(rest.value, top + 0.5 * ctx.typ);
-              rest.notes.unshift(turnsToDebut(t) + " turns to your debut: rest. Light Hello shows up from next turn and her training comes first wherever she is, so go in with full energy (rest is the pick below " + GL_REST_SKIP + " energy)");
-            } else {
-              rest.notes.push("energy is " + ctx.E + ", high enough to skip the turn-4 rest");
-            }
-          }
-          options.sort((a, b) => b.value - a.value);
-          options[0].notes.push("opening: raise bonds, take Wit, and keep energy high going into turn 5 (common: Train x3, then Rest)");
-          return;
-        }
-        // Turns 5-11: Light Hello's training comes first, whichever training she's on, as long as
-        // its failure is within your limit.
-        if (t <= 11 && ctx.deck && !options.some((o) => o.forced)) {
-          const lhOn = (o) => {
-            const fac = ctx.state.facilities.find((x) => x.stat === o.stat);
-            return fac && Array.isArray(fac.members) && fac.members.some((i) => ctx.deck.slots[i] && ctx.deck.slots[i].card.n === "Light Hello");
-          };
-          const lh = options.filter((o) => o.kind === "train" && lhOn(o)).sort((a, b) => b.value - a.value)[0];
-          if (lh) {
-            if (lh.fail <= ctx.state.risk) {
-              const top = Math.max.apply(null, options.filter((o) => o !== lh).map((o) => o.value));
-              if (lh.value <= top) lh.value = top + 0.1 * ctx.typ;
-              lh.notes.unshift("Light Hello is here: before your debut her training comes first, whichever training she's on");
-            } else {
-              lh.notes.unshift("Light Hello is here, but failure (" + lh.fail + "%) is above your limit");
-            }
-            options.sort((a, b) => b.value - a.value);
-          }
-        }
+        if (ctx.state.turn < 5) return;
         const best = options[0];
         if (!best) return;
         const adv = songAdvice(ctx.state, ctx.sc);
@@ -2092,7 +2151,7 @@
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
-    capsFor, sparkUncap, trainedGain, needFactors, focusCards, turnsToDebut,
+    capsFor, sparkUncap, trainedGain, needFactors, focusCards, turnsToDebut, applyOpening, NEW_YEAR,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

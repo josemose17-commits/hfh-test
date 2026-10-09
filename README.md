@@ -12,7 +12,7 @@ Open `index.html` in a browser. It needs no build step or server, and it saves y
 4. The coach names the action and any item or buff to use first. It explains why, says what it beat and by how much, and predicts your energy and mood afterwards. Tap any row in **All options** to see its breakdown.
 5. Press **Done, next turn**. The turn is logged, energy and mood carry forward, and the training inputs reset. If you did something else, press **I did this** on that option. **Undo last** steps back.
 6. Under **Stats**, type your current stats and, if you like, your own **Target** for each (left blank, the build's targets apply). A stat far below its target counts for more and a stat past it counts less, so the coach steers you toward reaching every target. Under **Sparks ★** type the stars of each blue spark your parents give for that stat (like `3 3 2`): each raises the cap (1 star +4, 2 stars +9, 3 stars +16), and the **Cap** box shows the result. Type the cap your game shows to override it.
-7. Mark goal races with **☆ Mark goal race** on their turns. The coach then runs them and plans energy around them. Goal races (career objectives and finale races) cost no energy; optional races cost about 15. Finale races are marked for you where they are fixed.
+7. Mark goal races with **☆ Mark goal race** on their turns. The coach then runs them and plans energy around them. Goal races (career objectives and finale races) cost no energy, except in Trackblazer, where even the debut costs energy; optional races cost about 15. Finale races are marked for you where they are fixed.
 
 Shortcuts: ← and → change turns.
 
@@ -108,6 +108,22 @@ Each scenario's rules come from GameTora's scenario articles:
 - Every scenario's guide (shown with the scenario) covers its opening, plan and reset checks where guides give them: the Global ones from GameTora and English guides, the JP-only ones mostly from game8.
 
 Facility levels are counted from your logged trainings (every 4 raise one level), with skipped turns estimated from your training mix. Unity Cup uses team rank and U.A.F. uses sport level instead. You can always pick the real level shown in the game.
+
+## Scenario openings
+
+Each scenario's opening, from the guides, is built into the coach (on top of the Wit and Speed focus cards below):
+
+| Scenario | Opening the coach follows | Source |
+|---|---|---|
+| Grand Concert | Turns 1-3: bonds and Wit. Turn 4 (9 turns to the debut): Rest unless energy is 85+. Turns 5-11: Light Hello's training comes first, wherever she is. | community guides, uma.guide |
+| Unity Cup | Turns 1-4: Recreation for mood when no training is strong (uma.guide's turn points: each card building bond, Wit, a hint and a white flame count 1, a Spirit Burst 2; Recreation wins when nothing scores above 3 at Normal mood after a training, or above 1 on a full bar or at Good mood). Riko Kashimoto joins on turn 5: her first training gives +1 mood, so it comes first while you're below Great. Wit counts a little extra all of Junior. | uma.guide |
+| Trackblazer | Pre-debut: bonds and the Wit facility (Wit is the hardest stat to raise here). The debut race costs energy in this scenario. | uma.guide |
+| Grand Masters | Junior: bonds before fragments (no rests or outings just for 2 fragments); time your Wisdom 1-4 turns before or right after a goal race. | game8 |
+| URA Finale | No scenario card joins late. Akikawa shows up on trainings from turn 4 (tick **Akikawa here**); Happy Meek duels start after her challenge event. | Game8 |
+
+The JP-only scenarios keep the openings in their guides (Onsen's first two turns on the Hole Digger, Food Festival cooking from turn 1, and so on). Guides don't give a turn when their scenario cards join, so there's no rest-before-her rule like Grand Concert's.
+
+Every scenario also has the two New Year events: Classic Early January (+20 energy, or a stat or skill points) and Senior Early January (+30 energy, or all stats or skill points). The energy planner knows you can take the energy, so energy spent just before them costs less, and the turn plan reminds you the turn before.
 
 ## How the coach decides
 

@@ -1318,7 +1318,7 @@
     $("#dock").className = "dock k-" + kind + (a.stat ? " s-" + a.stat : "");
   }
 
-  const PART_NAMES = { stats: "Stats", sp: "Skill points", bond: "Bonds", hint: "Hint", scenario: "Scenario", energy: "Energy", mood: "Mood", risk: "Failure risk", condition: "Condition", fans: "Fans", item: "Item / buff", goal: "Goal race" };
+  const PART_NAMES = { stats: "Stats", sp: "Skill points", bond: "Bonds", hint: "Hint", scenario: "Scenario", energy: "Energy", mood: "Mood", risk: "Failure risk", condition: "Condition", fans: "Fans", item: "Item / buff", goal: "Goal race", opening: "Opening plan" };
 
   function renderOptions() {
     const top = Math.max(1, ...rec.ranked.filter((o) => o.value < 1e4).map((o) => o.value));
