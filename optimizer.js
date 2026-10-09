@@ -215,7 +215,7 @@
         if (best < 0) { energy = Math.min(100, energy + 52); rests++; continue; }
         typ = typ ? typ * 0.9 + bestRaw * 0.1 : bestRaw;
         energy = Math.max(0, Math.min(100, energy + bestG.energy));
-        count[best]++;
+        if (!camp) count[best]++; // camp trainings don't level facilities
         train[best]++;
         if (rand() < bestFail) { fails++; continue; }
         for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + trained(x[i], bestG.g[i]));

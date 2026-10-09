@@ -107,7 +107,7 @@ Each scenario's rules come from GameTora's scenario articles:
 - **Trecen-ken**: tasting sessions before friendship trainings, and before tips reset after each Late December.
 - Every scenario's guide (shown with the scenario) covers its opening, plan and reset checks where guides give them: the Global ones from GameTora and English guides, the JP-only ones mostly from game8.
 
-Facility levels are counted from your logged trainings (every 4 raise one level), with skipped turns estimated from your training mix. Unity Cup uses team rank and U.A.F. uses sport level instead. You can always pick the real level shown in the game.
+Facility levels are counted from your logged trainings (every 4 raise one level), with skipped turns estimated from your training mix. Summer camp trainings don't count: every facility is level 5 during camp, and that doesn't level them up. Unity Cup uses team rank and U.A.F. uses sport level instead. You can always pick the real level shown in the game.
 
 ## Scenario openings
 
