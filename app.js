@@ -740,8 +740,9 @@
   function tokenRow(f, sc) {
     const g = E.tokenGain(f, state, sc);
     const ex = f.extras || {};
-    const sel = (key, cur) => `<select data-gltok="${key}" aria-label="Token type">${sc.tokens.map((n, i) => `<option value="${i}" ${cur === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
-    const row = (x, k) => `<div class="tokpick"><span class="tok t${x.type}">${sc.tokens[x.type].slice(0, 2)}</span>${sel(k ? "tokType2" : "tokType", x.type)}<input type="number" inputmode="numeric" min="0" max="99" data-gltok="${k ? "tok2" : "tok"}" value="${ex[k ? "tok2" : "tok"] != null ? ex[k ? "tok2" : "tok"] : ""}" placeholder="~${x.amount}" aria-label="Token amount"></div>`;
+    // The picker's left edge takes the token's colour (no separate badge, so it fits narrow columns).
+    const sel = (key, cur) => `<select class="t${cur}" data-gltok="${key}" aria-label="Token type">${sc.tokens.map((n, i) => `<option value="${i}" ${cur === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
+    const row = (x, k) => `<div class="tokpick">${sel(k ? "tokType2" : "tokType", x.type)}<input type="number" inputmode="numeric" min="0" max="99" data-gltok="${k ? "tok2" : "tok"}" value="${ex[k ? "tok2" : "tok"] != null ? ex[k ? "tok2" : "tok"] : ""}" placeholder="~${x.amount}" aria-label="Token amount"></div>`;
     return `<div class="tokrow" title="Tokens this training gives. Set the type and amount your screen shows; Done adds them to your tokens.">
       <span class="pip-label">Tokens${g.length > 1 ? " (friendship: 2 types)" : ""}</span>
       ${g.map((x, i) => row(x, i)).join("")}
@@ -855,7 +856,8 @@
       const on = (f.members || []).indexOf(si) !== -1;
       const hint = on && (f.hints || []).indexOf(si) !== -1;
       const rb = D.isRainbow(c, bond, f.stat);
-      return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}${hint ? " hint" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""} · tap again to mark a hint (!)">${hint ? '<b class="bang">!</b>' : ""}${esc(shortName(c))}${bond < 80 ? `<small>${Math.round(bond)}</small>` : ""}</button>`;
+      // Every chip keeps the same size from turn to turn: name (cut short if needed), then the bond.
+      return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}${hint ? " hint" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""} · tap again to mark a hint (!)">${hint ? '<b class="bang">!</b>' : ""}<span class="mname">${esc(shortName(c))}</span><small class="${bond >= 80 ? "full" : ""}">${Math.round(bond)}</small></button>`;
     }).join("");
     return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>
       ${pipsHTML("extra", f.extra || 0, "Others (not in deck)", "c")}`;
