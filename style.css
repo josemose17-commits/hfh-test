@@ -165,6 +165,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 .stats { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .stat-table input { width: 84px; padding: 5px 6px; text-align: right; }
 @media (max-width: 520px) { .stat-table input { width: 62px; } .stat-table input.sparks { width: 56px; } }
+.stat-table th small { display: block; font-size: .66rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+#statsPanel .table-wrap { max-width: 100%; }
 .stat-table th[scope="row"] { color: var(--c); font-family: var(--font-display); font-size: 1rem; }
 
 /* The call */

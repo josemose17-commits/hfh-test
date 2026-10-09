@@ -588,6 +588,8 @@ test("your own target stats replace the build's", () => {
   const st = (targets) => base({ stats: { speed: 1100 }, targets, facilities: facs({ speed: { cards: 1, gain: 20 } }) });
   const v = (t) => E.evaluate(st(t), ura).options.find((o) => o.stat === "speed").parts.stats;
   assert.ok(v({ speed: 1000 }) < v({ speed: 1500 }), "past your target, Speed counts less");
+  // A target above the scenario's cap counts as the cap (URA caps every stat at 1400).
+  assert.strictEqual(E.evaluate(st({ speed: 2000 }), ura).ctx.target.speed, 1400);
 });
 
 test("Chairman Akikawa: training with her is worth more before the bond check and raises her bond", () => {

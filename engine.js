@@ -511,10 +511,11 @@
     const caps = capsFor(state, sc);
     const calib = calibFactor(state);
     const target = Object.assign({}, build.target, state.targets || {});
+    STATS.forEach((k) => { target[k] = Math.min(target[k], caps[k]); });
     const ctx = {
       state, sc, calib, caps,
       w: build.w,
-      // Your own targets (the Stats table) override the build's.
+      // Your own targets (the Stats table) override the build's; none goes past the cap.
       target,
       need: needFactors(state.stats || {}, target, build.w),
       stats: state.stats || {},
