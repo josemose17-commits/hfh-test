@@ -951,7 +951,7 @@
           <span class="tydot" aria-hidden="true"></span>
           <input class="slot-name" data-slot-name="${i}" list="cardList" value="${esc(D.label(c))}" autocomplete="off" aria-label="Support card ${i + 1}">
           <select data-slot-lb="${i}" aria-label="Limit break">${[0, 1, 2, 3, 4].map((lb) => `<option value="${lb}" ${lb === sl.lb ? "selected" : ""}>LB${lb} · Lv${D.levelFor(c, lb)}</option>`).join("")}</select>
-          ${focus.has(i) ? `<span class="chip focus" title="Opening focus: your ${focus.get(i).type === "wit" ? "Wit" : "Speed"} card with the highest specialty priority (${focus.get(i).spec}). The coach maxes its bond first.">${bond >= 100 ? "Focus ✓" : "Focus"}</span>` : ""}
+          ${focus.has(i) ? `<span class="chip focus" title="Opening focus: your one ${focus.get(i).type === "wit" ? "Wit" : "Speed"} card with the highest specialty priority (${focus.get(i).spec}), so it shows up most. The coach gets it to rainbow (80) first; your other ${focus.get(i).type === "wit" ? "Wit" : "Speed"} cards don't get this push.">${bond >= 80 ? "Focus ✓" : "Focus"}</span>` : ""}
           <label class="bond${bond >= 80 ? " full" : ""}"><span>Bond</span><input type="number" inputmode="numeric" data-slot-bond="${i}" min="0" max="100" value="${Math.round(bond)}"></label>
           <button type="button" class="btn ghost small square" data-slot-clear="${i}" aria-label="Remove card">✕</button>
         </div>

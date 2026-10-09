@@ -75,7 +75,7 @@
   function phaseFor(turn, scenario) {
     const finaleStart = scenario && scenario.totalTurns < 78 ? scenario.totalTurns : 73;
     if (turn >= finaleStart) return { id: "finale", name: "Finale", tip: "Every turn counts. Energy has little value left, so take the strongest training and spend skill points before the last race." };
-    if (turn <= 11) return { id: "predebut", name: "Pre-debut", tip: "Build bonds. Max your Wit and Speed focus cards first, then train where the most un-bonded cards gather, and use Wit to save energy." };
+    if (turn <= 11) return { id: "predebut", name: "Pre-debut", tip: "Build bonds. Get your two focus cards (one Speed, one Wit) to rainbow first, then train where the most un-bonded cards gather, and use Wit to save energy." };
     if (turn <= 24) return { id: "junior", name: "Junior", tip: "Keep building bonds until most cards reach orange (80+). Take friendship trainings as they appear." };
     if (turn <= 36) return { id: "classic1", name: "Classic spring", tip: "Friendship trainings in your main stats come first. Arrive at summer camp with high energy and Good or Great mood." };
     if (turn <= 40) return { id: "camp1", name: "Classic summer camp", tip: "Facilities are at max level. Take every strong training, and rest (which also lifts mood) only when failure gets risky." };
@@ -1110,10 +1110,12 @@
   }
 
   // ---- Opening focus ----
-  // From the start, pick one Wit card and one Speed card (each the one with the highest
-  // specialty priority, so it shows up on its own training most) and max their bonds first.
-  // Once both are maxed, the usual rule (train where the most cards still building bond are)
-  // takes over.
+  // From the start, pick ONE Wit card and ONE Speed card (each the one with the highest
+  // specialty priority, so it shows up on its own training most) and get just those two to
+  // friendship (80, rainbow) first. Your other Speed and Wit cards are treated like any other
+  // card. Once both are at 80, the usual rule (train where the most cards still building bond
+  // are) takes over.
+  const FOCUS_BOND = 80;
   // Full weight through Junior year, fading out by Classic summer.
   const FOCUS_K = 2.0;
   function focusWeight(turn) {
@@ -1189,7 +1191,7 @@
         const bonding = deckMode ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
         const hints = deckMode ? (fac.hints || []).length : fac.hint ? 1 : 0;
         // Your Wit/Speed focus cards come first, so a training with one always counts as strong.
-        const focus = deckMode ? ctx.focus.filter((fc) => fc.bond < 100 && fac.members.indexOf(fc.idx) !== -1).length : 0;
+        const focus = deckMode ? ctx.focus.filter((fc) => fc.bond < FOCUS_BOND && fac.members.indexOf(fc.idx) !== -1).length : 0;
         return bonding + hints + (o.stat === "wit" ? 1 : 0) + (x.flames > 0 ? 1 : 0) + 2 * (x.burst || 0) + 3 * focus;
       };
       const best = Math.max.apply(null, trains.map(points).concat([0]));
@@ -1236,6 +1238,14 @@
     }
     options.sort((a, b) => b.value - a.value);
     if (op.early && t <= op.early.to && op.early.note && options[0]) options[0].notes.push(op.early.note);
+  }
+
+  // The stage tip names your two focus cards while they still need bond.
+  function focusPhase(ph, ctx) {
+    const left = (ctx.focus || []).filter((fc) => fc.bond < FOCUS_BOND);
+    if (!left.length || focusWeight(ctx.state.turn) <= 0) return ph;
+    const names = ctx.focus.map((fc) => fc.card.n + " (" + (fc.type === "wit" ? "Wit" : "Speed") + (fc.bond >= FOCUS_BOND ? ", done" : ", bond " + Math.round(fc.bond)) + ")").join(" and ");
+    return Object.assign({}, ph, { tip: "Focus cards: " + names + ". Get these two to rainbow (80) first; your other cards build bond as usual. " + ph.tip.replace(/^Build bonds\. Get your two focus cards \(one Speed, one Wit\) to rainbow first, then t/, "T") });
   }
 
   function sumParts(p) {
@@ -1321,11 +1331,11 @@
     const aki = akikawaValue(f, ctx);
     if (aki) { o.parts.bond += aki.add; o.notes.push(aki.note); }
     if (dg && ctx.focus.length && focusWeight(state.turn) > 0) {
-      const here = ctx.focus.filter((fc) => fc.bond < 100 && f.members.indexOf(fc.idx) !== -1);
+      const here = ctx.focus.filter((fc) => fc.bond < FOCUS_BOND && f.members.indexOf(fc.idx) !== -1);
       if (here.length) {
         o.parts.bond += here.length * focusWeight(state.turn) * typ;
         o.focus = here.length;
-        o.notes.push("focus card" + (here.length > 1 ? "s" : "") + " here: " + here.map((fc) => fc.card.n + " (bond " + Math.round(fc.bond) + ")").join(", ") + ". Max your Wit and Speed focus cards' bonds first");
+        o.notes.push(here.map((fc) => fc.card.n + " is your " + (fc.type === "wit" ? "Wit" : "Speed") + " focus card (specialty " + fc.spec + ", bond " + Math.round(fc.bond) + "/" + FOCUS_BOND + ")").join("; ") + ": the coach trains with it first so it rainbows as soon as possible. Only your one Speed and one Wit focus card get this push");
       }
     }
     o.raw = o.parts.stats + o.parts.sp + o.parts.bond + o.parts.hint + o.parts.scenario;
@@ -1538,7 +1548,7 @@
       after,
       typ: ctx.typ,
       calib: ctx.calib,
-      phase: phaseFor(state.turn, scenario),
+      phase: focusPhase(phaseFor(state.turn, scenario), ctx),
       fanPlan: plan,
       gradePlan: gplan,
       events: eventsFor(state.turn, scenario, state),

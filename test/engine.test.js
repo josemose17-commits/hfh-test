@@ -707,6 +707,13 @@ test("opening: the Wit and Speed cards with the highest specialty priority are m
   // Kitasan Black counts wherever she shows up.
   const g = pick(base({ turn: 3, energy: 90, deck: openDeck(), facilities: dfac({ speed: { members: [1, 3, 4] }, guts: { members: [0] } }) }));
   assert.strictEqual(g.action.stat, "guts");
+  // Only those two: the other Speed card (Silence Suzuka) and Wit card (Nishino Flower) get no push.
+  const others = E.evaluate(base({ turn: 3, energy: 90, deck: openDeck(), facilities: dfac({ speed: { members: [1] }, wit: { members: [3] }, power: { members: [0] } }) }), sc("ura")).options;
+  assert.ok(!others.find((o) => o.stat === "speed").focus && !others.find((o) => o.stat === "wit").focus);
+  assert.strictEqual(others.find((o) => o.stat === "power").focus, 1);
+  // The push ends at friendship (80, rainbow).
+  const at80 = E.evaluate(base({ turn: 3, energy: 90, deck: openDeck([80, null, 80, null, null, null]), facilities: dfac({ power: { members: [0] }, guts: { members: [2] } }) }), sc("ura")).options;
+  assert.ok(at80.every((o) => !o.focus));
   // Once both are maxed, back to the training with the most cards building bond.
   const done = pick(base({ turn: 6, energy: 90, deck: openDeck([100, null, 100, null, null, null]), facilities: dfac({ speed: { members: [1, 3, 4] }, wit: { members: [2] } }) }));
   assert.strictEqual(done.action.stat, "speed");
