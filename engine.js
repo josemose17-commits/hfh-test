@@ -720,7 +720,9 @@
     }
     return f.rainbows || 0;
   }
-  function tokenGain(f, state, sc) {
+  // expected: also count Light Hello's Training Together event (45% chance of 20 points of the
+  // type you have least of, uma.guide). Left out when Done adds real tokens.
+  function tokenGain(f, state, sc, expected) {
     if (!sc.tokenOf || !sc.tokenOf[f.stat]) return [];
     const ex = f.extras || {};
     const L = facLevelFor(state, sc, f.stat);
@@ -733,6 +735,11 @@
     const est = (f.stat === "wit" ? 6 : 10) + 2 * (L - 1) + 3 * cards + 2 * links;
     const [pri, sec] = sc.tokenOf[f.stat];
     const out = [{ type: ex.tokType != null && ex.tokType !== "" ? +ex.tokType : pri, amount: ex.tok != null && ex.tok !== "" ? +ex.tok : est, est: !(ex.tok != null && ex.tok !== "") }];
+    if (expected && Array.isArray(f.members) && state.deck && f.members.some((i) => { const sl = state.deck.slots[i]; const c = sl && Deck.card(sl.id); return c && c.n === "Light Hello"; })) {
+      const have = (state.gl && state.gl.tokens) || [0, 0, 0, 0, 0];
+      const least = have.indexOf(Math.min.apply(null, have));
+      out.push({ type: least, amount: 9, est: true, lh: true });
+    }
     const rb = facilityRainbows(f, state) > 0;
     if (rb || (ex.tok2 != null && ex.tok2 !== "")) {
       const t2 = ex.tokType2 != null && ex.tokType2 !== "" ? +ex.tokType2 : (out[0].type === sec ? pri : sec);
@@ -859,7 +866,7 @@
     const cap = tokenCap(st, sc);
     let add = 0;
     const bits = [];
-    tokenGain(f, st, sc).forEach((g) => {
+    tokenGain(f, st, sc, true).forEach((g) => {
       let left = Math.max(0, Math.min(g.amount, cap - (have[g.type] || 0)));
       let used = 0;
       wanted.forEach((w) => {
@@ -1134,14 +1141,21 @@
   //   early:      { to, wit, bond, note }  through turn `to`, favour Wit (wit x typ) and each card
   //               still building bond (bond x typ)
   //   rest:       { turn, below, note }    rest on this turn unless energy is at least `below`
-  //   chase:      { name, from, to, firstMood, note }  a scenario card that joins later: from
-  //               `from` to `to` her training comes first wherever she is (within your failure
-  //               limit); with firstMood only her first training, and only below Great mood
-  //               (it gives +1 mood)
+  //   chase:      { name, from, belowGreat, event, note }  a scenario card that joins later: the
+  //               first time she's on a training (from turn `from`), that training comes first
+  //               wherever she is (within your failure limit), and her fixed first-training event
+  //               (event: { mood, stats, bond }) is counted and applied on Done. With belowGreat,
+  //               only while your mood is below Great.
   //   recreation: { from, to, note }  early Recreation for mood, by uma.guide's turn points (each
   //               card building bond, Wit, a hint, a white flame 1; a Spirit Burst 2): Recreation
   //               wins when no training scores above 1 on a full bar or at Good mood, or above 3
   //               at Normal mood once you've trained (its 10-30 energy isn't wasted then)
+  const BOND_PER_TRAINING_E = 7;
+  // Has this deck card trained with you yet? Logged by Done; older saves fall back to its bond.
+  function metCard(ctx, slot) {
+    const st = (ctx.state.deck && ctx.state.deck.slots[slot.idx]) || {};
+    return !!st.met || slot.bond >= Deck.initialBond(slot.card, slot.level) + BOND_PER_TRAINING_E;
+  }
   function chaseSlot(ctx, name) {
     if (!ctx.deck) return null;
     return ctx.deck.used.find((s) => s.card.n === name) || null;
@@ -1189,18 +1203,24 @@
     }
     const ch = op.chase;
     const slot = ch ? chaseSlot(ctx, ch.name) : null;
-    if (slot && t >= ch.from && t <= ch.to) {
+    if (slot && t >= ch.from && !metCard(ctx, slot) && !(ch.belowGreat && ctx.state.mood >= 4)) {
       const hers = trains.filter((o) => onTraining(ctx, o, slot.idx)).sort((a, b) => b.value - a.value)[0];
-      const first = slot.bond <= Deck.initialBond(slot.card, slot.level);
-      if (hers && ch.firstMood && !(first && ctx.state.mood < 4)) {
-        // Only her first training counts, and only below Great mood.
-      } else if (hers) {
+      if (hers) {
+        // Her fixed first-training event.
+        const ev = ch.event || {};
+        let add = 0;
+        Object.keys(ev.stats || {}).forEach((k) => { add += ctx.gainValue(k, ev.stats[k]); });
+        if (ev.mood && ctx.state.mood < 4) add += ctx.moodStep(ctx.state.mood);
+        if (ev.bond) add += (ev.bond / BOND_PER_TRAINING_E) * bondK(t) * typ;
+        if (add) bump(hers, add);
+        hers.firstEvent = { idx: slot.idx, bond: ev.bond || 0, stats: ev.stats || null };
+        if (ev.mood) hers.moodDelta = (hers.moodDelta || 0) + ev.mood;
         if (hers.fail <= ctx.state.risk) {
           const top = Math.max.apply(null, options.filter((o) => o !== hers).map((o) => o.value));
           if (hers.value <= top) bump(hers, top - hers.value + 0.1 * typ);
-          hers.notes.unshift(ch.name + " is here: " + (ch.note || (ch.firstMood ? "your first training with her gives +1 mood, so take it while you're below Great" : "her training comes first, whichever training she's on")));
+          hers.notes.unshift(ch.name + " is here for the first time: " + (ch.note || "train with her now, whichever training she's on"));
         } else {
-          hers.notes.unshift(ch.name + " is here, but failure (" + hers.fail + "%) is above your limit");
+          hers.notes.unshift(ch.name + " is here for the first time, but failure (" + hers.fail + "%) is above your limit");
         }
       }
     }
@@ -1565,8 +1585,13 @@
         const c = Deck && Deck.card(sl.id);
         const start = sl.bond != null ? sl.bond : (c ? Deck.initialBond(c, Deck.levelFor(c, sl.lb)) : 0);
         const hinted = (fac.hints || []).indexOf(i) !== -1;
-        sl.bond = Math.min(100, start + (Deck ? Deck.BOND_PER_TRAINING : 7) + (hinted ? (Deck ? Deck.BOND_PER_HINT : 5) : 0));
+        const evBond = option.firstEvent && option.firstEvent.idx === i ? option.firstEvent.bond : 0;
+        sl.bond = Math.min(100, start + (Deck ? Deck.BOND_PER_TRAINING : 7) + (hinted ? (Deck ? Deck.BOND_PER_HINT : 5) : 0) + evBond);
+        sl.met = true;
       });
+    }
+    if (option.firstEvent && option.firstEvent.stats && s.trackStats && s.stats) {
+      Object.entries(option.firstEvent.stats).forEach(([k, g]) => { if (s.stats[k] > 0) s.stats[k] = Math.round(s.stats[k] + g); });
     }
     if (option.outing != null && s.deck && s.deck.slots[option.outing]) {
       const sl = s.deck.slots[option.outing];
@@ -1801,8 +1826,9 @@
     },
 
     grandlive: {
-      // Turns 5-11 (to the debut): chase Light Hello and the cards closest to friendship; focus one
-      // or two cards so they rainbow as soon as possible instead of spreading bond around.
+      // Turns 5-11 (to the debut): favour the cards closest to friendship, so one or two rainbow
+      // as soon as possible instead of spreading bond around. (Light Hello's first training is
+      // the opening's chase rule.)
       // Every turn: the performance tokens a training gives count toward the next song you need.
       facility(f, ctx) {
         const t = ctx.state.turn;
@@ -1813,8 +1839,7 @@
         f.members.forEach((i) => {
           const sl = ctx.deck.slots[i];
           if (!sl) return;
-          if (sl.card.n === "Light Hello") { add += 0.3 * ctx.typ; notes.push("Light Hello is here (chase her events before the debut)"); }
-          else if (sl.card.ty !== "friend" && sl.bond >= 50 && sl.bond < 80) { add += 0.12 * ctx.typ; notes.push(sl.card.n + " is close to friendship (" + Math.round(sl.bond) + ")"); }
+          if (sl.card.ty !== "friend" && sl.bond >= 50 && sl.bond < 80) { add += 0.12 * ctx.typ; notes.push(sl.card.n + " is close to friendship (" + Math.round(sl.bond) + ")"); }
         });
         return add ? { add, note: notes.join("; ") } : null;
       },

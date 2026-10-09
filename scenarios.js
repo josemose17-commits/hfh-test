@@ -86,7 +86,7 @@
       opening: {
         early: { to: 24, wit: 0.1 },
         recreation: { from: 1, to: 4, note: "Unity Cup opening: Recreation for mood. Karaoke (1 in 3) jumps straight to Great, and once you've trained none of its energy is wasted" },
-        chase: { name: "Riko Kashimoto", from: 5, to: 24, firstMood: true }
+        chase: { name: "Riko Kashimoto", from: 5, belowGreat: true, event: { mood: 1 }, note: "your first training with her gives +1 mood, so take it while you're below Great" }
       },
       finale: { name: "URA Finals", turns: [74, 76, 78], forced: true, note: "Unity Cup still ends with the three URA Finals races, after the Unity Cup Finals against team Zenith." },
       summary: "You recruit a team. Characters with a white flame on a training join Special Training (2+ flames pay the trainee extra stats), a full spirit gauge fires a Spirit Burst, and after a member's burst one Extreme Spirit Burst (0% failure) follows. Facility levels follow your team rank for each training type.",
@@ -242,11 +242,12 @@
       // Main and second token each training gives (about 60% / 30% of the time).
       tokenOf: { speed: [0, 3], stamina: [1, 2], power: [2, 4], guts: [3, 0], wit: [4, 1] },
       linkChars: ["Light Hello", "Smart Falcon", "Silence Suzuka", "Agnes Tachyon", "Mihono Bourbon"],
-      // Turns 1-3 bonds and Wit, rest on turn 4 (9 turns to the debut), then Light Hello first.
+      // Turns 1-3 bonds and Wit, rest on turn 4 (9 turns to the debut), then train with Light
+      // Hello the first time she shows up (her fixed first-training event).
       opening: {
         early: { to: 4, wit: 0.15, bond: 0.08, note: "opening: raise bonds, take Wit, and keep energy high going into turn 5 (common: Train x3, then Rest)" },
-        rest: { turn: 4, below: 85, note: "Light Hello shows up from next turn and her training comes first wherever she is, so go in with full energy" },
-        chase: { name: "Light Hello", from: 5, to: 11, note: "before your debut her training comes first, whichever training she's on" }
+        rest: { turn: 4, below: 85, note: "Light Hello shows up from next turn, and the first time she does you train with her wherever she is, so go in with full energy" },
+        chase: { name: "Light Hello", from: 5, event: { mood: 1, stats: { speed: 13, guts: 13 }, bond: 10 }, note: "train with her now, whichever training she's on. Her first-training event gives mood +1, Speed +13, Guts +13 and +10 bond, and her outings can't open until you've trained with her" }
       },
       train: { speed: [8, 0, 4, 0, 0, 4, -19], stamina: [0, 8, 0, 6, 0, 4, -20], power: [0, 4, 9, 0, 0, 4, -20], guts: [2, 0, 2, 7, 0, 4, -20], wit: [2, 0, 0, 0, 6, 5, 5] },
       finale: { name: "Grand Concert", turns: [], forced: false, note: "The career builds to the Grand Concert. Mark goal races as your game shows them." },
@@ -255,7 +256,8 @@
         "Lessons don't use a turn, so buy songs as soon as you can afford them. Extra Stat Gain songs add a permanent bonus to that training; Friendship Bonus songs boost every friendship training after the next live.",
         "Each training gives a main and second token: Speed gives Dance/Visual, Stamina Passion/Vocal, Power Vocal/Mental, Guts Visual/Dance, Wit Mental/Passion. Friendship trainings give two token types, and scenario-link cards (Light Hello, Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon) give more.",
         "Opening: train on turns 1-3 (bonds, Wit), then rest on turn 4, when the game shows 9 turns to your debut, unless your energy is already 85+. Go into turn 5 as full as you can.",
-        "Turn 5 to the debut: Light Hello's training comes first, whichever training she's on. After her, the cards closest to friendship. Focus one or two cards so they rainbow as soon as possible instead of spreading bond around. If no card is rainbowing and Light Hello hasn't given her +20 event by the debut, reset.",
+        "Light Hello shows up from turn 5. The first time she's on a training, take it, whichever training it is: her fixed event gives mood +1, Speed +13, Guts +13 (a little less at lower LB) and +10 bond, and you need it before her outings can open. After that she's a normal card (her Training Together event can add 20 points of your scarcest type).",
+        "Turn 5 to the debut: favour the cards closest to friendship. Focus one or two cards so they rainbow as soon as possible instead of spreading bond around. If no card is rainbowing and Light Hello hasn't given her +20 event by the debut, reset.",
         "Song plan, year one: buy 5 songs, then do 2 more technique lessons so the 6th song shows up, and carry it over (buy it right after the 1st Promo Live). Avoid the +Stamina and +Guts songs (Ring Ring Diary, Nigekiri! Fallin' Love) if you can. If you can't manage this by the end of year one, reset.",
         "Song plan, every half year after: buy the carried-over song, 1 technique lesson, a song, 2 lessons, a song, 2 lessons, then carry the next one over. That's 3 songs a half year (3 fill the Hype gauge). Before the Grand Live, buy that 4th song too: 18 songs unlock the special GIRLS' LEGEND U.",
         "Songs to aim for: the two skill point songs in year two (Yume wo Kakeru!, Grow Up, Shine!) and the two +10% friendship songs in year three (Daisuki no Takarabako, Fanfare for Future!).",
@@ -269,8 +271,8 @@
       keyCards: ["Light Hello [From the Ground Up] (SSR Friend)", "Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon (scenario links)"],
       inputs: [],
       events: [
-        { turn: 4, label: "Rest before Light Hello", tip: "The game shows 9 turns to your debut. Rest unless energy is 85+: Light Hello shows up from turn 5 and her training comes first." },
-        { turn: 5, label: "Lessons unlock", tip: "The Grand Live plan starts. Chase Light Hello and the cards closest to friendship until the debut. Song plan for year one: 5 songs, then carry the 6th over." },
+        { turn: 4, label: "Rest before Light Hello", tip: "The game shows 9 turns to your debut. Rest unless energy is 85+: Light Hello shows up from turn 5, and you train with her the first time she does." },
+        { turn: 5, label: "Lessons unlock", tip: "The Grand Live plan starts. Train with Light Hello the first time she shows up, then favour the cards closest to friendship until the debut. Song plan for year one: 5 songs, then carry the 6th over." },
         { turn: 12, label: "Reset check", tip: "By the debut you want one card rainbowing or Light Hello's +20 event. If neither, reset (normal for CM aces here)." },
         { turn: 23, label: "Reset check", tip: "Year one plan: 5 songs bought and the 6th song showing, held for after the live. If you're short, reset." },
         { turn: 24, label: "1st Promo Live", tip: "3 songs since the last live fill the Hype gauge and guarantee a Great Success (stat caps up). Lives pay 5 SP per technique and 25 SP per song learned since the last one." },
