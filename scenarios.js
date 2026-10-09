@@ -6,6 +6,9 @@
 // Each year has 24 turns (Early/Late for each month, starting in January).
 //
 // caps:      base stat caps [speed, stamina, power, guts, wit]. Inheritance can raise them.
+// opening:   the scenario's opening plan (see applyOpening in engine.js): early Wit/bond focus,
+//            an opening rest turn, a scenario card to chase once she joins, early Recreation.
+// goalRaceEnergy: energy a goal race costs here (Trackblazer's debut); 0 elsewhere.
 // gainScale: how big trainings are compared with URA. The coach replaces this with your
 //            own numbers once you have entered real gains on a few turns.
 // finale.forced: true only where the finale race turns are certain.
@@ -47,6 +50,7 @@
         { id: "meek", label: "Meek Duel mark", scope: "facility", type: "check", help: "Happy Meek is here with the orange Duel mark. A failed training cancels the duel." }
       ],
       events: [
+        { turn: 4, label: "Akikawa joins trainings", tip: "Director Akikawa shows up on trainings from now on. Tick Akikawa here when she's on one: her bond needs green (60+) by Senior Early April for the unique skill level-up." },
         { turn: 12, label: "Make Debut", tip: "Goal race. Have mood at Good or better." },
         { turn: 29, label: "Mood-up event", tip: "A guaranteed mood-up happens this turn, so an outing now is worth less." },
         { turn: 38, label: "Akikawa's snack", tip: "+30 energy at the end of this turn." },
@@ -74,11 +78,22 @@
       gainScale: 1.15,
       levelRule: "rank",
       formulaBoost: 1.35,
-      train: { speed: [8, 0, 4, 0, 0, 2, -19], stamina: [0, 7, 0, 3, 0, 2, -17], power: [0, 4, 6, 0, 0, 2, -18], guts: [3, 0, 3, 6, 0, 2, -20], wit: [2, 0, 0, 0, 6, 3, 5] },
-      trainNote: "Global values (JP raised some after its 2023 update).",
+      train: { speed: [8, 0, 4, 0, 0, 4, -19], stamina: [0, 8, 0, 6, 0, 4, -20], power: [0, 4, 9, 0, 0, 4, -20], guts: [3, 0, 3, 6, 0, 4, -20], wit: [2, 0, 0, 0, 6, 5, 5] },
+      trainNote: "Values since the July 2026 update (uma.guide), the same as JP's since 2023.",
+      // uma.guide's opening: Recreation for mood on turns 1-4 when no training is strong (Karaoke
+      // jumps to Great), Wit counts like a card building bond, and Riko joins on turn 5 (her
+      // first training together gives +1 mood).
+      opening: {
+        early: { to: 24, wit: 0.1 },
+        recreation: { from: 1, to: 4, note: "Unity Cup opening: Recreation for mood. Karaoke (1 in 3) jumps straight to Great, and once you've trained none of its energy is wasted" },
+        chase: { name: "Riko Kashimoto", from: 5, to: 24, firstMood: true }
+      },
       finale: { name: "URA Finals", turns: [74, 76, 78], forced: true, note: "Unity Cup still ends with the three URA Finals races, after the Unity Cup Finals against team Zenith." },
       summary: "You recruit a team. Characters with a white flame on a training join Special Training (2+ flames pay the trainee extra stats), a full spirit gauge fires a Spirit Burst, and after a member's burst one Extreme Spirit Burst (0% failure) follows. Facility levels follow your team rank for each training type.",
       coreLoop: [
+        "Opening (uma.guide): on turn 1 train, unless every training is weak; then Recreation is a gamble for Karaoke (straight to Great mood). On turns 2-4, take Recreation for mood when no training has 3+ cards building bond: after a training its 10-30 energy isn't wasted.",
+        "Riko Kashimoto (the scenario's Pal card) shows up on trainings from turn 5. Your first training with her gives +1 mood, so take her early while you're below Great. Since February 2026 her Recreation outings don't need a green bond, so she's no longer worth chasing for that.",
+        "Early on, Wit training counts like a card building bond: it saves energy and Wit matters here.",
         "Junior: train where the most white flames gather. Every flame you train with grows that teammate, and team rank sets your facility levels (F/G=1, D/E=2, B/C=3, A=4, S=5).",
         "2+ white flames on one training is Special Training: 2 flames give +2 main stat, 3 give +4/+1, 4 give +6/+3, 5 give +10/+5 plus skill points. Scenario-linked cards add +1 to each.",
         "A full spirit gauge fires a Spirit Burst: +15 main stat, +7 second stat, +5 SP (Wit: +2 Speed, +15 Wit, and +5 energy). Hold it for a facility you want: the stats your build needs that are hardest to raise (Speed for sprinters, Stamina and Power for longer races).",
@@ -86,7 +101,8 @@
         "Team Zenith Declares War (Senior Late November) rewards total bursts: 4+ white hint, 7+ hint Lv3, 10+ gold hint, 13+ gold Lv3 with stats. Aim for 10+ if you want the gold skill; 7-9 saves skill points if you don't.",
         "Unity Cup matches: win at least 3 of the 5 races to raise your league rank (a loss lowers it), so pick an opponent you can beat, with 3+ circles in Tazuna's preview. Keep each distance's team members viable; losing an early match is survivable but costs its bonuses.",
         "Bursts and Special Training cost a lot of energy: most decks bring a Wit card, and a Friend card helps.",
-        "Wit caps at 1800 here, so Wit-heavy builds are strong."
+        "Wit caps at 1800 here, so Wit-heavy builds are strong.",
+        "Classic Late December: train or race down to low energy. Senior opens with the New Year Shrine Visit (+30 energy) and a raffle (often +20-30 more)."
       ],
       deck: "Fewer cards of your main type than in URA. Mixed decks make more flames. Speed and Wit work well because of the high Wit cap, and nearly every top deck runs a Wit card for energy.",
       keyCards: ["Riko Kashimoto (Friend, scenario link)", "Kitasan Black (Speed)"],
@@ -97,6 +113,7 @@
         { id: "bursts", label: "Bursts so far", scope: "turn", type: "number", max: 30, help: "Spirit + Extreme bursts this career; Team Zenith's Senior Late Nov event pays more at 4, 7, 10 and 13" }
       ],
       events: [
+        { turn: 5, label: "Riko joins trainings", tip: "Riko Kashimoto shows up on trainings from now on. Your first training with her gives +1 mood." },
         { turn: 24, label: "Unity Cup race 1", tip: "approx. Pick an opponent with 3+ circles in Tazuna's preview." },
         { turn: 36, label: "Unity Cup race 2", tip: "approx." },
         { turn: 48, label: "Unity Cup race 3", tip: "approx." },
@@ -123,12 +140,19 @@
       gainScale: 1.0,
       formulaBoost: 1.15,
       train: { speed: [8, 0, 4, 0, 0, 2, -19], stamina: [0, 7, 0, 3, 0, 2, -17], power: [0, 4, 6, 0, 0, 2, -18], guts: [3, 0, 3, 6, 0, 2, -20], wit: [2, 0, 0, 0, 6, 3, 5] },
+      // uma.guide: pre-debut turns go to bonds and the Wit facility (Wit is the hardest stat to
+      // raise here), and unlike other scenarios the debut race costs energy.
+      opening: {
+        early: { to: 11, wit: 0.15, note: "Trackblazer pre-debut: build bonds and lean on the Wit facility, the hardest stat to raise here" }
+      },
+      goalRaceEnergy: 15,
       // Grade Point goals (GameTora), due at the end of Late December each year. Surplus doesn't
       // carry over. Dirt specialists and sprint-only turf trainees have lower targets.
       gradePoints: { due: [24, 48, 72], turf: [60, 300, 300], dirt: [30, 200, 300], sprint: [60, 200, 300] },
       finale: { name: "Twinkle Star Climax", turns: [74, 76, 78], forced: true, note: "Three finale races scored by Victory Points (1st 10, 2nd 8, 3rd 6). Each leg pays +10 to every stat and 30 SP, scaled by race bonus: use your Master Cleat Hammers here." },
       summary: "No fixed race goals: you need Grade Points (60, then +300, then +300) from races. Races also pay shop coins (1st 100, 2nd-3rd 60, 4th-5th 30), and the shop (restocks every 6 turns, max 5 of each item) sells training boosts, energy, mood, stats, facility levels and race bonus.",
       coreLoop: [
+        "Pre-debut (uma.guide): build bonds evenly (Grilled Carrots/BBQ later raise every card at once) and lean on the Wit facility: Wit is the hardest stat to raise here. Unlike other scenarios, the debut race costs energy, so don't arrive at it empty.",
         "Race often: guides count 30-40 races a career, about two races for every training outside camp. Take only strong trainings, and skip a race when a training is exceptional. Summer camp is where the stats come from.",
         "A win pays Grade Points by grade: G1 100, G2 80, G3 60, OP 40, Pre-OP 20 (less for lower places), plus 100 coins.",
         "Grade Point goals: 60 by the end of Junior, then 300 more by the end of Classic and 300 more by the end of Senior (each due after Late December, and surplus doesn't carry over). Dirt specialists need 30 and 200, sprint-only turf trainees 200 in Classic. The coach counts them as you race and says when a race can't wait.",
@@ -160,7 +184,8 @@
         { id: "consec", label: "Races in a row", scope: "turn", type: "number", max: 6, help: "Filled in for you from the career log" }
       ],
       events: [
-        { turn: 12, label: "Make Debut", tip: "Goal race. The shop unlocks after it." },
+        { turn: 11, label: "Debut next turn", tip: "In Trackblazer the debut race costs energy, so don't go into it empty." },
+        { turn: 12, label: "Make Debut", tip: "Goal race (it costs energy here). The shop unlocks after it." },
         { turn: 24, label: "Grade Point goal", tip: "60 Grade Points by the end of this turn (30 for dirt specialists). Surplus doesn't carry over." },
         { turn: 24, label: "Junior Uma of the Year", tip: "Unique skill level-up if picked: needs 1 blue bar of Akikawa bond plus wins and fans this year." },
         { turn: 36, label: "Stock up for camp", tip: "Stock Vitas, Megaphones and Ankle Weights for camp, your best training window." },
@@ -217,14 +242,20 @@
       // Main and second token each training gives (about 60% / 30% of the time).
       tokenOf: { speed: [0, 3], stamina: [1, 2], power: [2, 4], guts: [3, 0], wit: [4, 1] },
       linkChars: ["Light Hello", "Smart Falcon", "Silence Suzuka", "Agnes Tachyon", "Mihono Bourbon"],
+      // Turns 1-3 bonds and Wit, rest on turn 4 (9 turns to the debut), then Light Hello first.
+      opening: {
+        early: { to: 4, wit: 0.15, bond: 0.08, note: "opening: raise bonds, take Wit, and keep energy high going into turn 5 (common: Train x3, then Rest)" },
+        rest: { turn: 4, below: 85, note: "Light Hello shows up from next turn and her training comes first wherever she is, so go in with full energy" },
+        chase: { name: "Light Hello", from: 5, to: 11, note: "before your debut her training comes first, whichever training she's on" }
+      },
       train: { speed: [8, 0, 4, 0, 0, 4, -19], stamina: [0, 8, 0, 6, 0, 4, -20], power: [0, 4, 9, 0, 0, 4, -20], guts: [2, 0, 2, 7, 0, 4, -20], wit: [2, 0, 0, 0, 6, 5, 5] },
       finale: { name: "Grand Concert", turns: [], forced: false, note: "The career builds to the Grand Concert. Mark goal races as your game shows them." },
       summary: "Training earns performance points (Dance, Passion, Vocal, Visual, Mental; 200 each at first). You spend them on song lessons, which take no turn. Promo concerts run every six months from Late December of Junior year.",
       coreLoop: [
         "Lessons don't use a turn, so buy songs as soon as you can afford them. Extra Stat Gain songs add a permanent bonus to that training; Friendship Bonus songs boost every friendship training after the next live.",
         "Each training gives a main and second token: Speed gives Dance/Visual, Stamina Passion/Vocal, Power Vocal/Mental, Guts Visual/Dance, Wit Mental/Passion. Friendship trainings give two token types, and scenario-link cards (Light Hello, Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon) give more.",
-        "Opening (turns 1-4): raise bonds, take Wit, rest, and keep energy as high as possible going into turn 5. A common opening is Train x3, then Rest.",
-        "Turn 5 to the debut: chase Light Hello and the cards closest to friendship. Focus one or two cards so they rainbow as soon as possible instead of spreading bond around. If no card is rainbowing and Light Hello hasn't given her +20 event by the debut, reset.",
+        "Opening: train on turns 1-3 (bonds, Wit), then rest on turn 4, when the game shows 9 turns to your debut, unless your energy is already 85+. Go into turn 5 as full as you can.",
+        "Turn 5 to the debut: Light Hello's training comes first, whichever training she's on. After her, the cards closest to friendship. Focus one or two cards so they rainbow as soon as possible instead of spreading bond around. If no card is rainbowing and Light Hello hasn't given her +20 event by the debut, reset.",
         "Song plan, year one: buy 5 songs, then do 2 more technique lessons so the 6th song shows up, and carry it over (buy it right after the 1st Promo Live). Avoid the +Stamina and +Guts songs (Ring Ring Diary, Nigekiri! Fallin' Love) if you can. If you can't manage this by the end of year one, reset.",
         "Song plan, every half year after: buy the carried-over song, 1 technique lesson, a song, 2 lessons, a song, 2 lessons, then carry the next one over. That's 3 songs a half year (3 fill the Hype gauge). Before the Grand Live, buy that 4th song too: 18 songs unlock the special GIRLS' LEGEND U.",
         "Songs to aim for: the two skill point songs in year two (Yume wo Kakeru!, Grow Up, Shine!) and the two +10% friendship songs in year three (Daisuki no Takarabako, Fanfare for Future!).",
@@ -232,12 +263,13 @@
         "Friendship trainings give the most performance points, so they stay your priority.",
         "Lives also pay 5 SP per technique lesson and 25 SP per song learned since the last live, and raise the token cap by 50.",
         "Chairman Akikawa is here: the April unique skill check needs a green (3-bar) bond with her.",
-        "Stats above 1200 count half in races, but Speed (1600) and Guts (1500) can go past it here."
+        "Past 1200 a stat gains half from training and counts about half in races, but Speed (1600) and Guts (1500) can go past it here. Blue sparks raise the caps a little more."
       ],
       deck: "A normal stat deck works. The scenario friend card Light Hello is a strong pick: her outings are better than normal ones, and her unique effect cuts energy cost on friendship trainings.",
       keyCards: ["Light Hello [From the Ground Up] (SSR Friend)", "Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon (scenario links)"],
       inputs: [],
       events: [
+        { turn: 4, label: "Rest before Light Hello", tip: "The game shows 9 turns to your debut. Rest unless energy is 85+: Light Hello shows up from turn 5 and her training comes first." },
         { turn: 5, label: "Lessons unlock", tip: "The Grand Live plan starts. Chase Light Hello and the cards closest to friendship until the debut. Song plan for year one: 5 songs, then carry the 6th over." },
         { turn: 12, label: "Reset check", tip: "By the debut you want one card rainbowing or Light Hello's +20 event. If neither, reset (normal for CM aces here)." },
         { turn: 23, label: "Reset check", tip: "Year one plan: 5 songs bought and the 6th song showing, held for after the live. If you're short, reset." },
@@ -265,9 +297,14 @@
       caps: [1500, 1400, 1500, 1300, 1300],
       gainScale: 1.3,
       train: { speed: [10, 0, 3, 0, 0, 5, -19], stamina: [0, 8, 0, 6, 0, 5, -20], power: [0, 4, 9, 0, 0, 5, -20], guts: [2, 0, 3, 9, 0, 5, -20], wit: [2, 0, 0, 0, 8, 5, 5] },
+      opening: {
+        early: { to: 24, note: "Grand Masters Junior: bonds first. Don't rest or go out just for 2 fragments unless failure is getting high" }
+      },
       finale: { name: "Grand Masters race", turns: [78], forced: true, note: "No URA Finals here. After the SWBC in Senior Late December you get 5 more training turns, then the Grand Masters race against the three goddesses." },
       summary: "From turn 3, trainings, rests, outings and races drop Knowledge Fragments (rainbow trainings drop two). Every fragment you hold adds +1 to that stat in training, and 8 fragments fuse into a Goddess Wisdom you trigger by hand (no turn used). Each Wisdom levels up its goddess for the rest of the run and gives a one-turn effect.",
       coreLoop: [
+        "Opening (game8): in Junior, training for bonds beats resting or going out just for 2 fragments; rest only when failure gets high. Friendship trainings then drop fragments faster anyway.",
+        "Count back from goal races: a goal race always gives 2 fragments, so collect so that your Wisdom is ready 1-4 turns before a goal race or right after it, not on the race turn while you hold 8.",
         "Rainbow trainings drop two matching fragments (Wit rarely does). Goal races give two. With 7 held, no doubles; with 8, nothing until you obtain the Wisdom.",
         "Obtain a Wisdom from the Knowledge Table at the start of a turn; it doesn't use a turn. Its one-turn effect applies to what you do that turn.",
         "Obtain a Wisdom as soon as you hold 8 fragments: while you hold 8, no new fragments drop. The exceptions: save it for summer camp, and don't spend it on a turn where few cards are training.",

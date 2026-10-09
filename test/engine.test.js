@@ -635,3 +635,147 @@ test("support card events from the wiki: chain and other events, ranges by LB, b
     assert.match(E.eventText(c, 4), new RegExp("\\+" + c.e[1] + " energy"));
   }
 });
+
+test("goal races cost no energy; optional races do", () => {
+  const goal = pick(base({ energy: 50, goalRace: true }));
+  assert.strictEqual(goal.action.kind, "race");
+  assert.strictEqual(goal.action.energyDelta, 0);
+  assert.strictEqual(goal.after.energy, 50);
+  const opt = E.evaluate(base({ energy: 50, race: "g1" }), sc("ura")).options.find((o) => o.kind === "race");
+  assert.ok(opt && !opt.forced);
+  assert.strictEqual(opt.energyDelta, -15);
+  // Done on a goal race keeps your energy.
+  const next = E.advance(base({ energy: 50, goalRace: true }), sc("ura"), goal.action);
+  assert.strictEqual(next.energy, 50);
+});
+
+test("caps: scenario base plus blue spark uncaps, or your own cap", () => {
+  const gl = sc("grandlive");
+  assert.deepStrictEqual(gl.caps, [1600, 1300, 1300, 1500, 1300]);
+  assert.deepStrictEqual(sc("ura").caps, [1400, 1400, 1400, 1400, 1400]);
+  assert.deepStrictEqual(SCENARIOS[1].caps, [1300, 1300, 1300, 1300, 1800]);
+  assert.deepStrictEqual(SCENARIOS[2].caps, [1200, 1900, 1200, 1200, 1500]);
+  assert.strictEqual(E.sparkUncap("3 3 2"), 41);
+  assert.strictEqual(E.sparkUncap("1,2"), 13);
+  const caps = E.capsFor({ caps: { wit: 1350 }, sparks: { speed: "3 3", guts: "1" } }, gl);
+  assert.deepStrictEqual(caps, { speed: 1632, stamina: 1300, power: 1300, guts: 1504, wit: 1350 });
+});
+
+test("training past 1200 gives half the gain", () => {
+  assert.strictEqual(E.trainedGain("speed", 20, { speed: 1300 }), 10);
+  assert.strictEqual(E.trainedGain("speed", 20, { speed: 1190 }), 15);
+  assert.strictEqual(E.trainedGain("speed", 20, { speed: 900 }), 20);
+  assert.strictEqual(E.trainedGain("speed", 20, {}), 20);
+  const r = E.evaluate(base({ stats: { speed: 1300, stamina: 600, power: 700, guts: 300, wit: 500 }, facilities: facs({ speed: { cards: 2 } }) }), sc("ura"));
+  const sp = r.options.find((o) => o.kind === "train" && o.stat === "speed");
+  const low = E.evaluate(base({ stats: { speed: 900, stamina: 600, power: 700, guts: 300, wit: 500 }, facilities: facs({ speed: { cards: 2 } }) }), sc("ura"));
+  const sp2 = low.options.find((o) => o.kind === "train" && o.stat === "speed");
+  assert.ok(Math.abs(sp.statGains.speed * 2 - sp2.statGains.speed) < 0.01, "speed gain halves past 1200");
+  assert.ok(Math.abs(sp.statGains.power - sp2.statGains.power) < 0.01, "power below 1200 is untouched");
+});
+
+test("a stat far below its target gets priority", () => {
+  const st = (stamina) => base({ stats: { speed: 900, stamina, power: 700, guts: 400, wit: 600 }, facilities: facs({ speed: { gain: 24, fail: 0 }, stamina: { gain: 24, fail: 0 } }) });
+  const gap = (state) => {
+    const o = E.evaluate(state, sc("ura")).options;
+    return o.find((x) => x.stat === "stamina").parts.stats / o.find((x) => x.stat === "speed").parts.stats;
+  };
+  assert.ok(gap(st(300)) > gap(st(950)) * 1.3, "low stamina should count for more");
+  // Without current stats, the build weights alone decide: Speed first.
+  const noStats = E.evaluate(base({ facilities: facs({ speed: { gain: 24, fail: 0 }, stamina: { gain: 24, fail: 0 } }) }), sc("ura")).options;
+  assert.ok(noStats.find((x) => x.stat === "speed").parts.stats > noStats.find((x) => x.stat === "stamina").parts.stats);
+});
+
+test("Grand Concert song tokens only tip close calls", () => {
+  const r = E.evaluate(base({ turn: 30, facilities: facs(Object.fromEntries(E.STATS.map((s) => [s, { gain: 30, fail: 0, cards: 2 }]))) }), sc("grandlive"));
+  r.options.filter((o) => o.kind === "train").forEach((o) => assert.ok(o.parts.scenario <= 0.12 * r.ctx.typ + 1e-9, o.stat));
+});
+
+// Opening deck: SSR Kitasan Black (Speed, specialty 100), Silence Suzuka (Speed 65), Curren Chan
+// (Wit 65), Nishino Flower (Wit 50), Gold Ship (Stamina), Light Hello (Friend).
+const openDeck = (bonds) => ({ trainee: null, slots: [30028, 30002, 30068, 30082, 30004, 30052].map((id, i) => ({ id, lb: 4, bond: bonds ? bonds[i] : null })) });
+const dfac = (o) => E.STATS.map((s) => Object.assign(fac(s), { members: [], hints: [], extra: 0 }, (o || {})[s]));
+
+test("opening: the Wit and Speed cards with the highest specialty priority are maxed first", () => {
+  const info = E.deckInfo({ deck: openDeck() });
+  const focus = E.focusCards(info);
+  assert.deepStrictEqual(focus.map((f) => f.card.n), ["Curren Chan", "Kitasan Black"]);
+  // Curren Chan alone on Wit beats three other cards building bond on Speed.
+  const r = pick(base({ turn: 2, energy: 90, deck: openDeck(), facilities: dfac({ speed: { members: [1, 3, 4] }, wit: { members: [2] } }) }));
+  assert.strictEqual(r.action.stat, "wit");
+  assert.ok(r.reasons.some((n) => /focus card/.test(n)));
+  // Kitasan Black counts wherever she shows up.
+  const g = pick(base({ turn: 3, energy: 90, deck: openDeck(), facilities: dfac({ speed: { members: [1, 3, 4] }, guts: { members: [0] } }) }));
+  assert.strictEqual(g.action.stat, "guts");
+  // Once both are maxed, back to the training with the most cards building bond.
+  const done = pick(base({ turn: 6, energy: 90, deck: openDeck([100, null, 100, null, null, null]), facilities: dfac({ speed: { members: [1, 3, 4] }, wit: { members: [2] } }) }));
+  assert.strictEqual(done.action.stat, "speed");
+});
+
+test("Grand Concert: rest on turn 4 (9 turns to the debut) unless energy is very high", () => {
+  const gl = sc("grandlive");
+  assert.strictEqual(E.turnsToDebut(4), 9);
+  const f = dfac({ speed: { members: [0, 1] }, wit: { members: [2] } });
+  for (const e of [40, 60, 80]) {
+    const r = E.recommend(base({ turn: 4, energy: e, mood: 2, deck: openDeck(), facilities: f }), gl);
+    assert.strictEqual(r.action.kind, "rest", "energy " + e);
+  }
+  const high = E.recommend(base({ turn: 4, energy: 90, mood: 2, deck: openDeck(), facilities: f }), gl);
+  assert.notStrictEqual(high.action.kind, "rest");
+});
+
+test("Grand Concert: Light Hello's training comes first before the debut, wherever she is", () => {
+  const gl = sc("grandlive");
+  const st = (guts) => base({ turn: 6, energy: 95, mood: 2, deck: openDeck(), facilities: dfac({ speed: { members: [0, 1] }, guts, wit: { members: [2] } }) });
+  const r = E.recommend(st({ members: [5] }), gl);
+  assert.strictEqual(r.action.stat, "guts");
+  assert.ok(r.reasons.some((n) => /Light Hello is here/.test(n)));
+  // Not when her training's failure is above your limit.
+  const risky = E.recommend(st({ members: [5], fail: 30 }), gl);
+  assert.notStrictEqual(risky.action.stat, "guts");
+});
+
+test("Unity Cup opening: Recreation for mood by uma.guide's turn points, Riko's first training", () => {
+  const u = sc("unity");
+  // Kitasan Black, Silence Suzuka, Curren Chan, Nishino Flower, Gold Ship, SSR Riko Kashimoto.
+  const deck = (bonds) => ({ trainee: null, slots: [30028, 30002, 30068, 30082, 30004, 30036].map((id, i) => ({ id, lb: 4, bond: bonds ? bonds[i] : null })) });
+  const st = (o) => base(Object.assign({ turn: 2, energy: 80, mood: 2, deck: deck() }, o));
+  // Nothing above 3 points at Normal mood after a training: Recreation.
+  const weak = E.recommend(st({ facilities: dfac({ speed: { members: [1] }, stamina: { members: [4] }, wit: { members: [3] } }) }), u);
+  assert.strictEqual(weak.action.kind, "recreation");
+  // Four cards building bond on one training: train.
+  const strong = E.recommend(st({ deck: deck([null, null, null, null, null, 30]), facilities: dfac({ speed: { members: [1, 3, 4, 5] } }) }), u);
+  assert.strictEqual(strong.action.kind, "train");
+  // A focus card (Curren Chan, Wit) on a training beats the Recreation rule.
+  const focus = E.recommend(st({ facilities: dfac({ wit: { members: [2] }, speed: { members: [1] } }) }), u);
+  assert.strictEqual(focus.action.stat, "wit");
+  // Great mood already: no Recreation push.
+  const great = E.recommend(st({ mood: 4, facilities: dfac({ speed: { members: [1] }, stamina: { members: [4] } }) }), u);
+  assert.notStrictEqual(great.action.kind, "recreation");
+  // Riko joins on turn 5: her first training (below Great) comes first, later ones don't.
+  const riko = E.recommend(st({ turn: 6, mood: 3, facilities: dfac({ speed: { members: [1, 3] }, guts: { members: [5] } }) }), u);
+  assert.strictEqual(riko.action.stat, "guts");
+  assert.ok(riko.reasons.some((n) => /Riko Kashimoto is here/.test(n)));
+  const later = E.recommend(st({ turn: 6, mood: 3, deck: deck([null, null, null, null, null, 60]), facilities: dfac({ speed: { members: [1, 3] }, guts: { members: [5] } }) }), u);
+  assert.strictEqual(later.action.stat, "speed");
+  // Unity's base values since the July 2026 update.
+  assert.deepStrictEqual(u.train.power, [0, 4, 9, 0, 0, 4, -20]);
+});
+
+test("Trackblazer opening: Wit before the debut, and the debut costs energy", () => {
+  const tb = sc("trackblazer");
+  const r = E.recommend(base({ turn: 12, goalRace: true, energy: 40 }), tb);
+  assert.strictEqual(r.action.kind, "race");
+  assert.strictEqual(r.after.energy, 25);
+  const ev = E.evaluate(base({ turn: 3, facilities: facs({ speed: { gain: 12, fail: 0 }, wit: { gain: 12, fail: 0 } }) }), tb).options;
+  assert.ok(ev.find((o) => o.stat === "wit").parts.opening > 0);
+  assert.ok(!ev.find((o) => o.stat === "speed").parts.opening);
+  // Other scenarios' goal races stay free.
+  assert.strictEqual(E.recommend(base({ turn: 12, goalRace: true, energy: 40 }), sc("unity")).after.energy, 40);
+});
+
+test("New Year: the turn plan says energy can be spent before it", () => {
+  const ev = E.eventsFor(24, sc("ura"), base({ turn: 24 }));
+  assert.ok(ev.some((e) => /New Year/.test(e.label) && /\+20 energy/.test(e.tip)));
+  assert.ok(E.eventsFor(48, sc("ura"), base({ turn: 48 })).some((e) => /\+30 energy/.test(e.tip)));
+});

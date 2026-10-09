@@ -45,6 +45,7 @@
     g2: { label: "G2", sp: 35, stats: 8 },
     g1: { label: "G1", sp: 45, stats: 10 }
   };
+  // Optional races cost energy; goal races (career objectives, finale races) don't.
   const RACE_ENERGY = 15;
   const REST_OUTCOMES = [[30, 0.2], [50, 0.5], [70, 0.3]];
   // Spread of future turn quality used by the energy lookahead (weak / normal / strong).
@@ -74,7 +75,7 @@
   function phaseFor(turn, scenario) {
     const finaleStart = scenario && scenario.totalTurns < 78 ? scenario.totalTurns : 73;
     if (turn >= finaleStart) return { id: "finale", name: "Finale", tip: "Every turn counts. Energy has little value left, so take the strongest training and spend skill points before the last race." };
-    if (turn <= 11) return { id: "predebut", name: "Pre-debut", tip: "Build bonds. Train where the most un-bonded cards gather, and use Wit to save energy." };
+    if (turn <= 11) return { id: "predebut", name: "Pre-debut", tip: "Build bonds. Max your Wit and Speed focus cards first, then train where the most un-bonded cards gather, and use Wit to save energy." };
     if (turn <= 24) return { id: "junior", name: "Junior", tip: "Keep building bonds until most cards reach orange (80+). Take friendship trainings as they appear." };
     if (turn <= 36) return { id: "classic1", name: "Classic spring", tip: "Friendship trainings in your main stats come first. Arrive at summer camp with high energy and Good or Great mood." };
     if (turn <= 40) return { id: "camp1", name: "Classic summer camp", tip: "Facilities are at max level. Take every strong training, and rest (which also lifts mood) only when failure gets risky." };
@@ -369,6 +370,8 @@
     if (camps.indexOf(turn + 1) !== -1 && camps.indexOf(turn) === -1) out.push({ turn, label: "Camp next turn", tip: "Energy carried into camp is worth more than usual." });
     if (camps.indexOf(turn) !== -1 && camps.indexOf(turn - 1) === -1) out.push({ turn, label: "Summer camp starts", tip: "Four turns at max facility level." });
     evs.forEach((e) => { if (e.turn === turn) out.push(e); });
+    const ny = NEW_YEAR[turn + 1];
+    if (ny && turn + 1 <= scenario.totalTurns) out.push({ turn, label: "New Year next turn", tip: "The New Year event at the start of next turn offers +" + ny.e + " energy (or stats or " + ny.sp + " skill points), so spending energy now costs little: take the energy if you're low, the stats if you're not." });
     if (scenario.finale && scenario.finale.forced && scenario.finale.turns.indexOf(turn) !== -1) out.push({ turn, label: scenario.finale.name, tip: scenario.finale.note });
     tg.forEach((g) => out.push({ turn, label: g.label, tip: g.tip }));
     if (state && (state.goals || []).indexOf(turn) !== -1 && !tg.some((g) => g.forced)) out.push({ turn, label: "Goal race", tip: "You marked this turn as a goal race." });
@@ -443,17 +446,77 @@
     return 0.01;
   }
 
-  function makeCtx(state, sc) {
-    const build = BUILDS[state.build] || BUILDS.medium;
+  // Blue sparks raise stat caps at the start of a run (GameTora, Game8): +4 for a 1-star
+  // spark, +9 for 2 stars, +16 for 3 stars. Typed per stat as the stars of each spark ("3 3 2").
+  const SPARK_UNCAP = [0, 4, 9, 16];
+  function sparkUncap(text) {
+    return String(text || "").split(/[^0-9]+/).filter(Boolean)
+      .reduce((a, x) => a + (+x >= 1 && +x <= 3 ? SPARK_UNCAP[+x] : 0), 0);
+  }
+
+  // The caps the coach uses: your typed cap, else the scenario's base cap plus spark uncaps.
+  function capsFor(state, sc) {
     const caps = {};
     const userCaps = state.caps || {};
-    STATS.forEach((s, i) => { caps[s] = userCaps[s] > 0 ? userCaps[s] : (sc.caps ? sc.caps[i] : 1200); });
+    const sparks = state.sparks || {};
+    STATS.forEach((s, i) => {
+      caps[s] = userCaps[s] > 0 ? userCaps[s] : (sc.caps ? sc.caps[i] : 1200) + sparkUncap(sparks[s]);
+    });
+    return caps;
+  }
+
+  // How far behind its target each stat is, relative to the others (1 = average). A stat
+  // well short of its target counts for more, so the coach balances toward every target
+  // instead of always taking the heaviest-weighted stat. Same idea as the optimizer's need.
+  const NEED = 1.5;
+  function needFactors(stats, target, w) {
+    const raw = {};
+    const known = STATS.filter((s) => +stats[s] > 0 && target[s] > 0);
+    if (known.length < 3) return null;
+    known.forEach((s) => { raw[s] = 1 + NEED * Math.max(0, 1 - stats[s] / target[s]); });
+    const avgKnown = known.reduce((a, s) => a + raw[s], 0) / known.length;
+    STATS.forEach((s) => { if (raw[s] == null) raw[s] = avgKnown; });
+    const sumW = STATS.reduce((a, s) => a + w[s], 0);
+    const norm = STATS.reduce((a, s) => a + w[s] * raw[s], 0) / sumW;
+    const out = {};
+    STATS.forEach((s) => { out[s] = raw[s] / norm; });
+    return out;
+  }
+
+  // Since the July 2026 update, a stat past 1200 gains only half from training (Game8).
+  function trainedGain(stat, g, stats) {
+    const cur = +(stats || {})[stat];
+    if (!(cur > 0) || !(g > 0)) return g;
+    if (cur >= 1200) return g / 2;
+    return cur + g <= 1200 ? g : (1200 - cur) + (cur + g - 1200) / 2;
+  }
+
+  // How a training's total gain splits across stats: the scenario's base values when known,
+  // else the generic split.
+  function splitFor(stat, sc) {
+    const row = sc && sc.train && sc.train[stat];
+    if (row) {
+      const tot = row.slice(0, 5).reduce((a, b) => a + Math.max(0, b), 0);
+      if (tot > 0) {
+        const out = {};
+        STATS.forEach((st, i) => { if (row[i] > 0) out[st] = row[i] / tot; });
+        return out;
+      }
+    }
+    return FACILITY[stat].split;
+  }
+
+  function makeCtx(state, sc) {
+    const build = BUILDS[state.build] || BUILDS.medium;
+    const caps = capsFor(state, sc);
     const calib = calibFactor(state);
+    const target = Object.assign({}, build.target, state.targets || {});
     const ctx = {
       state, sc, calib, caps,
       w: build.w,
       // Your own targets (the Stats table) override the build's.
-      target: Object.assign({}, build.target, state.targets || {}),
+      target,
+      need: needFactors(state.stats || {}, target, build.w),
       stats: state.stats || {},
       E: clamp(Math.round(state.energy), 0, state.maxEnergy || 100),
       maxE: state.maxEnergy || 100,
@@ -462,6 +525,7 @@
       typ: typAt(state.turn, sc, calib)
     };
     ctx.deck = deckInfo(state);
+    ctx.focus = focusCards(ctx.deck);
     ctx.songs = songBonuses(state, sc);
     ctx.boost = sc.train ? scenarioBoost(state, sc) : 1;
     ctx.V = continuation(state, sc, calib);
@@ -477,7 +541,7 @@
 
   function pointValue(stat, x, ctx) {
     if (x >= ctx.caps[stat]) return 0;
-    let k = ctx.w[stat];
+    let k = ctx.w[stat] * (ctx.need ? ctx.need[stat] : 1);
     if (x >= 1200) k *= 0.5;
     if (x >= ctx.target[stat]) k *= 0.4;
     return k;
@@ -511,6 +575,11 @@
     return (0.1 / MOOD_MULT[from]) * sum * 0.6 + raceBoost;
   }
 
+  // Start-of-turn New Year events, common to every scenario: Classic Early January's New Year's
+  // Resolutions (Energy +20, Stat +10 or 20 SP) and Senior Early January's Shrine Visit (Energy
+  // +30, all stats +5 or 35 SP), then a raffle.
+  const NEW_YEAR = { 25: { e: 20, stats: 10, sp: 20 }, 49: { e: 30, stats: 25, sp: 35 } };
+
   // Lookahead: V[e] = expected value of the turns after this one, starting with energy e.
   function continuation(state, sc, calib) {
     const maxE = state.maxEnergy || 100;
@@ -518,6 +587,8 @@
     const clampE = (e) => (e < 0 ? 0 : e > maxE ? maxE : Math.round(e));
     const avgCost = ["speed", "stamina", "power", "guts"].reduce((a, st) => a + baseCost(st, sc), 0) / 4;
     const witBase = baseCost("wit", sc);
+    const bw = (BUILDS[state.build] || BUILDS.medium).w;
+    const avgW = STATS.reduce((a, st) => a + bw[st], 0) / STATS.length;
     let next = new Float64Array(maxE + 1);
     for (let t = sc.totalTurns; t > state.turn; t--) {
       const cur = new Float64Array(maxE + 1);
@@ -528,7 +599,7 @@
       const cost = avgCost + 1.5 * (lv - 1);
       const witDelta = witBase < 0 ? -witBase : -(witBase + 1.5 * (lv - 1));
       for (let e = 0; e <= maxE; e++) {
-        if (forced.has(t)) { cur[e] = next[clampE(e - 10 + regen)]; continue; }
+        if (forced.has(t)) { cur[e] = next[clampE(e - (sc.goalRaceEnergy || 0) + regen)]; continue; }
         const rest = next[clampE(e + restGain + regen)];
         const fw = estimateFail("wit", e) / 100;
         const wit = 0.4 * typ - fw * 0.9 * typ + next[clampE(e + witDelta + regen)];
@@ -541,6 +612,14 @@
           v += DRAWS[i][1] * Math.max(train, wit, rest);
         }
         cur[e] = v;
+      }
+      // New Year (Classic and Senior Early January): the event at the start of the turn offers
+      // energy (+20, then +30) or stats/skill points, so arriving low on energy costs little.
+      const ny = NEW_YEAR[t];
+      if (ny && t <= sc.totalTurns) {
+        const w = cur.slice();
+        const alt = Math.max(ny.stats * avgW, ny.sp * SP_VALUE);
+        for (let e = 0; e <= maxE; e++) cur[e] = Math.max(w[clampE(e + ny.e)], w[e] + alt);
       }
       next = cur;
     }
@@ -792,7 +871,7 @@
     });
     if (!add) return null;
     // Tokens come with most trainings anyway, so they tip close calls rather than decide.
-    return { add: Math.min(add, 0.4 * ctx.typ), note: bits.join(", ") + " toward " + wanted.map((w) => w.song.name).join(" / ") };
+    return { add: Math.min(add, 0.12 * ctx.typ), note: bits.join(", ") + " toward " + wanted.map((w) => w.song.name).join(" / ") };
   }
 
   // ---- Support card events (Umamusume Wiki) ----
@@ -1021,6 +1100,122 @@
     return r;
   }
 
+  // ---- Opening focus ----
+  // From the start, pick one Wit card and one Speed card (each the one with the highest
+  // specialty priority, so it shows up on its own training most) and max their bonds first.
+  // Once both are maxed, the usual rule (train where the most cards still building bond are)
+  // takes over.
+  // Full weight through Junior year, fading out by Classic summer.
+  const FOCUS_K = 2.0;
+  function focusWeight(turn) {
+    return turn <= 24 ? FOCUS_K : turn >= 36 ? 0 : FOCUS_K * (36 - turn) / 12;
+  }
+  function focusCards(deck) {
+    if (!deck || !Deck) return [];
+    const out = [];
+    ["wit", "speed"].forEach((ty) => {
+      const best = deck.used.filter((s) => s.card.ty === ty).map((s) => {
+        const fx = Deck.baseEffects(s.card, s.level);
+        return { s, spec: fx[19] || 0, fb: fx[1] || 0 };
+      }).sort((a, b) => b.spec - a.spec || b.fb - a.fb || b.s.level - a.s.level)[0];
+      if (best) out.push({ idx: best.s.idx, card: best.s.card, bond: best.s.bond, type: ty, spec: best.spec });
+    });
+    return out;
+  }
+
+  // The game counts down the turns to your debut (turn 12): 12 on turn 1, 9 on turn 4.
+  function turnsToDebut(turn) {
+    return turn <= 12 ? 13 - turn : 0;
+  }
+
+  // ---- Scenario openings (sc.opening in scenarios.js) ----
+  //   early:      { to, wit, bond, note }  through turn `to`, favour Wit (wit x typ) and each card
+  //               still building bond (bond x typ)
+  //   rest:       { turn, below, note }    rest on this turn unless energy is at least `below`
+  //   chase:      { name, from, to, firstMood, note }  a scenario card that joins later: from
+  //               `from` to `to` her training comes first wherever she is (within your failure
+  //               limit); with firstMood only her first training, and only below Great mood
+  //               (it gives +1 mood)
+  //   recreation: { from, to, note }  early Recreation for mood, by uma.guide's turn points (each
+  //               card building bond, Wit, a hint, a white flame 1; a Spirit Burst 2): Recreation
+  //               wins when no training scores above 1 on a full bar or at Good mood, or above 3
+  //               at Normal mood once you've trained (its 10-30 energy isn't wasted then)
+  function chaseSlot(ctx, name) {
+    if (!ctx.deck) return null;
+    return ctx.deck.used.find((s) => s.card.n === name) || null;
+  }
+  function onTraining(ctx, o, idx) {
+    const fac = ctx.state.facilities.find((x) => x.stat === o.stat);
+    return !!(fac && Array.isArray(fac.members) && fac.members.indexOf(idx) !== -1);
+  }
+  function applyOpening(ctx, options) {
+    const op = ctx.sc.opening;
+    const t = ctx.state.turn;
+    if (!op || options.some((o) => o.forced)) return;
+    const typ = ctx.typ;
+    const trains = options.filter((o) => o.kind === "train");
+    const bump = (o, add) => { o.parts.opening = (o.parts.opening || 0) + add; o.value = sumParts(o.parts); };
+    if (op.early && t <= op.early.to) {
+      trains.forEach((o) => {
+        const fac = ctx.state.facilities.find((x) => x.stat === o.stat) || {};
+        const unbonded = Array.isArray(fac.members) && fac.members.length && ctx.deck
+          ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
+        const add = ((o.stat === "wit" ? op.early.wit || 0 : 0) + (op.early.bond || 0) * unbonded) * typ;
+        if (add) bump(o, add);
+      });
+    }
+    if (op.recreation && t >= op.recreation.from && t <= op.recreation.to && ctx.state.mood < 4) {
+      const rec = options.find((o) => o.kind === "recreation");
+      const points = (o) => {
+        const fac = ctx.state.facilities.find((x) => x.stat === o.stat) || {};
+        const x = fac.extras || {};
+        const deckMode = Array.isArray(fac.members) && fac.members.length && ctx.deck;
+        const bonding = deckMode ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
+        const hints = deckMode ? (fac.hints || []).length : fac.hint ? 1 : 0;
+        // Your Wit/Speed focus cards come first, so a training with one always counts as strong.
+        const focus = deckMode ? ctx.focus.filter((fc) => fc.bond < 100 && fac.members.indexOf(fc.idx) !== -1).length : 0;
+        return bonding + hints + (o.stat === "wit" ? 1 : 0) + (x.flames > 0 ? 1 : 0) + 2 * (x.burst || 0) + 3 * focus;
+      };
+      const best = Math.max.apply(null, trains.map(points).concat([0]));
+      const full = ctx.E >= ctx.maxE - 5;
+      const limit = full || ctx.state.mood >= 3 ? 1 : 3;
+      if (rec && best <= limit) {
+        const top = Math.max.apply(null, options.filter((o) => o !== rec).map((o) => o.value));
+        if (rec.value <= top) bump(rec, top - rec.value + 0.1 * typ);
+        rec.notes.unshift((op.recreation.note || "opening: Recreation for mood") + " (no training scores above " + limit + " here)");
+      }
+    }
+    const ch = op.chase;
+    const slot = ch ? chaseSlot(ctx, ch.name) : null;
+    if (slot && t >= ch.from && t <= ch.to) {
+      const hers = trains.filter((o) => onTraining(ctx, o, slot.idx)).sort((a, b) => b.value - a.value)[0];
+      const first = slot.bond <= Deck.initialBond(slot.card, slot.level);
+      if (hers && ch.firstMood && !(first && ctx.state.mood < 4)) {
+        // Only her first training counts, and only below Great mood.
+      } else if (hers) {
+        if (hers.fail <= ctx.state.risk) {
+          const top = Math.max.apply(null, options.filter((o) => o !== hers).map((o) => o.value));
+          if (hers.value <= top) bump(hers, top - hers.value + 0.1 * typ);
+          hers.notes.unshift(ch.name + " is here: " + (ch.note || (ch.firstMood ? "your first training with her gives +1 mood, so take it while you're below Great" : "her training comes first, whichever training she's on")));
+        } else {
+          hers.notes.unshift(ch.name + " is here, but failure (" + hers.fail + "%) is above your limit");
+        }
+      }
+    }
+    if (op.rest && t === op.rest.turn) {
+      const rest = options.find((o) => o.kind === "rest");
+      if (rest && ctx.E < op.rest.below) {
+        const top = Math.max.apply(null, options.filter((o) => o !== rest).map((o) => o.value));
+        if (rest.value <= top + 0.5 * typ) bump(rest, top + 0.5 * typ - rest.value);
+        rest.notes.unshift((t <= 12 ? turnsToDebut(t) + " turns to your debut: rest. " : "Rest. ") + (op.rest.note || "") + " (rest is the pick below " + op.rest.below + " energy)");
+      } else if (rest) {
+        rest.notes.push("energy is " + ctx.E + ", high enough to skip the opening rest");
+      }
+    }
+    options.sort((a, b) => b.value - a.value);
+    if (op.early && t <= op.early.to && op.early.note && options[0]) options[0].notes.push(op.early.note);
+  }
+
   function sumParts(p) {
     return Object.keys(p).reduce((a, k) => a + p[k], 0);
   }
@@ -1034,11 +1229,14 @@
     const statGains = {};
     let gain, cards, rainbows, unbonded, spPts, energyDelta, fail;
     if (dg) {
-      // Card formula. A typed total gain rescales the formula's split across stats.
-      const scale = !est && dg.total > 0 ? +f.gain / dg.total : 1;
-      STATS.forEach((st, i) => { if (dg.gains[i] > 0) statGains[st] = dg.gains[i] * scale; });
-      gain = est ? dg.total : +f.gain;
-      if (!est && !(dg.total > 0)) Object.keys(FACILITY[f.stat].split).forEach((st) => { statGains[st] = gain * FACILITY[f.stat].split[st]; });
+      // Card formula, halved past 1200. A typed total gain (what the game shows) rescales the
+      // formula's split across stats.
+      const adj = dg.gains.map((g, i) => trainedGain(STATS[i], g, ctx.stats));
+      const adjTotal = adj.reduce((a, b) => a + b, 0);
+      const scale = !est && adjTotal > 0 ? +f.gain / adjTotal : 1;
+      STATS.forEach((st, i) => { if (adj[i] > 0) statGains[st] = adj[i] * scale; });
+      gain = est ? adjTotal : +f.gain;
+      if (!est && !(adjTotal > 0)) { const sp = splitFor(f.stat, sc); Object.keys(sp).forEach((st) => { statGains[st] = gain * sp[st]; }); }
       cards = dg.cards;
       rainbows = dg.rainbows;
       unbonded = dg.unbonded;
@@ -1048,10 +1246,16 @@
     } else {
       cards = f.cards || 0;
       rainbows = Math.min(f.rainbows || 0, cards);
-      gain = est ? estimateGain(f, state, sc, ctx.calib) * (rainbows && ctx.songs.fb ? 1 + ctx.songs.fb / 100 : 1) + (ctx.songs.extra[f.stat] || 0) : +f.gain;
-      Object.keys(FACILITY[f.stat].split).forEach((st) => { statGains[st] = gain * FACILITY[f.stat].split[st]; });
+      const rawGain = estimateGain(f, state, sc, ctx.calib) * (rainbows && ctx.songs.fb ? 1 + ctx.songs.fb / 100 : 1) + (ctx.songs.extra[f.stat] || 0);
+      // Split by the scenario's base values and halve past 1200; a typed gain (what the game
+      // shows) keeps that split.
+      const sp = splitFor(f.stat, sc);
+      Object.keys(sp).forEach((st) => { statGains[st] = trainedGain(st, rawGain * sp[st], ctx.stats); });
+      const adjTotal = Object.keys(statGains).reduce((a, st) => a + statGains[st], 0);
+      gain = est ? adjTotal : +f.gain;
+      if (!est && adjTotal > 0) Object.keys(statGains).forEach((st) => { statGains[st] *= gain / adjTotal; });
       unbonded = Math.min(f.unbonded || 0, cards - rainbows);
-      spPts = gain * SP_RATE[f.stat];
+      spPts = (est ? rawGain : gain) * SP_RATE[f.stat];
       const ec = energyCost(f.stat, state.turn, sc, facLevelFor(state, sc, f.stat));
       energyDelta = ec < 0 ? -ec + 2 * rainbows : -ec;
       fail = failBlank ? estimateFail(f.stat, ctx.E) : clamp(+f.fail, 0, 100);
@@ -1094,6 +1298,14 @@
     }
     const aki = akikawaValue(f, ctx);
     if (aki) { o.parts.bond += aki.add; o.notes.push(aki.note); }
+    if (dg && ctx.focus.length && focusWeight(state.turn) > 0) {
+      const here = ctx.focus.filter((fc) => fc.bond < 100 && f.members.indexOf(fc.idx) !== -1);
+      if (here.length) {
+        o.parts.bond += here.length * focusWeight(state.turn) * typ;
+        o.focus = here.length;
+        o.notes.push("focus card" + (here.length > 1 ? "s" : "") + " here: " + here.map((fc) => fc.card.n + " (bond " + Math.round(fc.bond) + ")").join(", ") + ". Max your Wit and Speed focus cards' bonds first");
+      }
+    }
     o.raw = o.parts.stats + o.parts.sp + o.parts.bond + o.parts.hint + o.parts.scenario;
     scoreRisk(o, ctx);
     return o;
@@ -1161,8 +1373,8 @@
       options.push({
         kind: "race", forced: true,
         label: finale ? "Race: " + sc.finale.name : "Run your goal race",
-        energyDelta: -RACE_ENERGY, moodDelta: 0, prefix: [], consume: {},
-        notes: [finale ? "Finale race turn." : "This turn holds a goal race. Missing it ends the career."],
+        energyDelta: sc.goalRaceEnergy ? -sc.goalRaceEnergy : 0, moodDelta: 0, prefix: [], consume: {},
+        notes: [finale ? "Finale race turn." : "This turn holds a goal race. Missing it ends the career.", sc.goalRaceEnergy ? "in this scenario goal races cost energy too (about " + sc.goalRaceEnergy + ")" : "goal races don't cost energy"],
         parts: { goal: 1e5 }, value: 1e5
       });
       const gr = goalRaceAt(state, sc, state.turn);
@@ -1224,7 +1436,7 @@
         };
         const o = {
           kind: "race", label: named ? "Race: " + named.n + " (" + GRADE_LABEL[named.g] + ")" : "Race (" + r.label + ")", energyDelta: -RACE_ENERGY, moodDelta: 0, prefix: [], consume: {},
-          notes: ["about " + Math.round(r.sp * rb) + " skill points if you win"], parts: p,
+          notes: ["about " + Math.round(r.sp * rb) + " skill points if you win", "an optional race costs about " + RACE_ENERGY + " energy"], parts: p,
           fans: named ? expectedFans(state, named) : Math.round(TYPICAL_FANS[raceKey] * 0.8 * (1 + fanBonus(state) / 100))
         };
         if (sc.gradePoints) { o.gp = named ? gpOf(named) : GP_BY_KEY[raceKey] || 20; o.raceName = named ? named.n : ""; }
@@ -1250,12 +1462,13 @@
       hook.items(ctx, options);
       options.sort((a, b) => b.value - a.value);
     }
+    applyOpening(ctx, options);
     return { options, ctx };
   }
 
   const PART_LABELS = {
     stats: "stat gains", sp: "skill points", bond: "bond building", hint: "skill hint", scenario: "scenario bonus",
-    energy: "energy", mood: "mood", risk: "failure risk", condition: "curing the condition", fans: "fans", item: "item or buff", goal: "goal race"
+    energy: "energy", mood: "mood", risk: "failure risk", condition: "curing the condition", fans: "fans", item: "item or buff", goal: "goal race", opening: "the scenario's opening plan"
   };
 
   function recommend(state, scenario) {
@@ -1613,29 +1826,7 @@
         tokenGain(f, s, sc).forEach((g) => { s.gl.tokens[g.type] = Math.min(cap, (s.gl.tokens[g.type] || 0) + Math.max(0, g.amount)); });
       },
       items(ctx, options) {
-        const t = ctx.state.turn;
-        // Opening, turns 1-4: build bonds, Wit and rest, and go into turn 5 (when lessons open)
-        // with as much energy as possible. A common opening is Train x3, then Rest.
-        if (t <= 4) {
-          options.forEach((o) => {
-            if (o.kind === "train") {
-              const fac = ctx.state.facilities.find((x) => x.stat === o.stat) || {};
-              const unbonded = Array.isArray(fac.members) && ctx.deck ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
-              o.value += (o.stat === "wit" ? 0.15 : 0) * ctx.typ + 0.08 * unbonded * ctx.typ;
-            }
-          });
-          // Turn 4: go into turn 5 as full as possible (Train x3, then Rest).
-          const rest = options.find((o) => o.kind === "rest");
-          if (rest && t === 4 && ctx.E < 85) {
-            const top = Math.max.apply(null, options.filter((o) => o !== rest).map((o) => o.value));
-            if (ctx.E <= 65) rest.value = Math.max(rest.value, top + 0.1 * ctx.typ);
-            else rest.value += 2 * ctx.typ * (0.85 - ctx.E / 100);
-            rest.notes.push("go into turn 5 with as much energy as you can: lessons open and the run starts in earnest");
-          }
-          options.sort((a, b) => b.value - a.value);
-          options[0].notes.push("opening: raise bonds, take Wit, rest, and keep energy high going into turn 5 (common: Train x3, then Rest)");
-          return;
-        }
+        if (ctx.state.turn < 5) return;
         const best = options[0];
         if (!best) return;
         const adv = songAdvice(ctx.state, ctx.sc);
@@ -1960,6 +2151,7 @@
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
+    capsFor, sparkUncap, trainedGain, needFactors, focusCards, turnsToDebut, applyOpening, NEW_YEAR,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

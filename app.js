@@ -29,6 +29,7 @@
       calib: k.calib || [],
       fcal: k.fcal || [],
       caps: k.caps || {},
+      sparks: k.sparks || {},
       deck: k.deck ? resetBonds(k.deck) : blankDeck(),
       gl: blankGl(),
       facLevels: {},
@@ -348,6 +349,15 @@
 
     $("#statTable").addEventListener("input", (e) => {
       const s = e.target.dataset.stat; if (!s) return;
+      if (e.target.dataset.kind === "sparks") {
+        state.sparks = state.sparks || {};
+        const txt = e.target.value.replace(/[^1-3 ,]/g, "").trim();
+        if (txt) state.sparks[s] = txt; else delete state.sparks[s];
+        const capIn = $('#statTable input[data-kind="cap"][data-stat="' + s + '"]');
+        if (capIn) capIn.placeholder = E.capsFor(Object.assign({}, state, { caps: {} }), scenario())[s];
+        commit();
+        return;
+      }
       const v = numOrNull(e.target.value);
       if (e.target.dataset.kind === "cap") { if (v) state.caps[s] = v; else delete state.caps[s]; }
       else if (e.target.dataset.kind === "target") { state.targets = state.targets || {}; if (v) state.targets[s] = v; else delete state.targets[s]; }
@@ -697,7 +707,7 @@
     $("#strip").innerHTML = html;
     const ti = E.turnInfo(state.turn, sc);
     $("#turnNum").textContent = "Turn " + state.turn + " / " + sc.totalTurns;
-    $("#turnText").innerHTML = esc(ti.text) + (E.isCamp(state.turn, sc) ? ' <span class="chip camp">summer camp</span>' : "");
+    $("#turnText").innerHTML = esc(ti.text) + (E.isCamp(state.turn, sc) ? ' <span class="chip camp">summer camp</span>' : "") + (state.turn < 12 ? ' <span class="chip">' + E.turnsToDebut(state.turn) + " turns to debut</span>" : "");
     const isGoal = E.isGoalTurn(state, sc, state.turn);
     const forcedFinale = sc.finale.forced && sc.finale.turns.indexOf(state.turn) !== -1;
     const g = $("#goalToggle");
@@ -930,6 +940,7 @@
     } else {
       $("#traineeInfo").innerHTML = `<span class="mini">Pick your trainee to apply her growth bonuses and get a build suggestion.</span>`;
     }
+    const focus = new Map(E.focusCards(E.deckInfo(state)).map((fc) => [fc.idx, fc]));
     $("#slots").innerHTML = dk.slots.map((sl, i) => {
       const c = sl && D.card(sl.id);
       if (!c) return `<div class="slot empty"><input class="slot-name" data-slot-name="${i}" list="cardList" placeholder="Card ${i + 1}: type a name" autocomplete="off" aria-label="Support card ${i + 1}"></div>`;
@@ -940,6 +951,7 @@
           <span class="tydot" aria-hidden="true"></span>
           <input class="slot-name" data-slot-name="${i}" list="cardList" value="${esc(D.label(c))}" autocomplete="off" aria-label="Support card ${i + 1}">
           <select data-slot-lb="${i}" aria-label="Limit break">${[0, 1, 2, 3, 4].map((lb) => `<option value="${lb}" ${lb === sl.lb ? "selected" : ""}>LB${lb} · Lv${D.levelFor(c, lb)}</option>`).join("")}</select>
+          ${focus.has(i) ? `<span class="chip focus" title="Opening focus: your ${focus.get(i).type === "wit" ? "Wit" : "Speed"} card with the highest specialty priority (${focus.get(i).spec}). The coach maxes its bond first.">${bond >= 100 ? "Focus ✓" : "Focus"}</span>` : ""}
           <label class="bond${bond >= 80 ? " full" : ""}"><span>Bond</span><input type="number" inputmode="numeric" data-slot-bond="${i}" min="0" max="100" value="${Math.round(bond)}"></label>
           <button type="button" class="btn ghost small square" data-slot-clear="${i}" aria-label="Remove card">✕</button>
         </div>
@@ -1232,10 +1244,13 @@
 
     const build = E.BUILDS[state.build];
     const tg = state.targets || {};
-    $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th>Cap</th><th title="Your target for this stat. The coach values a stat less once it's past this.">Target</th></tr></thead><tbody>${E.STATS.map((s, i) => `
+    const sparks = state.sparks || {};
+    const capNow = E.capsFor(Object.assign({}, state, { caps: {} }), sc);
+    $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th title="Stars of each blue spark for this stat from your parents and their parents, like 3 3 2. Each raises the cap: 1 star +4, 2 stars +9, 3 stars +16.">Sparks ★</th><th title="Scenario base cap plus your spark uncaps. Type the cap your game shows to override it.">Cap</th><th title="Your target for this stat. The coach values a stat less once it's past this.">Target</th></tr></thead><tbody>${E.STATS.map((s, i) => `
       <tr class="s-${s}"><th scope="row">${E.STAT_LABELS[s]}</th>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cur" min="0" max="2500" value="${state.stats[s] || ""}" placeholder="—" aria-label="Current ${E.STAT_LABELS[s]}"></td>
-        <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cap" min="0" max="2500" value="${state.caps[s] || ""}" placeholder="${sc.caps[i]}" aria-label="${E.STAT_LABELS[s]} cap"></td>
+        <td><input type="text" inputmode="numeric" class="sparks" data-stat="${s}" data-kind="sparks" value="${esc(sparks[s] || "")}" placeholder="e.g. 3 2" aria-label="${E.STAT_LABELS[s]} blue spark stars"></td>
+        <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cap" min="0" max="2500" value="${state.caps[s] || ""}" placeholder="${capNow[s]}" title="Base ${sc.caps[i]}${capNow[s] > sc.caps[i] ? " + " + (capNow[s] - sc.caps[i]) + " from sparks" : ""}" aria-label="${E.STAT_LABELS[s]} cap"></td>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="target" min="0" max="2500" value="${tg[s] || ""}" placeholder="${build.target[s]}" aria-label="${E.STAT_LABELS[s]} target"></td></tr>`).join("")}</tbody>`;
   }
 
@@ -1303,7 +1318,7 @@
     $("#dock").className = "dock k-" + kind + (a.stat ? " s-" + a.stat : "");
   }
 
-  const PART_NAMES = { stats: "Stats", sp: "Skill points", bond: "Bonds", hint: "Hint", scenario: "Scenario", energy: "Energy", mood: "Mood", risk: "Failure risk", condition: "Condition", fans: "Fans", item: "Item / buff", goal: "Goal race" };
+  const PART_NAMES = { stats: "Stats", sp: "Skill points", bond: "Bonds", hint: "Hint", scenario: "Scenario", energy: "Energy", mood: "Mood", risk: "Failure risk", condition: "Condition", fans: "Fans", item: "Item / buff", goal: "Goal race", opening: "Opening plan" };
 
   function renderOptions() {
     const top = Math.max(1, ...rec.ranked.filter((o) => o.value < 1e4).map((o) => o.value));
