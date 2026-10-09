@@ -11,8 +11,8 @@ Open `index.html` in a browser. It needs no build step or server, and it saves y
 3. Optional but recommended: type each training's **Gain** (the green numbers added up) and **Fail %**. Left blank, both are estimated from card counts and energy, and the estimate shows in the box.
 4. The coach names the action and any item or buff to use first. It explains why, says what it beat and by how much, and predicts your energy and mood afterwards. Tap any row in **All options** to see its breakdown.
 5. Press **Done, next turn**. The turn is logged, energy and mood carry forward, and the training inputs reset. If you did something else, press **I did this** on that option. **Undo last** steps back.
-6. Under **Stats**, type your current stats and, if you like, your own **Target** for each (left blank, the build's targets apply). Past a target the coach values that stat less, so it steers you toward reaching every target.
-7. Mark goal races with **☆ Mark goal race** on their turns. The coach then runs them and plans energy around them. Finale races are marked for you where they are fixed.
+6. Under **Stats**, type your current stats and, if you like, your own **Target** for each (left blank, the build's targets apply). A stat far below its target counts for more and a stat past it counts less, so the coach steers you toward reaching every target. Under **Sparks ★** type the stars of each blue spark your parents give for that stat (like `3 3 2`): each raises the cap (1 star +4, 2 stars +9, 3 stars +16), and the **Cap** box shows the result. Type the cap your game shows to override it.
+7. Mark goal races with **☆ Mark goal race** on their turns. The coach then runs them and plans energy around them. Goal races (career objectives and finale races) cost no energy; optional races cost about 15. Finale races are marked for you where they are fixed.
 
 Shortcuts: ← and → change turns.
 
@@ -78,9 +78,9 @@ Unlike a racing deck, every target skill counts (not just the best 8), and **Sta
 A **Grand Concert songs** panel appears in this scenario:
 - Tokens add up by themselves: each training card shows the token it gives (its usual type, with an estimated amount). Set the type and amount the training shows if they differ (friendship training gives a second type), and **Done** adds them, capped at 200 (+50 after each live). **Undo** takes them back. You can still type your tokens directly, and ticking a song takes its cost off.
 - **Song plan** (a CM ace guide, with 5 songs in year one): year one, buy 5 songs, do 2 more technique lessons so the 6th shows, and carry it over to right after the 1st Promo Live; every half year after, buy the carried song, 1 lesson, a song, 2 lessons, a song, 2 lessons, carry over (3 songs a half year); before the Grand Live, buy that 4th song too for 18 songs. Count your technique lessons with **+ technique lesson** and the panel says what's next ("Do 2 technique lessons, then buy song 3 of 5", "Hold the next song for after the live"). The coach only suggests buying a song when the plan says so, favours the two skill point songs in year two and the two +10% friendship songs in year three, and skips the +Stamina and +Guts songs in year one.
-- **Opening and resets**: turns 1-4 favour bonds, Wit and a rest so you go into turn 5 with high energy (common: Train x3, then Rest); turns 5-11 favour trainings with Light Hello and the cards closest to friendship. Reset checks sit on the debut (a rainbowing card or Light Hello's +20 event) and the end of year one (5 songs and the 6th held). Resets are normal here for CM aces (around 85%).
+- **Opening and resets**: turns 1-3 favour bonds and Wit; on turn 4 (the game shows 9 turns to your debut) Rest is the pick unless energy is 85 or more, so you go into turn 5 full. From turn 5 to the debut, Light Hello's training comes first, whichever training she's on (as long as its failure is within your limit); after her, the cards closest to friendship. Reset checks sit on the debut (a rainbowing card or Light Hello's +20 event) and the end of year one (5 songs and the 6th held). Resets are normal here for CM aces (around 85%).
 - It tracks Hype progress (3 songs since the last live guarantee a Great Success) and ranks the songs you can learn next by value per token.
-- Trainings count the tokens they give toward the songs you still need (only what those songs lack, and under the token cap), so between two close trainings the coach takes the one that gets your next song sooner.
+- Trainings count the tokens they give toward the songs you still need (only what those songs lack, and under the token cap), so between two close trainings the coach takes the one that gets your next song sooner. Tokens are capped at a small bonus, so they never outweigh the stats your build needs.
 - The coach puts "Learn ..." in front of its recommendation when you can afford a good song.
 - Extra Stat Gain songs add their permanent bonus to the gain formula right away. Friendship Bonus songs start counting after the next live.
 - Key turns: lessons unlock on turn 5, Promo Lives on turns 24/36/48/60, the lyrics event in Early November of Senior year (16+ songs), and the Grand Live on turn 72 (18+ songs for the special Girls' Legend U).
@@ -113,8 +113,9 @@ Facility levels are counted from your logged trainings (every 4 raise one level)
 
 Every option is scored in value points: stats, skill points, bond building, hints, scenario bonuses, energy, mood and failure risk. A score of 100 means a typical training for that point in the career.
 
-- **Stats**: each training raises the stats it really raises (for example Speed training gives Speed plus Power). They're weighted by your build. Stats past your build's "enough" point, past 1200 (which counts half in races) or at the scenario cap are worth less or nothing. Enter current stats under **Stats and caps** to switch this on, and they update as you press Done.
-- **Energy**: a lookahead plans the rest of the career, taking into account summer camps, goal races and how failure climbs as energy drops. A rest is recommended only when the energy is worth more later than this turn's training. Energy has no value on the last turn.
+- **Stats**: each training raises the stats it really raises (for example Speed training gives Speed plus Power), split by the scenario's base training values. They're weighted by your build. With current stats entered, a stat far below its target counts for more (the same "need" the deck optimizer uses), and stats past your target, past 1200 or at the cap are worth less or nothing. Since the July 2026 update a stat past 1200 gains only half from training and counts about half in races, so both are applied. Enter current stats under **Stats and caps** to switch this on, and they update as you press Done.
+- **Opening focus** (with your deck set): from turn 1 the coach picks your Wit card and your Speed card with the highest specialty priority (marked **Focus** in your deck) and trains wherever they are until their bonds are maxed. After that it goes back to the training with the most cards still building bond. The focus fades out over Classic spring.
+- **Energy**: a lookahead plans the rest of the career, taking into account summer camps, goal races (which cost no energy) and how failure climbs as energy drops. A rest is recommended only when the energy is worth more later than this turn's training. Energy has no value on the last turn.
 - **Mood**: one mood step is worth about 10% on upcoming trainings, and more just before a goal race.
 - **Deck strength**: after 3 or more turns with real gains entered, the coach learns how strong your deck is compared with a typical one and rescales its estimates.
 - **Scenarios**: each scenario adds its own rules, such as Spirit Bursts and Extreme bursts, Megaphones, Ankle Weights and Charms, Goddess Wisdom colors, SS Matches, Heat-Ups, dishes, Overdrive, legend buffs, Island Training, baths and PR activity, DREAMS training, and tasting sessions.
@@ -139,7 +140,7 @@ Every option is scored in value points: stats, skill points, bond building, hint
 | 14 | Rasshai! Trecen-ken! | 2026-06 (JP latest) | TBA | 2150/1800/1700/1700/1800 |
 | 15 | 朋、史解き ―午式駿大祭― | Announced for late Oct 2026 | TBA | unknown (Trecen-ken's assumed) |
 
-Inheritance can raise caps. Override them under **Stats and caps**.
+Caps are the July 2026 values (GameTora, Game8). Inheritance raises them: at the start of a run each blue spark adds +4 (1 star), +9 (2 stars) or +16 (3 stars) to its stat's cap, and blue and green sparks at the Classic and Senior inheritance events add a little more. Type your sparks under **Stats and caps**, or the cap your game shows.
 
 ## Data
 

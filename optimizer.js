@@ -69,6 +69,13 @@
     return k;
   }
 
+  // Training past 1200 gives half (July 2026 update).
+  function trained(x, g) {
+    if (!(g > 0)) return g;
+    if (x >= 1200) return g / 2;
+    return x + g <= 1200 ? g : (1200 - x) + (x + g - 1200) / 2;
+  }
+
   // Total value of a stat line: pointValue integrated from 0 (in steps of 10 points).
   function statsValue(ctx, x) {
     let v = 0;
@@ -196,7 +203,7 @@
           const members = at[f].map((k) => ({ card: deck[k].card, level: deck[k].level, bond: bond[k] }));
           const g = gain(ctx, fx, ctx.sc.train[STATS[f]], STATS[f], members, L, 4);
           let v = g.sp * SP_VALUE;
-          for (let i = 0; i < 5; i++) v += g.g[i] * pointValue(ctx, STATS[i], x[i]);
+          for (let i = 0; i < 5; i++) v += trained(x[i], g.g[i]) * pointValue(ctx, STATS[i], x[i]);
           const raw = v;
           // Early on, raising bonds pays off later.
           const early = Math.max(0, 1 - turn / 40);
@@ -211,7 +218,7 @@
         count[best]++;
         train[best]++;
         if (rand() < bestFail) { fails++; continue; }
-        for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + bestG.g[i]);
+        for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + trained(x[i], bestG.g[i]));
         sp += bestG.sp;
         rainbowTotal += bestG.rainbows;
         at[best].forEach((k) => {
