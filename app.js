@@ -319,6 +319,7 @@
       let v = +pip.dataset.v;
       if (f[k] === v) v = v - 1; // tapping the last filled dot clears it
       if (k === "extra") f.extra = Math.max(0, v);
+      else if (k === "rbmark") { if (+pip.dataset.v === rainbowCount(f)) v = +pip.dataset.v - 1; setRainbows(f, Math.max(0, v)); renderFacilities(); renderDeck(); commit(); return; }
       else setCount(f, k, Math.max(0, v));
       box.outerHTML = facilityHTML(f, idx);
       commit();
@@ -486,6 +487,13 @@
     $("#call").addEventListener("click", (e) => {
       if (e.target.closest("#doneBtn")) done(rec && rec.action);
       if (e.target.closest("#undoBtn")) undoTurn();
+      if (e.target.closest("#reportCopy")) {
+        const text = turnReport($("#reportWhy").value);
+        const out = $("#reportOut");
+        out.hidden = false;
+        out.value = text;
+        try { navigator.clipboard.writeText(text).then(() => flash("Report copied: paste it to me"), () => { out.select(); flash("Select the report and copy it"); }); } catch (err) { out.select(); flash("Select the report and copy it"); }
+      }
     });
 
     document.querySelector(".tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { state.tab = b.dataset.tab; save(); renderTab(); } });
@@ -781,6 +789,23 @@
   }
 
   // ---- Grand Concert songs panel ----
+  // The run's token plan: what the songs left to buy cost, what you hold, roughly what training
+  // brings in by the Grand Live, and which types you'll run short of (those count most).
+  function tokenPlanHTML(sc) {
+    const p = E.tokenPlan(state, sc);
+    if (!p || !p.songs.length) return "";
+    const row = sc.tokens.map((n, i) => {
+      const gap = p.short[i] - p.supply[i];
+      const cls = gap > 0 ? "short" : p.short[i] > 0.6 * p.supply[i] ? "tight" : "ok";
+      return `<tr class="tp-${cls}"><th>${n}</th><td class="num">${p.need[i]}</td><td class="num">${p.have[i]}</td><td class="num">~${Math.round(p.supply[i])}</td><td>${cls === "short" ? "short by ~" + Math.round(gap) : cls === "tight" ? "tight" : "fine"}</td></tr>`;
+    }).join("");
+    const worst = sc.tokens.map((n, i) => [n, p.short[i] - p.supply[i]]).filter(([, g]) => g > 0).sort((a, b) => b[1] - a[1]).map(([n]) => n);
+    return `<details class="token-plan"><summary><b>Token plan</b>: ${p.songs.length} songs left to buy${worst.length ? ` · short on ${worst.join(", ")}` : " · tokens look fine"}</summary>
+      <div class="table-wrap"><table class="tp"><thead><tr><th>Token</th><th>Songs left cost</th><th>You have</th><th>Training brings</th><th></th></tr></thead><tbody>${row}</tbody></table></div>
+      <p class="mini">Songs left: the best value per token, up to 18 in all, including ones that unlock later (${p.songs.map((x) => esc(x.song.name)).join(", ")}). "Training brings" is a rough estimate to the Grand Live. Trainings that give the token types you're short of count for more, so the coach steers you toward buying them all.</p>
+    </details>`;
+  }
+
   function renderSongs() {
     const sc = scenario();
     const panel = $("#songsPanel");
@@ -811,6 +836,7 @@
         <div>${learnedN >= 18 ? "18+ songs: special Girls' Legend U unlocked." : (18 - learnedN) + " more song(s) by Senior Late Dec for the special Girls' Legend U (16 by Senior Early Nov for the lyrics event)."}</div>
       </div>
       ${songPlanHTML(sc)}
+      ${tokenPlanHTML(sc)}
       ${top.length ? `<div class="song-advice"><b>Best next:</b> ${top.map((a) => `${esc(a.song.name)} ${a.affordable ? '<span class="pill c-clear-pick">affordable</span>' : `<span class="mini">(need ${a.short.map((x, i) => (x ? sc.tokens[i].slice(0, 2) + " " + x : "")).filter(Boolean).join(", ")})</span>`}`).join(" · ")}</div>` : ""}
       ${groups.map(([from, label]) => `<div class="song-group"><h3>${label}</h3>${sc.songs.filter((x) => x.from === from).map((song) => {
         const t = gl.songs[song.id];
@@ -853,8 +879,11 @@
 
   function renderFacilities() {
     $("#facilities").innerHTML = state.facilities.map(facilityHTML).join("");
+    // Bonds come from logged turns; a run picked up partway has estimates that are too low.
+    const stale = deckOn() && state.turn > 12 && (state.log || []).length < state.turn / 2;
     $("#facHelp").innerHTML = deckOn()
-      ? "Tap your cards on each training: once = here, twice = here with a hint <b>!</b>, three times = gone. A gold ring means friendship there. Add <b>Others</b> for characters not in your deck. Gains come from your cards' real effects. Typing the real total gain still wins, and teaches the coach this scenario's extra bonuses."
+      ? (stale ? "<b>Bonds may be off:</b> you've logged fewer turns than you've played, so the coach's bonds are estimates. If the game shows a rainbow the coach doesn't, set <b>Rainbow (as in game)</b> on that training (it fixes the card's bond), or set each card's gauge under <b>Trainee and deck</b>. " : "") +
+        "Tap your cards on each training: once = here, twice = here with a hint <b>!</b>, three times = gone. A gold ring means friendship there; if it doesn't match the game, set <b>Rainbow (as in game)</b>. Add <b>Others</b> for characters not in your deck. Gains come from your cards' real effects. Typing the real total gain still wins, and teaches the coach this scenario's extra bonuses."
       : "Tap the dots to set <b>Cards</b> on the training, <b>Rainbow</b> (friendship) cards and cards with <b>Bond under 80</b>. Leave <b>Gain</b> and <b>Fail</b> blank and the coach estimates them. Typing the real total gain (the green numbers added up) makes the call much sharper. For exact gains, set your deck under <b>Trainee and deck</b>.";
   }
 
@@ -870,8 +899,31 @@
       // Every chip keeps the same size from turn to turn: name (cut short if needed), then the bond.
       return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}${hint ? " hint" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""} · tap again to mark a hint (!)">${hint ? '<b class="bang">!</b>' : ""}<span class="mname">${esc(shortName(c))}</span><small class="${bond >= 80 ? "full" : ""}">${Math.round(bond)}</small></button>`;
     }).join("");
+    const rbNow = rainbowCount(f);
     return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>
-      ${pipsHTML("extra", f.extra || 0, "Others (not in deck)", "c")}`;
+      ${pipsHTML("extra", f.extra || 0, "Others (not in deck)", "c")}
+      ${(f.members || []).length ? pipsHTML("rbmark", rbNow, "Rainbow (as in game)", "r") : ""}`;
+  }
+
+  // Rainbow cards on a training, from the cards' bonds.
+  function rainbowCount(f) {
+    return (f.members || []).filter((si) => { const sl = state.deck.slots[si]; const c = sl && D.card(sl.id); return c && D.isRainbow(c, slotBond(sl), f.stat); }).length;
+  }
+
+  // The game shows how many rainbows a training has; when that differs from the bonds the coach
+  // tracks, fix the bonds (a rainbow card is at 80+, a card that could rainbow here but doesn't
+  // is under 80), so this turn and the ones after it come out right.
+  function setRainbows(f, v) {
+    const here = (f.members || []).map((si) => ({ sl: state.deck.slots[si] })).filter((x) => x.sl && D.card(x.sl.id))
+      .map((x) => Object.assign(x, { c: D.card(x.sl.id), bond: slotBond(x.sl) }));
+    const can = here.filter((x) => D.isRainbow(x.c, 100, f.stat));
+    const now = can.filter((x) => D.isRainbow(x.c, x.bond, f.stat));
+    if (v > now.length) {
+      can.filter((x) => now.indexOf(x) === -1).sort((a, b) => b.bond - a.bond).slice(0, v - now.length).forEach((x) => { x.sl.bond = Math.max(x.bond, 80); });
+      if (v > can.length) flash("Only " + can.length + " card(s) here can rainbow on " + E.STAT_LABELS[f.stat] + ": a card rainbows on its own type's training. Add the right cards first.");
+    } else if (v < now.length) {
+      now.sort((a, b) => a.bond - b.bond).slice(0, now.length - v).forEach((x) => { x.sl.bond = 79; });
+    }
   }
 
   // "Auto" follows the scenario's rule; the title explains where the number comes from.
@@ -1250,7 +1302,7 @@
     $("#statTable").innerHTML = `<thead><tr><th>Stat</th><th>Current</th><th title="Stars of each blue spark for this stat from your parents and their parents, like 3 3 2. Each raises the cap: 1 star +4, 2 stars +9, 3 stars +16.">Sparks ★</th><th title="The most this stat can reach: the scenario's base cap plus your spark uncaps. Type the cap your game shows to override it.">Cap<small>limit</small></th><th title="Where you want this stat for your build. The coach values a stat less once it's past this.">Target<small>goal</small></th></tr></thead><tbody>${E.STATS.map((s, i) => `
       <tr class="s-${s}"><th scope="row">${E.STAT_LABELS[s]}</th>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cur" min="0" max="2500" value="${state.stats[s] || ""}" placeholder="—" aria-label="Current ${E.STAT_LABELS[s]}"></td>
-        <td><input type="text" inputmode="numeric" class="sparks" data-stat="${s}" data-kind="sparks" value="${esc(sparks[s] || "")}" placeholder="e.g. 3 2" aria-label="${E.STAT_LABELS[s]} blue spark stars"></td>
+        <td><input type="text" inputmode="numeric" class="sparks" data-stat="${s}" data-kind="sparks" value="${esc(sparks[s] || "")}" placeholder="3 2" aria-label="${E.STAT_LABELS[s]} blue spark stars"></td>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cap" min="0" max="2500" value="${state.caps[s] || ""}" placeholder="${capNow[s]}" title="Base ${sc.caps[i]}${capNow[s] > sc.caps[i] ? " + " + (capNow[s] - sc.caps[i]) + " from sparks" : ""}" aria-label="${E.STAT_LABELS[s]} cap"></td>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="target" min="0" max="2500" value="${tg[s] || ""}" placeholder="${Math.min(build.target[s], state.caps[s] || capNow[s])}" aria-label="${E.STAT_LABELS[s]} target"></td></tr>`).join("")}</tbody>`;
     $("#statNote").textContent = "Cap is the game's limit for each stat in " + sc.name + ": training can't take it higher (blue sparks and some events raise it). Target is your goal for a " + build.label + " build: past it the coach values that stat less. A target above the cap counts as the cap. Stats over 1200 count half in races, so most targets stop near 1200.";
@@ -1284,6 +1336,31 @@
     });
   }
 
+  // The report box keeps what you typed while the coach re-renders.
+  let reportOpen = false;
+  let reportWhy = "";
+  document.addEventListener("toggle", (e) => { if (e.target.id === "report") reportOpen = e.target.open; }, true);
+  document.addEventListener("input", (e) => { if (e.target.id === "reportWhy") reportWhy = e.target.value; });
+
+  // Everything needed to check a call: the turn's inputs, deck, tokens and every option's score.
+  function turnReport(why) {
+    const sc = scenario();
+    const typ = rec.typ || 1;
+    const r2 = (x) => Math.round((x / typ) * 100) / 100;
+    const name = (si) => { const sl = state.deck.slots[si]; const c = sl && D.card(sl.id); return c ? c.n + " [" + c.t + "]" : "slot " + si; };
+    const rep = {
+      v: 1, why: (why || "").trim(), scenario: sc.id, turn: state.turn, when: rec.turn.text, build: state.build,
+      energy: state.energy + "/" + (state.maxEnergy || 100), mood: E.MOODS[state.mood], risk: state.risk,
+      stats: state.stats, targets: state.targets || {}, caps: state.caps, extras: state.extras, fans: state.fans,
+      gl: state.gl ? { tokens: state.gl.tokens, songs: Object.keys(state.gl.songs || {}), lessons: state.gl.lessons } : undefined,
+      deck: (state.deck.slots || []).map((sl) => sl && sl.id ? { card: name(state.deck.slots.indexOf(sl)), id: sl.id, lb: sl.lb, bond: Math.round(slotBond(sl)), dates: sl.dates } : null),
+      trainings: state.facilities.map((f) => ({ stat: f.stat, cards: (f.members || []).map(name), hints: (f.hints || []).map(name), others: f.extra || 0, gain: f.gain, fail: f.fail, extras: f.extras })),
+      pick: (rec.action.prefix || []).concat([rec.action.label]).join(" → "),
+      options: rec.ranked.slice(0, 8).map((o) => ({ label: o.label, score: r2(o.value), parts: Object.fromEntries(Object.entries(o.parts).filter(([, v]) => Math.abs(v) > 0.005 * typ).map(([k, v]) => [k, r2(v)])), gains: o.statGains ? Object.fromEntries(Object.entries(o.statGains).map(([k, v]) => [k, Math.round(v)])) : undefined, fail: o.fail }))
+    };
+    return "Uma coach report\n" + JSON.stringify(rep);
+  }
+
   function renderCall() {
     const sc = scenario();
     rec = E.recommend(state, sc);
@@ -1303,7 +1380,13 @@
       <div class="actions">
         <button type="button" class="btn" id="doneBtn">Done, next turn ▶</button>
         <button type="button" class="btn ghost" id="undoBtn" ${(state.log || []).length ? "" : "disabled"}>Undo last</button>
-      </div>`;
+      </div>
+      <details class="report" id="report" ${reportOpen ? "open" : ""}><summary>This call looks wrong?</summary>
+        <p class="mini">Say why, then copy the report and paste it to me. It has this turn's inputs, your deck and tokens, and every option's score, so the call can be checked and the coach fixed.</p>
+        <textarea id="reportWhy" rows="3" placeholder="e.g. Wit had a rainbow and 2 more cards, I think it beats Power">${esc(reportWhy)}</textarea>
+        <button type="button" class="btn ghost small" id="reportCopy">Copy report</button>
+        <textarea id="reportOut" rows="4" readonly hidden></textarea>
+      </details>`;
     const fp = $("#fanPlan");
     const gp = rec.gradePlan;
     if (rec.fanPlan && rec.fanPlan.status !== "met") {
@@ -1320,7 +1403,7 @@
     $("#dock").className = "dock k-" + kind + (a.stat ? " s-" + a.stat : "");
   }
 
-  const PART_NAMES = { stats: "Stats", sp: "Skill points", bond: "Bonds", hint: "Hint", scenario: "Scenario", energy: "Energy", mood: "Mood", risk: "Failure risk", condition: "Condition", fans: "Fans", item: "Item / buff", goal: "Goal race", opening: "Opening plan" };
+  const PART_NAMES = { stats: "Stats", sp: "Skill points", bond: "Bonds", hint: "Hint", scenario: "Scenario", tokens: "Song tokens", energy: "Energy", mood: "Mood", risk: "Failure risk", condition: "Condition", fans: "Fans", item: "Item / buff", goal: "Goal race", opening: "Opening plan" };
 
   function renderOptions() {
     const top = Math.max(1, ...rec.ranked.filter((o) => o.value < 1e4).map((o) => o.value));
