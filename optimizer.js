@@ -394,6 +394,94 @@
     return { cards: deck, result, contrib, runnersUp, evals: evals.n };
   }
 
+  // ---- Target stats: steer a deck toward your stat targets ----
+  // How close a simulated stat line ends to the targets (each capped at the stat cap): every
+  // point short costs 1, a big miss counts extra (400 short costs 720), and a miss in a stat
+  // the build leans on counts up to double (Speed most). Points past a target count 0.1 each,
+  // skill points 0.35 each.
+  function targetFit(ctx, stats, sp) {
+    let value = 0, short = 0;
+    const top = Math.max.apply(null, STATS.map((s) => ctx.w[s]));
+    STATS.forEach((s, i) => {
+      const t = Math.min(ctx.target[s], ctx.caps[s]);
+      const miss = Math.max(0, t - stats[i]);
+      short += miss;
+      value -= miss * (1 + miss / 500) * (1 + ctx.w[s] / top);
+      value += 0.1 * Math.max(0, Math.min(stats[i], ctx.caps[s]) - t);
+    });
+    return { value: value + sp * SP_VALUE, short: Math.round(short) };
+  }
+
+  // Starts from a deck (Euophrys' pick) and goes slot by slot: the best few cards of each type
+  // the deck makeup allows (by Euophrys' score with the other five fixed) go in one at a time,
+  // and a swap stays when the simulated careers end closer to the targets, counting the
+  // deck's skills (tiers.js) and must-haves too. Locked cards stay. Up to 2 passes.
+  // Friend and Group cards help every training, so balanced targets would pull in several;
+  // real decks rarely run more than one of each, so the search stays at 1 (or the start
+  // deck's count, or your deck makeup's).
+  // opts: the tier list options (scenario key, skills, must, comp, locked, skillWeight...);
+  // sim: buildCtx options (coach scenario, build, trainee, target, caps).
+  // Returns a stepper so the page can show progress: next() does one slot, result() ends it.
+  const FIT_RUNS = 6;
+  const FIT_PER_TYPE = { friend: 2, group: 2 };
+  const FIT_TYPES = ["speed", "stamina", "power", "guts", "wit", "friend", "group"];
+  function targetSearch(opts, sim, start, pool, borrowPool) {
+    const Tr = root.UmaTiers || (typeof require !== "undefined" ? require("./tiers.js") : null);
+    const ctx = buildCtx(Object.assign({}, sim, { runs: FIT_RUNS }));
+    const comp = opts.comp || {};
+    const locked = new Set(opts.locked || []);
+    const sw = opts.skillWeight != null ? opts.skillWeight : 1;
+    const cache = new Map();
+    const evaluate = (deck, c) => {
+      const s = simulate(c, deck.map((x) => ({ card: D.card(x.id), lb: x.lb })));
+      const fit = targetFit(c, s.stats, s.sp);
+      const sk = Tr.deckSkills(opts, deck);
+      return { value: fit.value + sw * sk.value + sk.mustValue, short: fit.short, stats: s.stats, sp: s.sp };
+    };
+    const score = (deck) => {
+      const k = deck.map((x) => x.id + ":" + x.lb).sort().join(",");
+      if (!cache.has(k)) cache.set(k, evaluate(deck, ctx));
+      return cache.get(k);
+    };
+    let deck = start.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
+    let cur = score(deck);
+    const nOf = (cards, t) => cards.filter((x) => D.card(x.id).ty === t).length;
+    const most = { friend: comp.friend != null ? comp.friend : Math.max(1, nOf(deck, "friend")), group: comp.group != null ? comp.group : Math.max(1, nOf(deck, "group")) };
+    const slots = deck.map((_, i) => i).filter((i) => !locked.has(deck[i].id));
+    const swaps = [];
+    let step = 0, pass = 0, changed = false;
+    function next() {
+      if (pass >= 2 || !slots.length) return false;
+      const i = slots[step % slots.length];
+      const c = deck[i];
+      const u = D.card(c.id).ty;
+      const rest = deck.filter((_, j) => j !== i);
+      const from = c.borrowed ? borrowPool : pool;
+      let best = null;
+      // A fixed type keeps its slot; free types can trade places.
+      FIT_TYPES.filter((t) => (t === u || (comp[u] == null && comp[t] == null)) && !(most[t] != null && nOf(rest, t) >= most[t])).forEach((t) => {
+        const cands = from.filter((x) => x.id !== c.id && D.card(x.id).ty === t);
+        if (!cands.length) return;
+        Tr.rank(opts, t, rest, cands).slice(0, FIT_PER_TYPE[t] || 4).forEach((r) => {
+          const cand = deck.slice();
+          cand[i] = { id: r.id, lb: r.lb, borrowed: c.borrowed };
+          const v = score(cand);
+          if (v.value > (best ? best.v.value : cur.value) + 1e-6) best = { cand, v, in: r };
+        });
+      });
+      if (best) { swaps.push({ out: c.id, in: best.in.id, inLb: best.in.lb }); deck = best.cand; cur = best.v; changed = true; }
+      step++;
+      if (step % slots.length === 0) { pass = changed ? pass + 1 : 2; changed = false; }
+      return pass < 2;
+    }
+    // The start and final decks, rescored with more careers for the readout.
+    function result() {
+      const full = buildCtx(Object.assign({}, sim, { runs: 16 }));
+      return { cards: deck, swaps, before: evaluate(start, full), after: evaluate(deck, full), target: ctx.target, caps: ctx.caps };
+    }
+    return { next, result, progress: () => (slots.length ? Math.min(1, step / (slots.length * 2)) : 1) };
+  }
+
   // Cards you don't own (or own at a lower limit break) that would raise the deck most.
   // Each candidate is tried in place of the deck's weakest cards (swapSlots, by index).
   function wishlist(opts, deck, candidates, limit, swapSlots) {
@@ -505,7 +593,7 @@
     };
   }
 
-  const api = { optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, statsValue, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, statsValue, targetFit, targetSearch, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

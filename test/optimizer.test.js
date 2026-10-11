@@ -170,3 +170,46 @@ test("deck makeup: the optimizer builds exactly the counts you fix, borrowed car
   assert.ok(r.runnersUp.every((a) => D.card(a.in).ty === D.card(a.out).ty), "an alternative broke the makeup");
   assert.throws(() => O.runJob({ job: "optimize", opts: { scenario: "ura", build: "long", runs: 4, comp: { group: 5 } }, pool: pool.slice(0, 20), borrowPool: [] }), /Not enough cards/);
 });
+
+// ---- Target stats ----
+const Tiers = require("../tiers.js");
+const gl = SCENARIOS.find((s) => s.id === "grandlive");
+const pool4 = () => globalCards().filter((c) => c.r >= 2).map((c) => ({ id: c.id, lb: 4 }));
+const runSearch = (opts, sim, start, pool) => { const s = O.targetSearch(opts, sim, start, pool, []); while (s.next()); return s.result(); };
+
+test("target fit: points short count, big misses and the build's main stats count more", () => {
+  const ctx = O.buildCtx({ scenario: ura, build: "medium", target: { speed: 1200, stamina: 800, power: 800, guts: 600, wit: 800 } });
+  const at = (stats) => O.targetFit(ctx, stats, 0);
+  assert.strictEqual(at([1200, 800, 800, 600, 800]).short, 0);
+  assert.strictEqual(at([1100, 700, 800, 600, 800]).short, 200);
+  assert.ok(at([1000, 800, 800, 600, 800]).value < at([1100, 700, 800, 600, 800]).value, "one 200 miss is worse than two 100 misses");
+  assert.ok(at([1100, 800, 800, 600, 800]).value < at([1200, 800, 800, 500, 800]).value, "100 short in Speed is worse than 100 short in Guts");
+});
+
+test("target stats: the search ends closer to the targets than Euophrys' pick, with legal decks", () => {
+  const pool = pool4();
+  const opts = { scenario: "GL" };
+  const start = Tiers.buildDeck(opts, pool, []).cards;
+  const r = runSearch(opts, { scenario: gl, build: "medium", target: { speed: 1400, stamina: 900, power: 1000, guts: 600, wit: 1000 } }, start, pool);
+  assert.ok(r.after.short < r.before.short, r.before.short + " -> " + r.after.short);
+  assert.strictEqual(r.cards.length, 6);
+  assert.strictEqual(new Set(r.cards.map((c) => D.card(c.id).cid)).size, 6, "no character twice");
+  const n = (t) => r.cards.filter((c) => D.card(c.id).ty === t).length;
+  assert.ok(n("friend") <= 1 && n("group") <= 1, "at most one Friend and one Group card");
+  assert.ok(r.swaps.length > 0);
+});
+
+test("target stats: locked cards, deck makeup and must-have skills hold", () => {
+  const pool = pool4();
+  const comp = { speed: 2, stamina: 2, power: 1, wit: 1 };
+  const lock = globalCards(3).find((c) => c.ty === "stamina").id;
+  const must = String(globalCards().find((c) => c.r >= 2 && c.ty === "speed" && (c.es || []).length).es[0]);
+  const opts = { scenario: "GL", comp, locked: [lock], must: [must] };
+  const start = Tiers.buildDeck(opts, pool, []).cards;
+  const r = runSearch(opts, { scenario: gl, build: "long", target: { speed: 1300, stamina: 1300 } }, start, pool);
+  const n = {};
+  r.cards.forEach((c) => { const t = D.card(c.id).ty; n[t] = (n[t] || 0) + 1; });
+  assert.deepStrictEqual(n, comp);
+  assert.ok(r.cards.some((c) => c.id === lock));
+  assert.ok(r.cards.some((c) => (D.card(c.id).hs || []).concat(D.card(c.id).es || []).map(String).includes(must)), "must-have still covered");
+});

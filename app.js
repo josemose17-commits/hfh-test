@@ -549,7 +549,7 @@
       if (row) { const id = +row.dataset.dbRow; db().open = db().open === id ? null : id; renderDbList(); }
     });
     // Euophrys weight edits re-rank once you leave the box (or tick a box).
-    $("#tabBody").addEventListener("change", (e) => { if (e.target.dataset.eu != null) setTimeout(renderTab, 0); });
+    $("#tabBody").addEventListener("change", (e) => { if (e.target.dataset.eu != null || e.target.dataset.cmTarget != null) setTimeout(renderTab, 0); });
     $("#tabBody").addEventListener("input", (e) => {
       if (e.target.dataset.own != null) {
         const id = +e.target.dataset.own;
@@ -563,6 +563,13 @@
         if (e.target.value === "") delete comp[e.target.dataset.cmComp]; else comp[e.target.dataset.cmComp] = +e.target.value;
         save();
         renderCM();
+        return;
+      }
+      if (e.target.dataset.cmTarget != null) {
+        const tg = cm().targets;
+        const v = +e.target.value;
+        if (v > 0) tg[e.target.dataset.cmTarget] = v; else delete tg[e.target.dataset.cmTarget];
+        save();
         return;
       }
       if (e.target.dataset.cm != null) { cmInput(e.target); return; }
@@ -1481,7 +1488,7 @@
   function cm() {
     if (!state.cm) state.cm = {};
     const c = state.cm;
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], sq: "", sfilter: "all", globalSkills: true };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, sq: "", sfilter: "all", globalSkills: true };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
     return c;
@@ -1626,7 +1633,7 @@
 
   function optKey() {
     const c = cm();
-    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer() {
@@ -1637,24 +1644,60 @@
     if (pool.length < 6 && !c.borrow) { flash("The optimizer needs at least 6 cards. Mark more owned cards, or untick “Only cards I own”."); return; }
     optRun = { f: 0 };
     renderCM();
+    const key = optKey();
+    const tg = c.goal === "race" ? cmTargets(c) : null;
+    const done = (r, opts, fit) => {
+      // The predicted stats: the target search's own careers, or a readout from the same
+      // simulation for Euophrys' pick.
+      let est = fit ? fit.after : null;
+      if (!est) {
+        try {
+          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), runs: 16 });
+          est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
+        } catch (err) { est = null; }
+      }
+      optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      wish = null;
+      optRun = null;
+      if (state.tab === "cm") renderCM();
+    };
+    const fail = (err) => { flash(String(err.message || err)); optRun = null; if (state.tab === "cm") renderCM(); };
     setTimeout(() => {
       try {
         const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked: c.locked.slice(), comp: Object.assign({}, c.comp) });
-        const r = T.buildDeck(opts, pool, c.borrow ? borrowPool() : []);
-        // A rough career readout from the coach's simulation, for context only.
-        let est = null;
-        try {
-          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, runs: 12 });
-          est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
-        } catch (err) { est = null; }
-        optResult = Object.assign(r, { key: optKey(), goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
-        wish = null;
-      } catch (err) {
-        flash(String(err.message || err));
-      }
-      optRun = null;
-      if (state.tab === "cm") renderCM();
+        const bp = c.borrow ? borrowPool() : [];
+        const r = T.buildDeck(opts, pool, bp);
+        if (!tg) { done(r, opts, null); return; }
+        // Target stats: start from Euophrys' pick and swap cards toward the targets, a slot at
+        // a time so the page can show progress.
+        const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: tg, caps: E.capsFor(state, scenario()) };
+        const search = OPT.targetSearch(opts, sim, r.cards, pool, bp);
+        const tick = () => {
+          try {
+            let more = true;
+            const t0 = Date.now();
+            while (more && Date.now() - t0 < 150) more = search.next();
+            if (optRun) optRun.f = search.progress();
+            const bar = $("#cmProg i");
+            if (bar) bar.style.width = Math.round(search.progress() * 100) + "%";
+            if (more) { setTimeout(tick, 0); return; }
+            const fit = search.result();
+            done(T.describeDeck(opts, fit.cards, pool, bp), opts, fit);
+          } catch (err) { fail(err); }
+        };
+        setTimeout(tick, 0);
+      } catch (err) { fail(err); }
     }, 30);
+  }
+
+  // Your target stats for the optimizer (blank ones take the race build's), or null when none set.
+  function cmTargets(c) {
+    const t = c.targets || {};
+    const set = E.STATS.filter((s) => t[s] > 0);
+    if (!set.length) return null;
+    const out = {};
+    set.forEach((s) => { out[s] = +t[s]; });
+    return out;
   }
 
   // Cards you don't have (or have below LB4) that would beat a card in the deck, for its slot.
@@ -1736,6 +1779,7 @@
         ${goal === "race" ? `<label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt(SKILL_W, c.skillW)}</select></label>` : ""}
       </div>
       ${compHTML(c)}
+      ${goal === "race" ? targetsHTML(p, c) : ""}
       ${euSettingsHTML("speed")}
       <div class="row-wrap">
         <label class="field grow"><span>Must include (optional)</span><input id="cmLock" list="cardListAll" placeholder="A card that must be in the deck" autocomplete="off"></label>
@@ -1745,10 +1789,23 @@
       ${mustHTML(c)}
       ${c.ownedOnly && n < 6 ? `<p class="mini warn">You've marked ${n} owned card${n === 1 ? "" : "s"}. Mark yours in the <button type="button" class="linkish" data-goto-tab="cards">Support cards</button> tab, or untick “Only cards I own” to search every Global SSR and SR at max limit break.</p>` : ""}
       <div class="row-wrap run-row">
-        <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? "Building…" : "Find my best deck"}</button>
+        <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? (goal === "race" && cmTargets(c) ? "Simulating careers…" : "Building…") : "Find my best deck"}</button>
+        ${running && goal === "race" && cmTargets(c) ? `<span class="progress" id="cmProg"><i style="width:${Math.round((optRun.f || 0) * 100)}%"></i></span>` : ""}
       </div>
       <div id="cmOut">${optResult ? optResultHTML(optResult, c) : ""}</div>
     </section>`;
+  }
+
+  // Target stats: blank boxes show the race build's targets.
+  function targetsHTML(p, c) {
+    const bt = E.BUILDS[p.build].target;
+    const t = c.targets || {};
+    const coach = state.targets && E.STATS.some((s) => state.targets[s] > 0);
+    return `<div class="cm-targets">
+      <span class="mini"><b>Target stats</b> (optional). Blank: Euophrys' pick. Set any, and the optimizer simulates careers and swaps cards until the predicted stats come as close to your targets as it can, keeping good skills and your must-haves. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.</span>
+      <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${bt[s]}"></label>`).join("")}</div>
+      ${coach || cmTargets(c) ? `<div class="row-wrap">${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
+    </div>`;
   }
 
   // Must-have skills: the deck has to include a card that can give each one (hint or event).
@@ -1815,7 +1872,8 @@
       </div>`;
       }).join("")}</div>
       ${mustResultHTML(r, c)}
-      <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.${r.est ? ` Rough career estimate from the coach's simulation: ${E.STATS.map((s, i) => `${E.STAT_LABELS[s]} ${r.est.stats[i]}`).join(" · ")} · ${r.est.sp} SP.` : ""}</p>
+      ${predictedHTML(r)}
+      <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>
       ${r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
         <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${esc(debuffOrSkillName(x.id))} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${esc(skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
       <div class="row-wrap">
@@ -1827,6 +1885,30 @@
         const have = owned[x.id] != null;
         return `<li><b>${esc(cd.n)}</b> <span class="mini">[${esc(cd.t)}] ${D.RARITY[cd.r]} ${D.typeLabel(cd.ty)}</span> ${have ? "from LB" + owned[x.id] + " to LB4" : "at LB4"}: <b>+${Math.round(x.gain)}</b>, replacing ${esc(D.card(x.replaces).n)}</li>`;
       }).join("")}</ol><p class="mini">Each card is tried in the slot of the same type, with the other five cards fixed.</p></div>` : `<p class="mini">No card at LB4 beats your current picks for their slots.</p>`) : ""}
+    </div>`;
+  }
+
+  // Predicted stats from the simulated careers, against your targets when you set them.
+  function predictedHTML(r) {
+    if (!r.est) return "";
+    const f = r.fit;
+    const cell = (i) => {
+      const s = E.STATS[i];
+      if (!f) return `<td class="num">${r.est.stats[i]}</td>`;
+      const t = Math.min(f.target[s], f.caps[s]);
+      const d = r.est.stats[i] - t;
+      return `<td class="num">${r.est.stats[i]}<div class="mini">${t}</div><div class="mini ${d < 0 ? "short" : "over"}">${d < 0 ? d : "+" + d}</div></td>`;
+    };
+    return `<div class="predicted">
+      <b>${f ? "Predicted stats vs your targets" : "Predicted stats"}</b> <span class="mini">(average of 16 simulated careers${f ? "; rows: predicted, target, difference" : ""})</span>
+      <table class="pred"><thead><tr>${E.STATS.map((s) => `<th>${E.STAT_LABELS[s]}</th>`).join("")}</tr></thead>
+        <tbody><tr>${E.STATS.map((_, i) => cell(i)).join("")}</tr></tbody></table>
+      <p class="mini">Skill points: about ${r.est.sp}.</p>
+      ${f ? `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${f.swaps.length ? " Swapped for your targets: " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : " Euophrys' pick was already the closest."}</p>` : ""}
+      <details class="pred-help"><summary>What the predicted stats include</summary>
+        <p class="mini"><b>Included:</b> your trainee's starting stats and growth bonuses (100 each without a trainee); every training turn up to the finale, with your cards dealt onto trainings by their specialty priority and the best training picked for your targets each turn (rest when energy runs low, failures by energy); the game's training formula with friendship at bond 80+, training effectiveness, stat bonuses, mood effect and unique effects; facility levels (+1 per 4 trainings, level 5 at summer camp); bonds (+7 per training, +5 per hint, plus card events); each card's event stats, skill points and energy; about 120 per stat from random events; optional races on about 1 turn in 10 after the debut (more in Trackblazer) with your race bonus; half gains past 1200; your stat caps with sparks; a flat multiplier for the scenario's own bonuses.</p>
+        <p class="mini"><b>Not included, so add these yourself:</b> inheritance (the two inspiration events from your parents' sparks), goal and finale race rewards, friend card outings, New Year events, hint events' stats, scenario mechanics beyond the flat multiplier (Grand Concert songs, items, Overdrive and so on), and mood drops (it assumes Great all career). Real runs usually end higher, mostly from inheritance; what matters is how decks compare.</p>
+      </details>
     </div>`;
   }
 
@@ -1951,6 +2033,8 @@
       renderCM();
       return true;
     }
+    if (t.closest("#cmTgCoach")) { c.targets = Object.assign({}, state.targets); save(); renderCM(); return true; }
+    if (t.closest("#cmTgClear")) { c.targets = {}; save(); renderCM(); return true; }
     if (t.closest("#cmMustAdd")) {
       const id = skillIdByName($("#cmMust").value);
       if (!id) { flash("Pick a skill from the list first. It lists the skills support cards can give."); return true; }
