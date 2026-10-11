@@ -1481,7 +1481,7 @@
   function cm() {
     if (!state.cm) state.cm = {};
     const c = state.cm;
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], sq: "", sfilter: "all", globalSkills: true };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], sq: "", sfilter: "all", globalSkills: true };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
     return c;
@@ -1565,7 +1565,7 @@
   const euOver = () => eu().over[euScen()] || (eu().over[euScen()] = { general: {}, tabs: {} });
   function euOpts(c, p) {
     const sv = skillMap(p.id, c.style);
-    const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW };
+    const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must.slice() };
     if (c.goal === "ace" || c.goal === "debuff") {
       o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, (id) => skillInfo(id)[2]), statsWeight: +c.statsW };
     }
@@ -1626,7 +1626,7 @@
 
   function optKey() {
     const c = cm();
-    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer() {
@@ -1742,6 +1742,7 @@
         <button type="button" class="btn ghost small" id="cmLockAdd">Add</button>
       </div>
       ${c.locked.length ? `<div class="row-wrap">${c.locked.map((id) => `<span class="chip lockchip">${esc(D.card(id).n)} <button type="button" class="linkish" data-cm-unlock="${id}" aria-label="Remove ${esc(D.card(id).n)}">✕</button></span>`).join("")}</div>` : ""}
+      ${mustHTML(c)}
       ${c.ownedOnly && n < 6 ? `<p class="mini warn">You've marked ${n} owned card${n === 1 ? "" : "s"}. Mark yours in the <button type="button" class="linkish" data-goto-tab="cards">Support cards</button> tab, or untick “Only cards I own” to search every Global SSR and SR at max limit break.</p>` : ""}
       <div class="row-wrap run-row">
         <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? "Building…" : "Find my best deck"}</button>
@@ -1749,6 +1750,35 @@
       <div id="cmOut">${optResult ? optResultHTML(optResult, c) : ""}</div>
     </section>`;
   }
+
+  // Must-have skills: the deck has to include a card that can give each one (hint or event).
+  // Lists every skill a Global card can give; ☆ in the skills table adds one too.
+  function mustHTML(c) {
+    const src = skillSources(c);
+    const trn = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    const known = new Set(trn ? trn.us.concat(trn.is, trn.as).map(String) : []);
+    const names = [...new Set(D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).flatMap((x) => (x.hs || []).concat(x.es || [])))].map((id) => debuffOrSkillName(id)).sort();
+    const mine = c.ownedOnly && ownedIds().length;
+    return `<div class="must">
+      <div class="row-wrap">
+        <label class="field grow"><span>Must-have skills (optional)</span><input id="cmMust" list="cmSkillList" placeholder="A skill the deck must be able to give" autocomplete="off"></label>
+        <button type="button" class="btn ghost small" id="cmMustAdd">Add</button>
+      </div>
+      <datalist id="cmSkillList">${names.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
+      ${c.must.length ? `<div class="row-wrap">${c.must.map((id) => {
+        const n = (src[id] || []).length;
+        const note = known.has(String(id)) ? "your trainee has it" : n ? n + (mine ? " of your cards" : " cards") : mine ? "none of your cards" : "no support card";
+        return `<span class="chip lockchip${n || known.has(String(id)) ? "" : " warnchip"}">${esc(debuffOrSkillName(id))} <span class="mini">${note}</span> <button type="button" class="linkish" data-must-del="${id}" aria-label="Remove ${esc(debuffOrSkillName(id))}">✕</button></span>`;
+      }).join("")}</div>` : ""}
+      <p class="mini">The deck will include a card that can hint each must-have skill or give it through an event, before anything else counts. Cards only offer a skill by chance, so the result shows how likely you are to see it.</p>
+    </div>`;
+  }
+  const skillIdByName = (name) => {
+    const n = name.trim().toLowerCase();
+    if (!n) return null;
+    for (const x of D.DATA.supports) for (const id of (x.hs || []).concat(x.es || [])) if (debuffOrSkillName(id).toLowerCase() === n) return String(id);
+    return null;
+  };
 
   const GOALS = [["race", "Racing this CM"], ["ace", "Ace parent"], ["debuff", "Debuffer parent"]];
   const SKILL_W = [["0", "Not at all (pure Euophrys)"], ["0.5", "A little"], ["1", "Normal"], ["2", "A lot"], ["3", "Skills first"]];
@@ -1779,10 +1809,12 @@
         <span class="tydot" aria-hidden="true"></span>
         <div class="opt-name"><b>${esc(card.n)}</b> <span class="mini">${esc(card.t)}</span>
           <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""}${c.locked.indexOf(x.id) !== -1 ? " · locked" : ""}</div>
-          ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)} LB${x.alt.lb} (${Math.round(x.alt.score)})</div>` : ""}</div>
+          ${x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => esc(debuffOrSkillName(id))).join(", ")}</div>` : ""}
+          ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? ", but no must-have" : ""})</div>` : ""}</div>
         <div class="num" title="Euophrys score with the other five cards fixed, plus skills">${Math.round(x.score)}<div class="mini">${Math.round(x.base)} + ${Math.round(x.skill)} skills</div></div>
       </div>`;
       }).join("")}</div>
+      ${mustResultHTML(r, c)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.${r.est ? ` Rough career estimate from the coach's simulation: ${E.STATS.map((s, i) => `${E.STAT_LABELS[s]} ${r.est.stats[i]}`).join(" · ")} · ${r.est.sp} SP.` : ""}</p>
       ${r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
         <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${esc(debuffOrSkillName(x.id))} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${esc(skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
@@ -1796,6 +1828,24 @@
         return `<li><b>${esc(cd.n)}</b> <span class="mini">[${esc(cd.t)}] ${D.RARITY[cd.r]} ${D.typeLabel(cd.ty)}</span> ${have ? "from LB" + owned[x.id] + " to LB4" : "at LB4"}: <b>+${Math.round(x.gain)}</b>, replacing ${esc(D.card(x.replaces).n)}</li>`;
       }).join("")}</ol><p class="mini">Each card is tried in the slot of the same type, with the other five cards fixed.</p></div>` : `<p class="mini">No card at LB4 beats your current picks for their slots.</p>`) : ""}
     </div>`;
+  }
+
+  // How the deck covers each must-have: the chance it's offered and from which cards, or which
+  // cards (outside the ones you can use) would give it.
+  function mustResultHTML(r, c) {
+    if (!r.must || !r.must.length) return "";
+    const all = {};
+    D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).forEach((x) => (x.hs || []).concat(x.es || []).forEach((id) => { (all[id] = all[id] || []).push(x); }));
+    return `<div class="must-result"><b>Must-have skills</b><ul>${r.must.map((m) => {
+      const name = esc(debuffOrSkillName(m.id));
+      if (m.p > 0) {
+        const from = m.src.map((id) => { const cd = D.card(id); return esc(cd.n) + ((cd.es || []).map(String).indexOf(String(m.id)) !== -1 ? " (event)" : " (hint)"); }).join(", ");
+        return `<li class="ok"><b>${name}</b>: about ${Math.round(m.p * 100)}% to be offered, from ${from}.</li>`;
+      }
+      if (!all[m.id]) return `<li class="miss"><b>${name}</b>: no support card on Global gives it (it comes from trainees or the scenario), so it can't shape the deck.</li>`;
+      const others = all[m.id].filter((x) => !r.cards.some((y) => y.id === x.id)).sort((a, b) => b.r - a.r).slice(0, 4);
+      return `<li class="miss"><b>${name}</b>: no card ${c.ownedOnly && ownedIds().length ? "you own" : "the optimizer could use"} gives it${Object.keys(c.comp).length ? " with this deck makeup" : ""}.${others.length ? " Cards that do: " + others.map((x) => esc(x.n) + " [" + esc(x.t) + "]").join(", ") + "." : ""}</li>`;
+    }).join("")}</ul></div>`;
   }
 
   function cmSkills(p, c) {
@@ -1834,7 +1884,8 @@
           const info = skillInfo(r.id);
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
-          return `<tr class="sk-${kind}"><td><b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}${known.has(r.id) ? ' <span class="pill" title="Your trainee already has this skill (unique, innate or awakening)">she has it</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${info[1] || "–"}</td><td class="num">${info[1] ? (r.L / info[1] * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          const must = c.must.indexOf(String(r.id)) !== -1;
+          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}${known.has(r.id) ? ' <span class="pill" title="Your trainee already has this skill (unique, innate or awakening)">she has it</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${info[1] || "–"}</td><td class="num">${info[1] ? (r.L / info[1] * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       <details class="paste">
@@ -1896,6 +1947,24 @@
       if (!card) { flash("Pick a card from the list first."); return true; }
       if (c.locked.indexOf(card.id) === -1) c.locked.push(card.id);
       if (c.ownedOnly && owned[card.id] == null) flash(card.n + " isn't marked as owned, so it can only come in as the borrowed card.");
+      save();
+      renderCM();
+      return true;
+    }
+    if (t.closest("#cmMustAdd")) {
+      const id = skillIdByName($("#cmMust").value);
+      if (!id) { flash("Pick a skill from the list first. It lists the skills support cards can give."); return true; }
+      if (c.must.indexOf(id) === -1) c.must.push(id);
+      save();
+      renderCM();
+      return true;
+    }
+    const md = t.closest("[data-must-del]");
+    if (md) { c.must = c.must.filter((id) => id !== md.dataset.mustDel); save(); renderCM(); return true; }
+    const mt = t.closest("[data-must]");
+    if (mt) {
+      const id = String(mt.dataset.must);
+      c.must = c.must.indexOf(id) === -1 ? c.must.concat([id]) : c.must.filter((x) => x !== id);
       save();
       renderCM();
       return true;

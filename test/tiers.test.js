@@ -109,3 +109,46 @@ test("parent targets are white skills only (gold skills and inherited uniques do
   const deb = T.parentTargets("debuff", pr, "Senkou", {}, X);
   assert.ok(Object.keys(deb).every((id) => X[id].r === 1));
 });
+
+// ---- Must-have skills ----
+const giversOf = (id, from) => from.filter((c) => (c.hs || []).concat(c.es || []).map(String).includes(String(id)));
+const pool4 = () => glob.filter((c) => c.r >= 2).map((c) => ({ id: c.id, lb: 4 }));
+
+test("must-have skills: the deck includes a card that gives each one", () => {
+  const pool = pool4();
+  const plain = T.buildDeck({ scenario: "GL", skillWeight: 0 }, pool, []);
+  const offered = new Set(plain.cards.flatMap((c) => (D.card(c.id).hs || []).concat(D.card(c.id).es || [])).map(String));
+  // Two skills the plain deck doesn't offer, each given by a card in the pool.
+  const must = [...new Set(glob.filter((c) => c.r >= 2).flatMap((c) => (c.hs || []).concat(c.es || [])).map(String))].filter((id) => !offered.has(id)).slice(0, 2);
+  assert.strictEqual(must.length, 2);
+  const r = T.buildDeck({ scenario: "GL", skillWeight: 0, must }, pool, []);
+  must.forEach((id) => assert.ok(r.cards.some((c) => giversOf(id, [D.card(c.id)]).length), "covers " + id));
+  assert.deepStrictEqual(r.must.map((m) => m.id), must);
+  r.must.forEach((m) => assert.ok(m.p > 0 && m.src.length));
+  // The bonus that forces coverage isn't part of the scores shown.
+  r.cards.forEach((c) => assert.ok(c.score < 1e5, "score " + c.score));
+  assert.ok(r.cards.some((c) => c.gives.length));
+});
+
+test("must-have skills: one no usable card gives is reported, and the trainee's own skills need no card", () => {
+  const pool = pool4().filter((c) => D.card(c.id).ty === "speed");
+  const onlyElsewhere = [...new Set(glob.filter((c) => c.ty === "stamina").flatMap((c) => (c.hs || []).concat(c.es || [])).map(String))]
+    .find((id) => !giversOf(id, pool.map((c) => D.card(c.id))).length);
+  const r = T.buildDeck({ scenario: "GL", must: [onlyElsewhere] }, pool, []);
+  assert.strictEqual(r.must[0].p, 0);
+  assert.strictEqual(r.cards.length, 6);
+  const tr = D.DATA.trainees.find((t) => t.en && (t.is || []).length);
+  const own = String(tr.is[0]);
+  const k = T.buildDeck({ scenario: "GL", trainee: tr.id, must: [own] }, pool4(), []);
+  assert.deepStrictEqual(k.must, [], "the trainee's innate skill isn't a must-have to cover");
+});
+
+test("must-have skills: a locked deck makeup still covers what it can", () => {
+  const pool = pool4();
+  const comp = { speed: 3, stamina: 2, wit: 1 };
+  const witOnly = [...new Set(glob.filter((c) => c.r >= 2 && c.ty === "wit").flatMap((c) => (c.hs || []).concat(c.es || [])).map(String))]
+    .find((id) => !giversOf(id, glob.filter((c) => c.r >= 2 && c.ty !== "wit")).length);
+  const r = T.buildDeck({ scenario: "GL", comp, must: [witOnly] }, pool, []);
+  const wit = r.cards.find((c) => D.card(c.id).ty === "wit");
+  assert.ok(giversOf(witOnly, [D.card(wit.id)]).length, "the Wit slot goes to a card that gives it");
+});
