@@ -10,10 +10,11 @@ Open `index.html` in a browser. It needs no build step or server, and it saves y
 2. Each turn, set energy and mood. For each training, tap the dots for **Cards**, **Rainbow** (friendship) cards and cards with **Bond under 80**, and tick **Hint** if one shows.
 3. Optional but recommended: type each training's **Gain** (the green numbers added up) and **Fail %**. Left blank, both are estimated from card counts and energy, and the estimate shows in the box.
 4. The coach names the action and any item or buff to use first. It explains why, says what it beat and by how much, and predicts your energy and mood afterwards. Tap any row in **All options** to see its breakdown.
-5. If a call looks wrong, open **This call looks wrong?** under it, say why, and copy the report: it has the turn's inputs, deck, tokens and every option's score, so it can be checked and the coach fixed.
-6. Press **Done, next turn**. The turn is logged, energy and mood carry forward, and the training inputs reset. If you did something else, press **I did this** on that option. **Undo last** steps back.
-7. Under **Stats**, type your current stats and, if you like, your own **Target** for each (left blank, the build's targets apply). A stat far below its target counts for more and a stat past it counts less, so the coach steers you toward reaching every target. Under **Sparks ★** type the stars of each blue spark your parents give for that stat (like `3 3 2`): each raises the cap (1 star +4, 2 stars +9, 3 stars +16), and the **Cap** box shows the result. Type the cap your game shows to override it.
-8. Mark goal races with **☆ Mark goal race** on their turns. The coach then runs them and plans energy around them. Goal races (career objectives and finale races) cost no energy, except in Trackblazer, where even the debut costs energy; optional races cost about 15. Finale races are marked for you where they are fixed.
+5. The **Run check** box (when a check applies) says whether to keep going or reset the run. See [When to reset](#when-to-reset).
+6. If a call looks wrong, open **This call looks wrong?** under it, say why, and copy the report: it has the turn's inputs, deck, tokens and every option's score, so it can be checked and the coach fixed.
+7. Press **Done, next turn**. The turn is logged, energy and mood carry forward, and the training inputs reset. If you did something else, press **I did this** on that option. **Undo last** steps back.
+8. Under **Stats**, type your current stats and, if you like, your own **Target** for each (left blank, the build's targets apply). A stat far below its target counts for more and a stat past it counts less, so the coach steers you toward reaching every target. Under **Sparks ★** type the stars of each blue spark your parents give for that stat (like `3 3 2`): each raises the cap (1 star +4, 2 stars +9, 3 stars +16), and the **Cap** box shows the result. Type the cap your game shows to override it.
+9. Mark goal races with **☆ Mark goal race** on their turns. The coach then runs them and plans energy around them. Goal races (career objectives and finale races) cost no energy, except in Trackblazer, where even the debut costs energy; optional races cost about 15. Finale races are marked for you where they are fixed.
 
 Shortcuts: ← and → change turns.
 
@@ -42,6 +43,18 @@ Picking a trainee loads her career goals from GameTora (her objectives list): fi
 ## Fan goals and races
 
 The **Optional race open** list shows the races on this turn from the career calendar (GameTora) that fit your trainee's aptitudes (B or better), with their expected fans; **Fans** tracks your fan count (type it from the game; Done on a race adds the expected fans, with your deck's Fan Bonus). When a fan goal is coming, the coach plans it with the real races before the deadline, counting your goal races and races you can only enter with more fans: it says **race now** when later races can't cover it (and adds the best race this turn if you didn't pick one), says racing now is **worth it** when it saves you races later or fits the plan for free, and says you can **keep training** when bigger races later do the job, listing them. If the goal can't be reached with races that fit, it tells you to race every chance, since missing a goal ends the run.
+
+## When to reset
+
+A **Run check** box in the call says whether the run is still worth playing: **Keep going**, **Borderline** (a warning, with what to fix), **Reset this run** (with a **Start a new career** button, tap twice), or that the coach needs one more answer from you. Under **Settings → Reset advice** pick **Building an ace (strict)** (the default), **Only when a goal is lost**, or **Off**.
+
+- **Career goals** (every mode): a fan or Grade Point goal that even winning every race that fits you can't reach. It's a warning first, since races outside your aptitudes can still save it, and a reset with 2 or fewer turns to the deadline.
+- **Grand Concert**: by the debut (turn 12), one stat card at friendship or Light Hello's +20 event (tick **Light Hello +20 event** when it happens); by the end of year one (turn 23), 5 songs bought (marked in the Songs panel). Either miss is a reset, as in the CM-ace guide.
+- **Mecha**: set **Exam rank** after each Upgrade Exam (turns 24, 36, 48, 60). An A or lower is a reset (game8). The rank clears when the next exam comes.
+- **Yukoma Hot Springs**: type **Springs dug**. Fewer than 2 by Junior November (turn 21) is a reset (game8).
+- **Bonds** (every scenario, ace mode): fewer than 60% of your stat cards at friendship going into Classic (turns 22–28) is a warning, never a reset on its own.
+
+The checks use the coach's bonds, which come from the turns you log. With fewer than half the turns logged it asks you to check the game instead of telling you to reset.
 
 ## My cards
 

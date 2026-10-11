@@ -184,6 +184,17 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 .versus, .after { font-size: .9rem; }
 .phase { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; font-size: .88rem; }
 .events { display: grid; gap: 6px; }
+/* Reset advice: the run's verdict and its reasons, coloured by how bad it is. */
+.runcheck { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; font-size: .9rem; min-width: 0; }
+.runcheck ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+.runcheck .rc-head { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; letter-spacing: .02em; }
+.runcheck.rc-reset { border-color: var(--bad); border-left-width: 6px; }
+.runcheck.rc-reset .rc-head, li.rc-reset b { color: var(--bad); }
+.runcheck.rc-borderline, .runcheck.rc-unknown { border-left-color: var(--warn); }
+.runcheck.rc-borderline .rc-head, li.rc-borderline b, li.rc-unknown b { color: var(--warn); }
+.runcheck.rc-wait { border-left-color: var(--gold); }
+li.rc-ok b { color: var(--accent); }
+.runcheck .btn { justify-self: start; }
 .ev { border-left: 3px solid var(--gold); padding-left: 8px; font-size: .9rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .actions .btn:first-child { flex: 1 1 auto; }

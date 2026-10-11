@@ -341,6 +341,106 @@
       " Counting wins; lower places pay less, so fix the number if you place lower.";
   }
 
+  // ---- Reset advice ----
+  // Is this run still worth playing? state.resetMode: "ace" (default) for Champions Meeting
+  // aces, "finish" to flag only a run that can't meet a career goal, "off". Each item has a
+  // status: ok, wait (not decided yet), unknown (the coach can't tell), borderline or reset.
+  // The verdict is the worst of them. Null when nothing applies on this turn.
+  const isStatCard = (sl) => sl.card.ty !== "friend" && sl.card.ty !== "group";
+  // The coach's bonds come from logged turns; with fewer than half logged they're estimates.
+  const bondsStale = (state) => state.turn > 6 && (state.log || []).length < (state.turn - 1) / 2;
+  const RESET_CHECKS = {
+    // Grand Concert (CM ace guide): one card rainbowing or Light Hello's +20 event by the debut.
+    debut(state, sc, c) {
+      const label = "Debut check";
+      const x = state.extras || {};
+      const deck = deckInfo(state);
+      const lh = deck && deck.used.some((sl) => sl.card.n === "Light Hello");
+      const rb = deck ? deck.used.filter((sl) => isStatCard(sl) && sl.bond >= 80) : [];
+      if (x.lh20) return { label, status: "ok", why: "Light Hello's +20 event is in. Keep going." };
+      if (rb.length) return { label, status: "ok", why: rb.map((sl) => sl.card.n).join(", ") + (rb.length > 1 ? " are" : " is") + " at friendship. Keep going." };
+      const goal = "By the debut (turn " + c.at + ") the guide wants one card rainbowing" + (lh || !deck ? " or Light Hello's +20 event (tick it under " + sc.name + " when it happens)" : "") + ".";
+      if (!deck) return { label, status: "unknown", why: goal + " Set your deck under Trainee and deck so the coach can see bonds." };
+      if (bondsStale(state)) return { label, status: "unknown", why: goal + " The coach's bonds are estimates (few turns logged), so check the game: if no card shows a rainbow, reset." };
+      if (state.turn < c.at) return { label, status: "borderline", why: goal + " Not yet: focus one or two cards." };
+      return { label, status: "reset", why: "No card at friendship and no Light Hello +20 event by the debut. The guide resets here (around 85% of CM-ace runs in this scenario do)." };
+    },
+    // Grand Concert: 5 songs bought in year one (the 6th held for after the 1st live).
+    songs1(state, sc, c) {
+      const label = "Year one songs";
+      const gl = state.gl || {};
+      const learned = gl.songs || {};
+      const bought = Object.values(learned).filter((t) => t >= 5 && glPeriod(sc, t) === 0).length;
+      const lessons = (gl.lessons || {})[0] || 0;
+      const goal = "5 songs by the 1st Promo Live (turn " + sc.lives[0] + "), with the 6th showing and held.";
+      if (!bought && !lessons) return { label, status: "unknown", why: goal + " Mark the songs you buy in the Songs panel so the coach can count them." };
+      if (bought >= 5) return { label, status: "ok", why: bought + " songs bought. Keep going." };
+      if (state.turn < c.at) return bought <= 2 ? { label, status: "borderline", why: "Only " + bought + " of 5 songs bought. Goal: " + goal } : { label, status: "wait", why: bought + " of 5 songs bought. Goal: " + goal };
+      if (bought === 4) return { label, status: "borderline", why: "4 of 5 songs. Buy the 5th before the live if your tokens allow it; if they can't, reset." };
+      return { label, status: "reset", why: "Only " + bought + " of 5 songs by the end of year one. The guide resets when the year-one song plan fails." };
+    },
+    // Mecha (game8): S in every Upgrade Exam; any A restarts the run.
+    exam(state, sc, c) {
+      const t = c.turns.find((e) => state.turn >= e - 2 && state.turn <= e + 3);
+      if (t == null) return null;
+      const n = c.turns.indexOf(t) + 1;
+      const label = "Upgrade Exam " + n;
+      const r = (state.extras || {})[c.input];
+      if (state.turn < t) return { label, status: "wait", why: "Exam on turn " + t + ". game8 restarts the run on any A, so keep your Research Levels up for an S." };
+      if (!r) return { label, status: state.turn === t ? "wait" : "unknown", why: "Set the rank under " + sc.name + " once you see it: an A or lower means reset for an ace." };
+      if (r === "S") return { label, status: "ok", why: "S rank. Keep going." };
+      return { label, status: "reset", why: (r === "A" ? "A" : "B or lower") + " in exam " + n + ". game8 restarts the run on any A when building an ace." };
+    },
+    // Onsen (game8): fewer than 2 springs dug by Junior November is a bad start.
+    springs(state, sc, c) {
+      const label = "Springs dug";
+      const v = (state.extras || {}).springs;
+      if (v == null || v === "") return { label, status: "unknown", why: "Type how many springs you've dug under " + sc.name + ". Fewer than 2 by turn " + c.at + " (Junior November) means reset." };
+      if (+v >= 2) return { label, status: "ok", why: v + " springs dug. Keep going." };
+      if (state.turn < c.at) return { label, status: "borderline", why: "Only " + v + " dug. You want 2 by turn " + c.at + " (Junior November), or reset." };
+      return { label, status: "reset", why: "Only " + v + " spring" + (+v === 1 ? "" : "s") + " by Junior November. game8 calls it a bad start: reset." };
+    }
+  };
+  const RESET_RANK = { reset: 4, borderline: 3, unknown: 2, wait: 1, ok: 0 };
+
+  function runCheck(state, sc) {
+    const mode = state.resetMode || "ace";
+    if (mode === "off") return null;
+    const items = [];
+    // Career goals: missing one ends the run, so a goal you can't reach is a reset.
+    const goalItem = (label, plan, text) => {
+      if (!plan || plan.status !== "short") return;
+      const left = plan.turnsLeft;
+      // Races outside your aptitudes can still save it, so it's a reset only at the very end.
+      items.push({ id: label, label, status: left <= 2 ? "reset" : "borderline", why: text + (left <= 2 ? " With " + left + " turn" + (left === 1 ? "" : "s") + " left the run is lost: reset." : " Race everything you can, outside your aptitudes too; if it still falls short, reset.") });
+    };
+    const fp = fanPlan(state, sc);
+    if (fp) goalItem("Fan goal", fp, "Even winning every race that fits you, you're short of " + Math.round(fp.left || fp.need).toLocaleString("en-US") + " fans by turn " + fp.goal.turn + ".");
+    const gp = gradePlan(state, sc);
+    if (gp) goalItem("Grade Points", gp, "Even winning every race that fits you, you can't reach " + gp.need + " Grade Points by turn " + gp.due + ".");
+    if (mode === "ace") {
+      (sc.resetChecks || []).forEach((c) => {
+        if (!c.turns && (state.turn < c.from || state.turn > c.to)) return;
+        const r = RESET_CHECKS[c.id] && RESET_CHECKS[c.id](state, sc, c);
+        if (r) items.push(Object.assign({ id: c.id }, r));
+      });
+      // Every scenario: stat cards at friendship going into Classic (a rule of thumb for aces,
+      // so it's never a reset on its own).
+      const deck = deckInfo(state);
+      if (deck && state.turn >= 22 && state.turn <= 28 && !bondsStale(state)) {
+        const stat = deck.used.filter(isStatCard);
+        const rb = stat.filter((sl) => sl.bond >= 80).length;
+        if (stat.length >= 2) {
+          const ok = rb / stat.length >= 0.6;
+          items.push({ id: "bonds", label: "Bonds", status: ok ? "ok" : "borderline", why: rb + " of " + stat.length + " stat cards at friendship (80+)." + (ok ? "" : " Aces usually have most of them by Classic, so training will be weaker than it should. Not a reset on its own, but with another miss it's a good time to start over.") });
+        }
+      }
+    }
+    if (!items.length) return null;
+    const verdict = items.reduce((a, it) => (RESET_RANK[it.status] > RESET_RANK[a] ? it.status : a), "ok");
+    return { verdict, mode, items };
+  }
+
   // Goal race turns that come from the trainee's goals, minus any you unmarked.
   function autoGoalTurns(state, sc) {
     const off = new Set(state.goalsOff || []);
@@ -1669,6 +1769,8 @@
       snapshot: JSON.stringify(Object.assign({}, state, { log: undefined }))
     }]).slice(-90);
     s.turn = Math.min(scenario.totalTurns, s.turn + 1);
+    // A reset check's input that belongs to one event (Mecha's exam rank) clears when the next one comes.
+    (scenario.resetChecks || []).forEach((c) => { if (c.input && c.turns && c.turns.indexOf(s.turn) !== -1) delete s.extras[c.input]; });
     s.facilities = s.facilities.map((f) => ({ stat: f.stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 }));
     s.goalRace = isGoalTurn(s, scenario, s.turn);
     s.race = "";
@@ -2220,7 +2322,7 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, turnsToDebut, applyOpening, NEW_YEAR,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
