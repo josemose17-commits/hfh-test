@@ -814,3 +814,85 @@ test("summer camp trainings don't raise facility levels", () => {
   // During camp itself every facility is level 5.
   assert.strictEqual(E.facLevelFor(base({ turn: 38, log }), sc("ura"), "speed"), 5);
 });
+
+// ---- Reset advice ----
+const logged = (n) => Array.from({ length: n }, (_, i) => ({ turn: i + 1, kind: "train" }));
+const rcItem = (rc, id) => rc && rc.items.find((it) => it.id === id);
+
+test("reset advice: Grand Concert debut check wants a rainbow or Light Hello's +20 event", () => {
+  const gl = sc("grandlive");
+  const at = (o) => E.runCheck(base(Object.assign({ turn: 12, deck: openDeck(), log: logged(11) }, o)), gl);
+  assert.strictEqual(at({}).verdict, "reset");
+  assert.strictEqual(rcItem(at({ extras: { lh20: true } }), "debut").status, "ok");
+  // Curren Chan (a stat card) at friendship is enough; Light Hello (a friend card) isn't.
+  assert.strictEqual(at({ deck: openDeck([null, null, 85, null, null, null]) }).verdict, "ok");
+  assert.strictEqual(at({ deck: openDeck([null, null, null, null, null, 90]) }).verdict, "reset");
+  // Before the debut it's a warning, and with few turns logged the bonds aren't trusted.
+  assert.strictEqual(at({ turn: 11, log: logged(10) }).verdict, "borderline");
+  assert.strictEqual(at({ log: logged(2) }).verdict, "unknown");
+  assert.strictEqual(at({ deck: undefined }).verdict, "unknown");
+  assert.strictEqual(E.runCheck(base({ turn: 16, deck: openDeck(), log: logged(15) }), gl), null, "nothing to check after the window");
+  // Settings: "finish" skips the ace checks, "off" turns advice off.
+  assert.strictEqual(at({ resetMode: "finish" }), null);
+  assert.strictEqual(at({ resetMode: "off" }), null);
+});
+
+test("reset advice: Grand Concert wants 5 songs in year one", () => {
+  const gl = sc("grandlive");
+  const songs = (n) => ({ songs: Object.fromEntries(gl.songs.slice(0, n).map((s, i) => [s.id, 6 + 3 * i])) });
+  const at = (turn, n) => rcItem(E.runCheck(base({ turn, gl: songs(n) }), gl), "songs1");
+  assert.strictEqual(at(23, 5).status, "ok");
+  assert.strictEqual(at(23, 4).status, "borderline");
+  assert.strictEqual(at(23, 3).status, "reset");
+  assert.strictEqual(at(20, 3).status, "wait");
+  assert.strictEqual(at(20, 2).status, "borderline");
+  assert.strictEqual(at(23, 0).status, "unknown", "no songs marked: ask instead of resetting");
+});
+
+test("reset advice: Mecha restarts on an A, and the rank clears at the next exam", () => {
+  const me = sc("mecha");
+  const at = (turn, examRank) => E.runCheck(base({ turn, extras: { examRank } }), me);
+  assert.strictEqual(at(25, "A").verdict, "reset");
+  assert.strictEqual(at(25, "B").verdict, "reset");
+  assert.strictEqual(at(25, "S").verdict, "ok");
+  assert.strictEqual(at(25, "").verdict, "unknown");
+  assert.strictEqual(at(24, "").verdict, "wait");
+  assert.match(rcItem(at(37, "A"), "exam").label, /Exam 2/);
+  assert.strictEqual(at(30, "A"), null);
+  const r = E.recommend(base({ turn: 35, extras: { examRank: "S" } }), me);
+  assert.strictEqual(E.advance(base({ turn: 35, extras: { examRank: "S" } }), me, r.action).extras.examRank, undefined);
+  assert.strictEqual(E.advance(base({ turn: 33, extras: { examRank: "S" } }), me, r.action).extras.examRank, "S");
+});
+
+test("reset advice: Onsen wants 2 springs by Junior November", () => {
+  const on = sc("onsen");
+  const at = (turn, springs) => E.runCheck(base({ turn, extras: springs == null ? {} : { springs } }), on);
+  assert.strictEqual(at(21, 1).verdict, "reset");
+  assert.strictEqual(at(21, 2).verdict, "ok");
+  assert.strictEqual(at(18, 1).verdict, "borderline");
+  assert.strictEqual(at(21).verdict, "unknown");
+});
+
+test("reset advice: a fan goal the races can't reach, and bonds going into Classic", () => {
+  const D = require("../deck.js");
+  const ura = sc("ura");
+  const tm = D.DATA.trainees.find((t) => t.n === "Tamamo Cross"); // 5,000 fans by turn 29
+  const st = (turn, fans, o) => base(Object.assign({ turn, fans, deck: { trainee: tm.id, slots: [] } }, o));
+  assert.strictEqual(rcItem(E.runCheck(st(24, 0), ura), "Fan goal").status, "borderline");
+  assert.strictEqual(rcItem(E.runCheck(st(27, 0), ura), "Fan goal").status, "reset");
+  assert.strictEqual(rcItem(E.runCheck(st(27, 0, { resetMode: "finish" }), ura), "Fan goal").status, "reset", "goals count in every mode");
+  assert.strictEqual(E.runCheck(st(27, 6000), ura), null);
+  // Bonds: a warning only, never a reset on its own.
+  const bonds = (b) => E.runCheck(base({ turn: 24, deck: openDeck(b), log: logged(23) }), ura);
+  assert.strictEqual(bonds([40, 40, 40, 40, 40, 40]).verdict, "borderline");
+  assert.strictEqual(bonds([90, 90, 90, 40, 40, 40]).verdict, "ok");
+});
+
+test("reset advice runs on every scenario and turn", () => {
+  SCENARIOS.forEach((s) => {
+    for (let t = 1; t <= s.totalTurns; t++) {
+      const rc = E.runCheck(base({ turn: t, deck: openDeck(), log: logged(t - 1) }), s);
+      if (rc) assert.ok(rc.items.length && ["ok", "wait", "unknown", "borderline", "reset"].includes(rc.verdict), s.id + " " + t);
+    }
+  });
+});

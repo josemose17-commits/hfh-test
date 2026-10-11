@@ -25,6 +25,7 @@
       risk: k.risk != null ? k.risk : 12,
       raceBonus: k.raceBonus || 0,
       maxEnergy: k.maxEnergy || 100,
+      resetMode: k.resetMode || "ace",
       trackStats: k.trackStats != null ? k.trackStats : true,
       calib: k.calib || [],
       fcal: k.fcal || [],
@@ -126,6 +127,7 @@
               <label class="field"><span>Max failure you accept <b id="riskOut"></b></span><input id="risk" type="range" min="0" max="40" step="1"></label>
               <label class="field"><span>Deck race bonus %</span><input id="raceBonus" type="number" inputmode="numeric" min="0" max="100"></label>
               <label class="field"><span>Max energy</span><input id="maxEnergy" type="number" inputmode="numeric" min="100" max="150"></label>
+              <label class="field"><span>Reset advice</span><select id="resetMode"><option value="ace">Building an ace (strict)</option><option value="finish">Only when a goal is lost</option><option value="off">Off</option></select></label>
               <button type="button" class="btn ghost" id="resetCalib">Forget learned deck strength</button>
               <p class="mini" id="calibNote"></p>
             </div>
@@ -252,7 +254,8 @@
     $("#raceBonus").addEventListener("input", (e) => { state.raceBonus = Math.max(0, +e.target.value || 0); commit(); });
     $("#maxEnergy").addEventListener("input", (e) => { const v = +e.target.value; if (v >= 100 && v <= 150) { state.maxEnergy = v; state.energy = Math.min(state.energy, v); commit(); } });
     $("#resetCalib").addEventListener("click", () => { state.calib = []; commit(); });
-    $("#newCareer").addEventListener("click", newCareer);
+    $("#resetMode").addEventListener("change", (e) => { state.resetMode = e.target.value; commit(); });
+    $("#newCareer").addEventListener("click", () => newCareer($("#newCareer")));
 
     $("#energy").addEventListener("input", (e) => { state.energy = +e.target.value; $("#energyNum").value = state.energy; commit(); });
     $("#energyNum").addEventListener("input", (e) => { const v = numOrNull(e.target.value); if (v != null) { state.energy = Math.max(0, Math.min(state.maxEnergy, v)); $("#energy").value = state.energy; commit(); } });
@@ -487,6 +490,7 @@
     $("#call").addEventListener("click", (e) => {
       if (e.target.closest("#doneBtn")) done(rec && rec.action);
       if (e.target.closest("#undoBtn")) undoTurn();
+      if (e.target.closest("#rcNew")) newCareer($("#rcNew"));
       if (e.target.closest("#reportCopy")) {
         const text = turnReport($("#reportWhy").value);
         const out = $("#reportOut");
@@ -665,18 +669,20 @@
     flash("Undid turn " + state.turn);
   }
 
-  function newCareer() {
-    const btn = $("#newCareer");
+  // Two taps start over (the first arms it for 3 seconds). btn: the button pressed.
+  function newCareer(btn) {
+    btn = btn || $("#newCareer");
+    const label = btn.dataset.label || (btn.dataset.label = btn.textContent);
     if (!resetArmed) {
       btn.textContent = "Tap again to reset";
       btn.classList.add("warn");
-      resetArmed = setTimeout(() => { resetArmed = null; btn.textContent = "New career"; btn.classList.remove("warn"); }, 3000);
+      resetArmed = setTimeout(() => { resetArmed = null; btn.textContent = label; btn.classList.remove("warn"); }, 3000);
       return;
     }
     clearTimeout(resetArmed);
     resetArmed = null;
     state = freshState(state);
-    btn.textContent = "New career";
+    btn.textContent = label;
     btn.classList.remove("warn");
     commit(true);
     flash("New career started at turn 1");
@@ -1273,6 +1279,7 @@
     $("#risk").value = state.risk;
     $("#raceBonus").value = state.raceBonus || 0;
     $("#maxEnergy").value = state.maxEnergy;
+    $("#resetMode").value = state.resetMode || "ace";
     $("#energy").max = state.maxEnergy;
     $("#energy").value = state.energy;
     $("#energyNum").value = state.energy;
@@ -1367,12 +1374,20 @@
     const a = rec.action;
     const kind = a.kind;
     $("#call").className = "panel call k-" + kind + (a.stat ? " s-" + a.stat : "");
+    const rc = E.runCheck(state, sc);
+    const rcHead = { reset: "Reset this run", borderline: "Borderline run", unknown: "Reset check: the coach needs to know", wait: "Reset check coming up", ok: "Run check: keep going" };
+    const runBox = rc ? `<div class="runcheck rc-${rc.verdict}" ${rc.verdict === "reset" ? 'role="alert"' : ""}>
+        <div class="rc-head">${esc(rcHead[rc.verdict])}</div>
+        <ul>${rc.items.map((it) => `<li class="rc-${it.status}"><b>${esc(it.label)}:</b> ${esc(it.why)}</li>`).join("")}</ul>
+        ${rc.verdict === "reset" ? `<button type="button" class="btn ghost small warn" id="rcNew">Start a new career</button>` : ""}
+      </div>` : "";
     const vs = rec.versus ? `<div class="versus">Beats <b>${esc(rec.versus.label)}</b> by ${score(rec.versus.gap)} points, mostly on ${esc(rec.versus.because)}.</div>` : "";
     const after = a.forced ? "" : `<div class="after">After this: energy about <b>${rec.after.energy}</b>, mood <b>${E.MOODS[rec.after.mood]}</b>.</div>`;
     $("#call").innerHTML = `
       <div class="eyebrow">${esc(rec.turn.text)} · ${esc(rec.phase.name)}</div>
       <div class="headline">${a.prefix.map((p) => `<span class="pre">${esc(p)} →</span>`).join(" ")}<span>${esc(a.label)}</span></div>
       <div class="pill-row"><span class="pill c-${rec.confidence.replace(" ", "-")}">${esc(rec.confidence)}</span>${a.kind === "train" ? `<span class="pill">score ${score(a.value)}</span>` : ""}</div>
+      ${runBox}
       ${rec.reasons.length ? `<ul class="why">${rec.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
       ${vs}${after}
       ${rec.events.length ? `<div class="events">${rec.events.map((e) => `<div class="ev"><b>${esc(e.label)}</b> ${esc(e.tip || "")}</div>`).join("")}</div>` : ""}
