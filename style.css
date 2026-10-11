@@ -500,3 +500,19 @@ table.tp tr.tp-tight td:last-child { color: var(--gold); }
 .must-result { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: .9rem; }
 .must-result ul { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 3px; }
 .must-result li.miss { color: var(--warn); }
+
+/* Deck optimizer: target stats and the predicted stat line. */
+.cm-targets { display: grid; gap: 6px; }
+.tg-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.tg-row .field { min-width: 0; }
+.tg-row input { width: 100%; min-width: 0; padding-left: 6px; padding-right: 4px; }
+.tg-row .field span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 520px) { .tg-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.predicted { display: grid; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: .9rem; min-width: 0; }
+table.pred { width: 100%; max-width: 520px; border-collapse: collapse; table-layout: fixed; }
+table.pred th { font-size: .72rem; color: var(--muted); font-weight: 600; text-align: right; padding: 2px 3px; overflow: hidden; text-overflow: ellipsis; }
+table.pred td { padding: 2px 3px; vertical-align: top; text-align: right; }
+table.pred .short { color: var(--bad); }
+table.pred .over { color: var(--accent); }
+.pred-help summary { cursor: pointer; font-size: .85rem; color: var(--accent); }
+.pred-help p { margin: 6px 0 0; }

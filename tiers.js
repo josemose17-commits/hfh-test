@@ -208,8 +208,13 @@
       });
       if (!changed) break;
     }
-    // Each card's value with the other five fixed, and the next-best card for its slot. Scores
-    // shown leave out the must-have bonus; gives lists the must-haves the card brings.
+    return describeDeck(opts, deck, pool, borrowPool);
+  }
+
+  // A finished deck as the page shows it: each card's value with the other five fixed and the
+  // next-best card for its slot (scores leave out the must-have bonus; gives lists the
+  // must-haves the card brings), the deck's best skills and its must-have coverage.
+  function describeDeck(opts, deck, pool, borrowPool) {
     const cards = deck.map((c, i) => {
       const rest = deck.filter((_, j) => j !== i);
       const own = rank(opts, D.card(c.id).ty, rest, [c])[0] || { score: 0, base: 0, skill: 0, must: 0, skills: [], gives: [] };
@@ -231,6 +236,18 @@
     ctx.races = 0;
     const sv = skillValue(deck, ctx);
     return { cards, skills: sv.list.filter((s) => s.surplus > 0 && s.p >= 0.15).slice(0, 10), must: sv.must };
+  }
+
+  // The whole deck's skill score in stat points (1 L = 60, skill points at 0.35 each, as in
+  // optimizer.js) and its must-have bonus, for the target-stat search.
+  function deckSkills(opts, deck) {
+    const ctx = makeCtx(opts);
+    const ov = opts.overrides || {};
+    ctx.speedWeight = 1;
+    ctx.spWeight = 0.35;
+    ctx.races = weightsFor(opts.scenario, "speed", ov.general).races.slice(0, 3).reduce((a, b) => a + b, 0);
+    const sv = skillValue(deck, ctx);
+    return { value: sv.value, mustValue: sv.mustValue, must: sv.must };
   }
 
   // Target skills for a parent deck, as { skill id: weight in lengths }. Only white skills
@@ -260,7 +277,7 @@
     return out;
   }
 
-  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, skillValue, entry, parentTargets };
+  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaTiers = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);
