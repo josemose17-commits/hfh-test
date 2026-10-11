@@ -5,6 +5,7 @@
 // comes a skill score: the skills the card can hint or give through events, each valued by
 // its median length gain (L) on the chosen race minus its skill point cost, counting only
 // what the deck doesn't already cover and what the trainee doesn't already have.
+// Must-have skills (opts.must) come first: the deck covers every one some usable card gives.
 (function (root) {
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
   const EU = root.Euophrys || (typeof require !== "undefined" ? require("./vendor/euophrys.js") : null);
@@ -24,6 +25,11 @@
   const HINT_CHANCE = 0.075; // per turn trained with the card, before its hint frequency
   const TRAIN_SHARE = { type: 0.3, friend: 0.22 }; // share of training turns spent with the card
   const EVENT_SKILL_CHANCE = { 3: 0.8, 2: 0.65, 1: 0.5 };
+  // Must-have skills: covering one (a card in the deck can hint it or give it through an event)
+  // outweighs any card's score, so the builder covers each one it can. Past that, a better
+  // chance to actually be offered it counts a little (MUST_P for a sure thing).
+  const MUST_COVER = 1e6;
+  const MUST_P = 500;
 
   const byKey = new Map();
   function entry(id, lb) {
@@ -83,13 +89,21 @@
     // A race build only has the skill points for so many skills; a parent wants every skill it
     // can get, since each one learned can become a skill spark to pass down.
     list.forEach((s, i) => { if (s.surplus > 0) value += s.p * s.surplus * (ctx.parent || i < 8 ? 1 : 0.4); });
-    return { value, list };
+    // Must-have skills: the chance the deck offers each, and which cards give it.
+    let mustValue = 0;
+    const must = (ctx.must || []).map((id) => {
+      const e = p.get(id);
+      const pr = e ? 1 - e[0] : 0;
+      if (pr > 0) mustValue += MUST_COVER + MUST_P * pr;
+      return { id, p: pr, src: e ? e[2] : [] };
+    });
+    return { value, list, must, mustValue };
   }
 
   function makeCtx(opts) {
     const t = opts.trainee ? D.trainee(opts.trainee) : null;
     const parent = opts.parent || null;
-    return {
+    const ctx = {
       parent: !!parent,
       // Parent decks value target skills by weight (in lengths) instead of race skill values.
       skills: parent ? parent.targets : opts.skills || {}, costs: opts.costs || {},
@@ -97,6 +111,9 @@
       known: new Set((t ? [].concat(t.us || [], t.is || [], t.as || []) : []).map(String)),
       traineeChar: t ? t.cid : null,
     };
+    // A must-have the trainee already has needs no card.
+    ctx.must = (opts.must || []).map(String).filter((id) => !ctx.known.has(id));
+    return ctx;
   }
 
   // Ranks candidates ([{id, lb}]) of one card type for the deck so far ([{id, lb}]).
@@ -116,14 +133,16 @@
     });
     const base = EU.processCards(cands.map((c) => entry(c.id, c.lb)), w, selected);
     const baseBy = new Map(base.map((x) => [x.id + ":" + x.lb, x]));
-    const before = skillValue(deck, ctx).value;
+    const before = skillValue(deck, ctx);
     return cands.map((c) => {
       const b = baseBy.get(c.id + ":" + c.lb);
       const sv = skillValue(deck.concat([c]), ctx);
-      const skill = (sv.value - before) * ctx.skillWeight;
+      const skill = (sv.value - before.value) * ctx.skillWeight;
+      const must = sv.mustValue - before.mustValue;
       const base = b.score * (opts.parent ? opts.parent.statsWeight : 1);
       return {
-        id: c.id, lb: c.lb, base, skill, score: base + skill, info: b.info,
+        id: c.id, lb: c.lb, base, skill, must, score: base + skill + must, info: b.info,
+        gives: sv.must.filter((m) => m.src.indexOf(c.id) !== -1).map((m) => m.id),
         skills: sv.list.filter((s) => s.src.indexOf(c.id) !== -1 && s.surplus > 0).slice(0, 3).map((s) => ({ id: s.id, L: s.L, p: s.p }))
       };
     }).sort((a, b) => b.score - a.score);
@@ -189,23 +208,29 @@
       });
       if (!changed) break;
     }
-    // Each card's value with the other five fixed, and the next-best card for its slot.
+    // Each card's value with the other five fixed, and the next-best card for its slot. Scores
+    // shown leave out the must-have bonus; gives lists the must-haves the card brings.
     const cards = deck.map((c, i) => {
       const rest = deck.filter((_, j) => j !== i);
-      const own = rank(opts, D.card(c.id).ty, rest, [c])[0] || { score: 0, base: 0, skill: 0, skills: [] };
+      const own = rank(opts, D.card(c.id).ty, rest, [c])[0] || { score: 0, base: 0, skill: 0, must: 0, skills: [], gives: [] };
       const from = (c.borrowed ? borrowPool : pool).filter((x) => x.id !== c.id && D.card(x.id).ty === D.card(c.id).ty);
       const alt = from.length ? rank(opts, D.card(c.id).ty, rest, from)[0] : null;
-      return { id: c.id, lb: c.lb, borrowed: !!c.borrowed, score: own.score, base: own.base, skill: own.skill, skills: own.skills, alt: alt ? { id: alt.id, lb: alt.lb, score: alt.score } : null };
+      return {
+        id: c.id, lb: c.lb, borrowed: !!c.borrowed, score: own.score - own.must, base: own.base, skill: own.skill, skills: own.skills, gives: own.gives,
+        alt: alt ? { id: alt.id, lb: alt.lb, score: alt.score - alt.must, losesMust: own.must - alt.must >= MUST_COVER } : null
+      };
     });
     const ctx = makeCtx(opts);
     ctx.spWeight = 1;
     ctx.speedWeight = 1;
     if (opts.parent) {
-      const sum = skillValue(deck, ctx).list.filter((s) => s.surplus > 0);
-      return { cards, skills: sum, expected: sum.reduce((a, s) => a + s.p, 0) };
+      const sv = skillValue(deck, ctx);
+      const sum = sv.list.filter((s) => s.surplus > 0);
+      return { cards, skills: sum, expected: sum.reduce((a, s) => a + s.p, 0), must: sv.must };
     }
     ctx.races = 0;
-    return { cards, skills: skillValue(deck, ctx).list.filter((s) => s.surplus > 0 && s.p >= 0.15).slice(0, 10) };
+    const sv = skillValue(deck, ctx);
+    return { cards, skills: sv.list.filter((s) => s.surplus > 0 && s.p >= 0.15).slice(0, 10), must: sv.must };
   }
 
   // Target skills for a parent deck, as { skill id: weight in lengths }. Only white skills

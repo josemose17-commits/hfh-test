@@ -488,3 +488,15 @@ table.tp tr.tp-tight td:last-child { color: var(--gold); }
 /* Number boxes in the stats table: no spinner, so 4-digit stats fit narrow columns. */
 .stat-table input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .stat-table input[type="number"]::-webkit-inner-spin-button, .stat-table input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* Deck optimizer: must-have skills. */
+.must { display: grid; gap: 6px; }
+.must .lockchip { white-space: normal; max-width: 100%; }
+.lockchip.warnchip { border-color: var(--warn); }
+.lockchip.warnchip .mini { color: var(--warn); }
+.must-tog { background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--gold); font-size: 1rem; line-height: 1; }
+.must-tog[aria-pressed="false"] { color: var(--muted); }
+.must-gives { color: var(--accent); }
+.must-result { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: .9rem; }
+.must-result ul { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 3px; }
+.must-result li.miss { color: var(--warn); }
