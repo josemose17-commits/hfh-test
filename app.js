@@ -1488,7 +1488,7 @@
   function cm() {
     if (!state.cm) state.cm = {};
     const c = state.cm;
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, sq: "", sfilter: "all", globalSkills: true };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, sq: "", sfilter: "all", globalSkills: true };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
     return c;
@@ -1572,7 +1572,7 @@
   const euOver = () => eu().over[euScen()] || (eu().over[euScen()] = { general: {}, tabs: {} });
   function euOpts(c, p) {
     const sv = skillMap(p.id, c.style);
-    const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must.slice() };
+    const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: !!c.independent };
     if (c.goal === "ace" || c.goal === "debuff") {
       o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, (id) => skillInfo(id)[2]), statsWeight: +c.statsW };
     }
@@ -1584,7 +1584,7 @@
     const scen = euScen();
     const auto = !eu().scen;
     const tab = T.TABS[ty || "speed"][0];
-    const w = T.weightsFor(scen, ty || "speed", Object.assign({}, euOver().general, euOver().tabs[tab]));
+    const w = T.weightsFor(scen, ty || "speed", Object.assign({}, euOver().general, euOver().tabs[tab]), null, !!cm().independent);
     const num = (k, v, step, path) => `<input type="number" step="${step}" data-eu="${path}" data-k="${k}" value="${v}">`;
     const coachName = (SCENARIOS.find((x) => x.id === state.scenario) || {}).name;
     return `<details class="eu-settings" ${euOpen ? "open" : ""}>
@@ -1618,7 +1618,7 @@
     const ty = state.tab === "tiers" ? (tier().type || "speed") : "speed";
     const tab = T.TABS[ty][0];
     const bag = where === "tab" ? (o.tabs[tab] = o.tabs[tab] || {}) : o.general;
-    const base = T.weightsFor(euScen(), ty, Object.assign({}, o.general, o.tabs[tab]));
+    const base = T.weightsFor(euScen(), ty, Object.assign({}, o.general, o.tabs[tab]), null, !!cm().independent);
     const v = el.type === "checkbox" ? el.checked : +el.value;
     if (field) { const arr = (bag[field] || base[field]).slice(); arr[+el.dataset.k] = v; bag[field] = arr; }
     else bag[el.dataset.k] = v;
@@ -1633,7 +1633,7 @@
 
   function optKey() {
     const c = cm();
-    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer() {
@@ -1645,18 +1645,20 @@
     optRun = { f: 0 };
     renderCM();
     const key = optKey();
-    const tg = c.goal === "race" ? cmTargets(c) : null;
+    const tg = cmTargets(c);
+    // Independent Training parent runs race a G1-heavy agenda: about 1 turn in 4.
+    const raceShare = c.independent ? 0.25 : undefined;
     const done = (r, opts, fit) => {
       // The predicted stats: the target search's own careers, or a readout from the same
       // simulation for Euophrys' pick.
       let est = fit ? fit.after : null;
       if (!est) {
         try {
-          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), runs: 16 });
+          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare, runs: 16 });
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
-      optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, independent: !!c.independent, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       wish = null;
       optRun = null;
       if (state.tab === "cm") renderCM();
@@ -1670,7 +1672,7 @@
         if (!tg) { done(r, opts, null); return; }
         // Target stats: start from Euophrys' pick and swap cards toward the targets, a slot at
         // a time so the page can show progress.
-        const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: tg, caps: E.capsFor(state, scenario()) };
+        const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: tg, caps: E.capsFor(state, scenario()), raceShare };
         const search = OPT.targetSearch(opts, sim, r.cards, pool, bp);
         const tick = () => {
           try {
@@ -1769,17 +1771,19 @@
       <h3>Deck optimizer</h3>
       <div class="field"><span>Build a deck for</span><div class="seg style-seg" role="radiogroup" aria-label="Deck goal">${GOALS.map(([k, l]) => `<button type="button" role="radio" aria-checked="${goal === k}" data-cm-goal="${k}">${l}</button>`).join("")}</div></div>
       ${goal !== "race" ? `<p class="mini"><b>${goal === "ace" ? "Ace parent" : "Debuffer parent"}:</b> picks the cards that give your parent the most ${goal === "ace" ? "white skills that are strong on this race (weighted by median L for the running style)" : "white debuff skills that work on this race's distance and surface with your running style"}, so she can learn them and pass them down as skill sparks. Gold skills don't count, since only white skills become sparks. Every skill counts, not just the best 8, and stats only count as much as you choose.</p>
-        <label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"]], c.statsW)}</select></label>` : ""}
+        <label class="field"><span>Stats still count</span><select data-cm="statsW">${opt([["0", "Not at all"], ["0.1", "A little"], ["0.25", "Some"], ["0.5", "Half"], ["1", "Fully"]], c.statsW)}</select></label>` : ""}
       <p class="mini">Builds the deck the way you'd use <a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>: it picks the best card, then the best card given that one, and so on, with Euophrys' own scoring for the scenario. On top, every skill a card can hint is scored by its median length gain on this race as a ${STYLE_LABEL[c.style]} runner. Then it rechecks each slot with the other five fixed.</p>
       ${traineePickerHTML(p, "data-cm-style")}
       ${nSkills ? "" : `<p class="mini warn">No skill values for this race yet${svCache[p.id] === "loading" ? " (loading…)" : ""}, so skills won't count. Paste your own Umalator results below to add them.</p>`}
       <div class="row-wrap">
         <label class="chip-toggle"><input type="checkbox" data-cm="ownedOnly" ${c.ownedOnly ? "checked" : ""}> Only cards I own (${n})</label>
         <label class="chip-toggle"><input type="checkbox" data-cm="borrow" ${c.borrow ? "checked" : ""}> Borrow 1 card from a friend</label>
+        <label class="chip-toggle" title="The 50-minute auto mode"><input type="checkbox" data-cm="independent" ${c.independent ? "checked" : ""}> Independent Training</label>
         ${goal === "race" ? `<label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt(SKILL_W, c.skillW)}</select></label>` : ""}
       </div>
+      ${c.independent ? `<p class="mini it-note"><b>Independent Training:</b> a card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.</p>` : ""}
       ${compHTML(c)}
-      ${goal === "race" ? targetsHTML(p, c) : ""}
+      ${targetsHTML(p, c)}
       ${euSettingsHTML("speed")}
       <div class="row-wrap">
         <label class="field grow"><span>Must include (optional)</span><input id="cmLock" list="cardListAll" placeholder="A card that must be in the deck" autocomplete="off"></label>
@@ -1789,8 +1793,8 @@
       ${mustHTML(c)}
       ${c.ownedOnly && n < 6 ? `<p class="mini warn">You've marked ${n} owned card${n === 1 ? "" : "s"}. Mark yours in the <button type="button" class="linkish" data-goto-tab="cards">Support cards</button> tab, or untick “Only cards I own” to search every Global SSR and SR at max limit break.</p>` : ""}
       <div class="row-wrap run-row">
-        <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? (goal === "race" && cmTargets(c) ? "Simulating careers…" : "Building…") : "Find my best deck"}</button>
-        ${running && goal === "race" && cmTargets(c) ? `<span class="progress" id="cmProg"><i style="width:${Math.round((optRun.f || 0) * 100)}%"></i></span>` : ""}
+        <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? (cmTargets(c) ? "Simulating careers…" : "Building…") : "Find my best deck"}</button>
+        ${running && cmTargets(c) ? `<span class="progress" id="cmProg"><i style="width:${Math.round((optRun.f || 0) * 100)}%"></i></span>` : ""}
       </div>
       <div id="cmOut">${optResult ? optResultHTML(optResult, c) : ""}</div>
     </section>`;
@@ -1801,10 +1805,11 @@
     const bt = E.BUILDS[p.build].target;
     const t = c.targets || {};
     const coach = state.targets && E.STATS.some((s) => state.targets[s] > 0);
+    const parent = c.goal === "ace" || c.goal === "debuff";
     return `<div class="cm-targets">
-      <span class="mini"><b>Target stats</b> (optional). Blank: Euophrys' pick. Set any, and the optimizer simulates careers and swaps cards until the predicted stats come as close to your targets as it can, keeping good skills and your must-haves. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.</span>
+      <span class="mini"><b>Target stats</b> (optional). Blank: Euophrys' pick. Set any, and the optimizer simulates careers and swaps cards until the predicted stats come as close to your targets as it can, keeping good skills and your must-haves. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
       <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${bt[s]}"></label>`).join("")}</div>
-      ${coach || cmTargets(c) ? `<div class="row-wrap">${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
+      ${coach || cmTargets(c) || parent ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
     </div>`;
   }
 
@@ -1899,14 +1904,17 @@
       const d = r.est.stats[i] - t;
       return `<td class="num">${r.est.stats[i]}<div class="mini">${t}</div><div class="mini ${d < 0 ? "short" : "over"}">${d < 0 ? d : "+" + d}</div></td>`;
     };
+    const parent = r.goal === "ace" || r.goal === "debuff";
+    const blue = (x) => (x > 1100 ? 10 : x >= 600 ? 5 : 0);
     return `<div class="predicted">
       <b>${f ? "Predicted stats vs your targets" : "Predicted stats"}</b> <span class="mini">(average of 16 simulated careers${f ? "; rows: predicted, target, difference" : ""})</span>
       <table class="pred"><thead><tr>${E.STATS.map((s) => `<th>${E.STAT_LABELS[s]}</th>`).join("")}</tr></thead>
-        <tbody><tr>${E.STATS.map((_, i) => cell(i)).join("")}</tr></tbody></table>
-      <p class="mini">Skill points: about ${r.est.sp}.</p>
+        <tbody><tr>${E.STATS.map((_, i) => cell(i)).join("")}</tr>
+        ${parent ? `<tr class="blue-row">${E.STATS.map((_, i) => `<td class="num"><span class="mini">3★ ${blue(r.est.stats[i])}%</span></td>`).join("")}</tr>` : ""}</tbody></table>
+      <p class="mini">Skill points: about ${r.est.sp}.${parent ? " 3★: the chance of a 3-star blue spark if that stat is the one picked (uma.guide: 0% under 600, 5% to 1100, 10% over). Inheritance isn't in these numbers and adds more." : ""}</p>
       ${f ? `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${f.swaps.length ? " Swapped for your targets: " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : " Euophrys' pick was already the closest."}</p>` : ""}
       <details class="pred-help"><summary>What the predicted stats include</summary>
-        <p class="mini"><b>Included:</b> your trainee's starting stats and growth bonuses (100 each without a trainee); every training turn up to the finale, with your cards dealt onto trainings by their specialty priority and the best training picked for your targets each turn (rest when energy runs low, failures by energy); the game's training formula with friendship at bond 80+, training effectiveness, stat bonuses, mood effect and unique effects; facility levels (+1 per 4 trainings, level 5 at summer camp); bonds (+7 per training, +5 per hint, plus card events); each card's event stats, skill points and energy; about 120 per stat from random events; optional races on about 1 turn in 10 after the debut (more in Trackblazer) with your race bonus; half gains past 1200; your stat caps with sparks; a flat multiplier for the scenario's own bonuses.</p>
+        <p class="mini"><b>Included:</b> your trainee's starting stats and growth bonuses (100 each without a trainee); every training turn up to the finale, with your cards dealt onto trainings by their specialty priority and the best training picked for your targets each turn (rest when energy runs low, failures by energy); the game's training formula with friendship at bond 80+, training effectiveness, stat bonuses, mood effect and unique effects; facility levels (+1 per 4 trainings, level 5 at summer camp); bonds (+7 per training, +5 per hint, plus card events); each card's event stats, skill points and energy; about 120 per stat from random events; optional races on ${r.independent ? "about 1 turn in 4 (a G1-heavy Independent Training agenda)" : "about 1 turn in 10 after the debut (more in Trackblazer)"} with your race bonus; half gains past 1200; your stat caps with sparks; a flat multiplier for the scenario's own bonuses.</p>
         <p class="mini"><b>Not included, so add these yourself:</b> inheritance (the two inspiration events from your parents' sparks), goal and finale race rewards, friend card outings, New Year events, hint events' stats, scenario mechanics beyond the flat multiplier (Grand Concert songs, items, Overdrive and so on), and mood drops (it assumes Great all career). Real runs usually end higher, mostly from inheritance; what matters is how decks compare.</p>
       </details>
     </div>`;
@@ -2035,6 +2043,7 @@
     }
     if (t.closest("#cmTgCoach")) { c.targets = Object.assign({}, state.targets); save(); renderCM(); return true; }
     if (t.closest("#cmTgClear")) { c.targets = {}; save(); renderCM(); return true; }
+    if (t.closest("#cmTgSpark")) { c.targets = { speed: 1100, stamina: 1100, power: 1100, guts: 1100, wit: 1100 }; save(); renderCM(); return true; }
     if (t.closest("#cmMustAdd")) {
       const id = skillIdByName($("#cmMust").value);
       if (!id) { flash("Pick a skill from the list first. It lists the skills support cards can give."); return true; }
@@ -2218,6 +2227,7 @@
           <label class="field grow"><span>Race for skill values</span><select data-tier="preset">${presetOpts}</select></label>
           <div class="field"><span>Running style</span><div class="seg style-seg" role="radiogroup">${STYLES.map(([k, l]) => `<button type="button" role="radio" aria-checked="${c.style === k}" data-tier-style="${k}">${l}</button>`).join("")}</div></div>
           <label class="field"><span>Skill hints count</span><select data-tier="skillW">${opt(SKILL_W, c.skillW)}</select></label>
+          <label class="chip-toggle" title="The 50-minute auto mode: skills only a card's 3rd chain event gives count much less, and Race Bonus counts for a G1-heavy agenda"><input type="checkbox" data-tier="independent" ${c.independent ? "checked" : ""}> Independent Training</label>
           <label class="field"><span>Show</span><select data-tier="show1">${opt(TIER_SHOW, t.show1)}</select></label>
           <label class="field"><span>and</span><select data-tier="show2">${opt(TIER_SHOW, t.show2)}</select></label>
         </div>
@@ -2247,6 +2257,7 @@
     const v = el.type === "checkbox" ? el.checked : el.value;
     if (k === "preset") c.preset = v;
     else if (k === "skillW") c.skillW = v;
+    else if (k === "independent") c.independent = v;
     else t[k] = v;
     save();
     renderTiers();

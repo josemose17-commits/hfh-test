@@ -152,3 +152,45 @@ test("must-have skills: a locked deck makeup still covers what it can", () => {
   const wit = r.cards.find((c) => D.card(c.id).ty === "wit");
   assert.ok(giversOf(witOnly, [D.card(wit.id)]).length, "the Wit slot goes to a card that gives it");
 });
+
+// ---- Independent Training ----
+test("Independent Training: skills only the 3rd chain event gives count much less", () => {
+  const kita = glob.find((c) => c.n === "Kitasan Black" && c.r === 3 && (c.es || []).length >= 2);
+  const late = T.lateChainSkills(kita);
+  assert.ok(late.size >= 1, "her last chain event gives a skill no earlier event does");
+  const id = [...late][0];
+  const skills = { [id]: 1 };
+  const pOf = (independent) => T.skillValue([{ id: kita.id, lb: 4 }], { skills, costs: {}, known: new Set(), it: independent, races: 0, speedWeight: 1, spWeight: 1 }).list.find((s) => s.id === id).p;
+  const normal = pOf(false), it = pOf(true);
+  assert.ok(it < normal * 0.5, normal + " -> " + it);
+  // Skills from her first two chain events keep their chance.
+  const early = (kita.es || []).map(String).find((x) => !late.has(x));
+  if (early) {
+    const sk = { [early]: 1 };
+    const p = (independent) => T.skillValue([{ id: kita.id, lb: 4 }], { skills: sk, costs: {}, known: new Set(), it: independent, races: 0, speedWeight: 1, spWeight: 1 }).list.find((s) => s.id === early).p;
+    assert.ok(Math.abs(p(true) - p(false)) < 0.05);
+  }
+});
+
+test("Independent Training: a G1-heavy agenda for race bonus, unless you set your own race counts", () => {
+  assert.deepStrictEqual(T.weightsFor("GL", "speed", {}, null, true).races.slice(0, 3), T.IT_RACES);
+  assert.deepStrictEqual(T.weightsFor("GL", "speed", { races: [5, 1, 0, 3] }, null, true).races, [5, 1, 0, 3]);
+  assert.notDeepStrictEqual(T.weightsFor("GL", "speed", {}, null, false).races.slice(0, 3), T.IT_RACES);
+});
+
+test("parent decks with stat targets: 'A little' keeps the skills and still gets closer to the targets", () => {
+  const O = require("../optimizer.js");
+  const { SCENARIOS } = require("../scenarios.js");
+  const X = require("../data/debuffs.js");
+  const P = require("../data/presets.js");
+  const pr = P.list.find((p) => p.course.dist === "Long");
+  const targets = T.parentTargets("debuff", pr, "Senkou", {}, X);
+  const pool = glob.filter((c) => c.r >= 2).map((c) => ({ id: c.id, lb: 4 }));
+  const opts = { scenario: "GL", parent: { targets, statsWeight: 0.1 }, independent: true };
+  const start = T.buildDeck(opts, pool, []).cards;
+  const s = O.targetSearch(opts, { scenario: SCENARIOS.find((x) => x.id === "grandlive"), build: "long", target: { speed: 1100, stamina: 1100, power: 1100, guts: 1100, wit: 1100 }, raceShare: 0.25 }, start, pool, []);
+  while (s.next());
+  const r = s.result();
+  assert.ok(r.after.short <= r.before.short);
+  assert.ok(T.deckSkills(opts, r.cards).value >= 0.9 * T.deckSkills(opts, start).value, "skills mostly kept");
+});
