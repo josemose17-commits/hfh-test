@@ -10,6 +10,7 @@
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
   const EU = root.Euophrys || (typeof require !== "undefined" ? require("./vendor/euophrys.js") : null);
   const cardsData = () => root.EuophrysCards || (typeof require !== "undefined" ? require("./data/euophrys-cards.js") : null);
+  const eventsData = () => root.UmaCardEvents || (typeof require !== "undefined" ? require("./data/card-events.js") : null);
 
   // Euophrys' Global scenario presets, and which one each coach scenario uses.
   const SCENARIOS = [["URA", "URA Finale"], ["Aoharu", "Unity Cup"], ["MANT", "Trackblazer"], ["GL", "Grand Concert"], ["GM", "Grand Masters"]];
@@ -28,6 +29,36 @@
   // Must-have skills: covering one (a card in the deck can hint it or give it through an event)
   // outweighs any card's score, so the builder covers each one it can. Past that, a better
   // chance to actually be offered it counts a little (MUST_P for a sure thing).
+  // Independent Training (the 50-minute auto mode): a card's 3rd chain event rarely fires
+  // (uma.guide), so a skill only that event (or a later one) gives counts at IT_LATE_CHAIN of
+  // its usual chance. Parent runs there race a G1-heavy agenda for affinity and race sparks,
+  // and the stats races give scale with Race Bonus, so Euophrys' race counts become IT_RACES
+  // (G1, G2/G3, OP) unless you've set your own.
+  const IT_LATE_CHAIN = 0.2;
+  const IT_RACES = [15, 3, 0];
+  const lateMemo = new Map();
+  function lateChainSkills(card) {
+    if (lateMemo.has(card.id)) return lateMemo.get(card.id);
+    const ev = eventsData();
+    const ce = ev && ev.cards && ev.cards[card.id];
+    const out = new Set();
+    if (ce && ce.chain && ce.chain.length >= 3) {
+      const skillsOf = (eid) => {
+        const set = new Set();
+        const e = ev.events[eid];
+        ((e && e.c) || []).forEach((ch) => [ch, ch.ok || {}, ch.ng || {}].forEach((x) => {
+          (x.h || []).forEach((h) => set.add(String(h[0])));
+          (x.g || []).forEach((g) => set.add(String(g)));
+        }));
+        return set;
+      };
+      const early = new Set();
+      ce.chain.slice(0, 2).concat(ce.other || []).forEach((eid) => skillsOf(eid).forEach((x) => early.add(x)));
+      ce.chain.slice(2).forEach((eid) => skillsOf(eid).forEach((x) => { if (!early.has(x)) out.add(x); }));
+    }
+    lateMemo.set(card.id, out);
+    return out;
+  }
   const MUST_COVER = 1e6;
   const MUST_P = 500;
 
@@ -41,10 +72,11 @@
 
   // Euophrys' weights for one card type in one scenario, with your overrides and the trainee's
   // growth bonuses (in place of Euophrys' flat +6%).
-  function weightsFor(scen, ty, overrides, trainee) {
+  function weightsFor(scen, ty, overrides, trainee, independent) {
     const s = EU.getScenario("gl", scen);
     const [tab, type] = TABS[ty] || TABS.speed;
     const w = Object.assign({}, s.general, s[tab], { type });
+    if (independent) w.races = IT_RACES.concat(w.races.slice(3));
     const o = overrides || {};
     Object.keys(o).forEach((k) => { if (o[k] != null) w[k] = Array.isArray(o[k]) ? o[k].slice() : o[k]; });
     const t = trainee ? D.trainee(trainee) : null;
@@ -74,7 +106,8 @@
         p.set(k, cur);
       };
       hs.forEach((id) => add(id, 1 - Math.exp(-hints / Math.max(1, hs.length)), lv));
-      (card.es || []).forEach((id) => add(id, EVENT_SKILL_CHANCE[card.r] || 0.5, 1));
+      const late = ctx.it ? lateChainSkills(card) : null;
+      (card.es || []).forEach((id) => add(id, (EVENT_SKILL_CHANCE[card.r] || 0.5) * (late && late.has(String(id)) ? IT_LATE_CHAIN : 1), 1));
     });
     const list = [];
     p.forEach(([miss, lv, src], id) => {
@@ -110,6 +143,7 @@
       skillWeight: parent ? 1 : opts.skillWeight != null ? opts.skillWeight : 1,
       known: new Set((t ? [].concat(t.us || [], t.is || [], t.as || []) : []).map(String)),
       traineeChar: t ? t.cid : null,
+      it: !!opts.independent,
     };
     // A must-have the trainee already has needs no card.
     ctx.must = (opts.must || []).map(String).filter((id) => !ctx.known.has(id));
@@ -121,7 +155,7 @@
   function rank(opts, ty, deck, candidates) {
     const ctx = makeCtx(opts);
     const ov = opts.overrides || {};
-    const w = weightsFor(opts.scenario, ty, Object.assign({}, ov.general, ov.tabs && ov.tabs[TABS[ty][0]]), opts.trainee);
+    const w = weightsFor(opts.scenario, ty, Object.assign({}, ov.general, ov.tabs && ov.tabs[TABS[ty][0]]), opts.trainee, opts.independent);
     ctx.spWeight = w.stats[5];
     ctx.speedWeight = w.stats[0];
     ctx.races = w.races.slice(0, 3).reduce((a, b) => a + b, 0);
@@ -245,7 +279,7 @@
     const ov = opts.overrides || {};
     ctx.speedWeight = 1;
     ctx.spWeight = 0.35;
-    ctx.races = weightsFor(opts.scenario, "speed", ov.general).races.slice(0, 3).reduce((a, b) => a + b, 0);
+    ctx.races = weightsFor(opts.scenario, "speed", ov.general, null, opts.independent).races.slice(0, 3).reduce((a, b) => a + b, 0);
     const sv = skillValue(deck, ctx);
     return { value: sv.value, mustValue: sv.mustValue, must: sv.must };
   }
@@ -277,7 +311,7 @@
     return out;
   }
 
-  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets };
+  const api = { SCENARIOS, FROM_COACH, TABS, weightsFor, rank, buildDeck, describeDeck, deckSkills, skillValue, entry, parentTargets, lateChainSkills, IT_RACES, IT_LATE_CHAIN };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaTiers = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

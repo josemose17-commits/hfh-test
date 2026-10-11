@@ -49,7 +49,7 @@
       start: t && t.b ? t.b.slice(0, 5) : [100, 100, 100, 100, 100],
       skills: opts.skills || {}, // skill id -> median L on the chosen course and style
       costs: opts.costs || {}, // skill id -> skill point cost, for skills deck.js doesn't know
-      raceShare: RACE_SHARE_BY_SCENARIO[sc.id] || RACE_SHARE,
+      raceShare: opts.raceShare != null ? opts.raceShare : RACE_SHARE_BY_SCENARIO[sc.id] || RACE_SHARE,
       skillWeight: opts.skillWeight != null ? opts.skillWeight : 1,
       known: new Set((t ? [].concat(t.us || [], t.is || [], t.as || []) : []).map(String)),
       runs: opts.runs || 10,
@@ -430,13 +430,19 @@
     const ctx = buildCtx(Object.assign({}, sim, { runs: FIT_RUNS }));
     const comp = opts.comp || {};
     const locked = new Set(opts.locked || []);
-    const sw = opts.skillWeight != null ? opts.skillWeight : 1;
+    // Parent decks: the skills are the point, so a swap may cost at most a share of the start
+    // deck's skill score, set by "Stats still count" (A little 4%, Some 10%, Half 20%, Fully
+    // 40%); within that, the closest stats win. skillWeight is the racing slider.
+    const sw = opts.parent ? 1 : opts.skillWeight != null ? opts.skillWeight : 1;
+    const giveUp = opts.parent ? Math.min(0.4, 0.4 * (opts.parent.statsWeight || 0)) : null;
+    let floor = -Infinity;
     const cache = new Map();
     const evaluate = (deck, c) => {
       const s = simulate(c, deck.map((x) => ({ card: D.card(x.id), lb: x.lb })));
       const fit = targetFit(c, s.stats, s.sp);
       const sk = Tr.deckSkills(opts, deck);
-      return { value: fit.value + sw * sk.value + sk.mustValue, short: fit.short, stats: s.stats, sp: s.sp };
+      const over = sk.value < floor - 1e-9 ? 1e9 : 0;
+      return { value: fit.value + sw * sk.value + sk.mustValue - over, short: fit.short, stats: s.stats, sp: s.sp, skill: sk.value };
     };
     const score = (deck) => {
       const k = deck.map((x) => x.id + ":" + x.lb).sort().join(",");
@@ -444,6 +450,7 @@
       return cache.get(k);
     };
     let deck = start.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
+    if (giveUp != null) floor = (1 - giveUp) * Tr.deckSkills(opts, deck).value;
     let cur = score(deck);
     const nOf = (cards, t) => cards.filter((x) => D.card(x.id).ty === t).length;
     const most = { friend: comp.friend != null ? comp.friend : Math.max(1, nOf(deck, "friend")), group: comp.group != null ? comp.group : Math.max(1, nOf(deck, "group")) };
@@ -477,6 +484,7 @@
     // The start and final decks, rescored with more careers for the readout.
     function result() {
       const full = buildCtx(Object.assign({}, sim, { runs: 16 }));
+      floor = -Infinity;
       return { cards: deck, swaps, before: evaluate(start, full), after: evaluate(deck, full), target: ctx.target, caps: ctx.caps };
     }
     return { next, result, progress: () => (slots.length ? Math.min(1, step / (slots.length * 2)) : 1) };
