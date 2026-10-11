@@ -511,10 +511,11 @@
     const caps = capsFor(state, sc);
     const calib = calibFactor(state);
     const target = Object.assign({}, build.target, state.targets || {});
+    STATS.forEach((k) => { target[k] = Math.min(target[k], caps[k]); });
     const ctx = {
       state, sc, calib, caps,
       w: build.w,
-      // Your own targets (the Stats table) override the build's.
+      // Your own targets (the Stats table) override the build's; none goes past the cap.
       target,
       need: needFactors(state.stats || {}, target, build.w),
       stats: state.stats || {},
@@ -822,6 +823,58 @@
     return plan;
   }
 
+  // What a song's bonus is worth over the turns left after you buy it (weighted stat points).
+  function songBaseValue(song, build, left) {
+    let v = 0;
+    Object.entries(song.extra || {}).forEach(([k, n]) => { v += k === "sp" ? n * SP_VALUE * left * 0.75 : n * build.w[k] * left * 0.2; });
+    Object.entries(song.once || {}).forEach(([k, n]) => { v += k === "sp" ? n * SP_VALUE : n * build.w[k]; });
+    // Friendship %: about 45% of the remaining turns are friendship trainings worth ~30 weighted stats.
+    if (song.fb) v += (song.fb / 100) * 0.45 * left * 30 * build.w.speed * 0.75;
+    return v;
+  }
+
+  // The run's token plan: the songs still to buy (the best value per token, up to 18 in all,
+  // counting ones that unlock later), the tokens they cost, what you hold, and about what
+  // training brings in by the Grand Live. A token type you'll run short of is worth more.
+  const GL_SONG_GOAL = 18;
+  function tokenPlan(state, sc) {
+    if (!sc.songs || !sc.tokenOf || state.turn > 72) return null;
+    const learned = (state.gl && state.gl.songs) || {};
+    const have = ((state.gl && state.gl.tokens) || [0, 0, 0, 0, 0]).slice();
+    const build = BUILDS[state.build] || BUILDS.medium;
+    const nLearned = Object.keys(learned).length;
+    const toBuy = Math.max(0, GL_SONG_GOAL - nLearned);
+    const cands = sc.songs.filter((song) => learned[song.id] == null && song.from <= 72).map((song) => {
+      const at = Math.max(state.turn, song.from);
+      const v = songBaseValue(song, build, Math.max(0, sc.totalTurns - at));
+      const cost = song.cost.reduce((a, b) => a + b, 0);
+      return { song, v, cost, per: v / Math.max(1, cost) };
+    }).sort((a, b) => b.per - a.per).slice(0, toBuy || 0);
+    const need = [0, 0, 0, 0, 0];
+    cands.forEach((c) => c.song.cost.forEach((x, i) => { need[i] += x; }));
+    // Expected tokens from training until the Grand Live: about 3 in 4 turns are trainings,
+    // spread over the facilities like your build's stat weights, ~18 tokens each, and about
+    // 40% of them friendship trainings that add a second type.
+    const turnsLeft = Math.max(0, 72 - state.turn);
+    const wsum = STATS.reduce((a, k) => a + build.w[k], 0);
+    const supply = [0, 0, 0, 0, 0];
+    const per = 16 + 2 * Math.min(4, Math.floor(state.turn / 18));
+    STATS.forEach((k) => {
+      const [pri, sec] = sc.tokenOf[k];
+      const n = turnsLeft * 0.75 * (build.w[k] / wsum);
+      supply[pri] += n * per;
+      supply[sec] += n * per * 0.6 * 0.4;
+    });
+    const short = need.map((x, i) => Math.max(0, x - have[i]));
+    const totalV = cands.reduce((a, c) => a + c.v, 0);
+    const totalCost = cands.reduce((a, c) => a + c.cost, 0);
+    const base = totalCost ? totalV / totalCost : 0;
+    // Price per token: a type you're short of by more than training will bring is a
+    // bottleneck (up to 1.5x a song's value per token); a type you have plenty of is worth little.
+    const price = short.map((x, i) => base * Math.min(1.5, x / Math.max(20, supply[i])));
+    return { songs: cands, toBuy, need, have, supply, short, price, base, cap: tokenCap(state, sc) };
+  }
+
   // Ranks songs you can learn now: value of the bonus over the rest of the run per token spent,
   // with a big push for songs that are still needed to fill the Hype gauge before the next live.
   function songAdvice(state, sc) {
@@ -832,11 +885,7 @@
     const left = Math.max(0, sc.totalTurns - state.turn);
     const hype = hypeStatus(state, sc);
     return sc.songs.filter((song) => learned[song.id] == null && song.from <= state.turn).map((song) => {
-      let v = 0;
-      Object.entries(song.extra || {}).forEach(([k, n]) => { v += k === "sp" ? n * SP_VALUE * left * 0.75 : n * build.w[k] * left * 0.2; });
-      Object.entries(song.once || {}).forEach(([k, n]) => { v += k === "sp" ? n * SP_VALUE : n * build.w[k]; });
-      // Friendship %: about 45% of the remaining turns are friendship trainings worth ~30 weighted stats.
-      if (song.fb) v += (song.fb / 100) * 0.45 * left * 30 * build.w.speed * 0.75;
+      let v = songBaseValue(song, build, left);
       if (hype && hype.need > 0) v += 25;
       // The plan's picks: the SP songs in year two, the +10% friendship songs in year three; skip
       // the +Stamina and +Guts songs in year one.
@@ -851,36 +900,29 @@
     }).sort((a, b) => (b.affordable - a.affordable) || (b.perToken - a.perToken));
   }
 
-  // Tokens a training gives toward the songs still to buy: each useful token is worth its share
-  // of the song it goes to (only up to what that song still lacks, and below the token cap).
+  // Tokens a training gives, valued by the run's token plan: worth more for a type you'll run
+  // short of before the songs left are bought, nothing past the cap or for a type you have
+  // plenty of.
   function songTokenValue(f, ctx) {
     const st = ctx.state;
     const sc = ctx.sc;
     if (!sc.songs || !sc.tokenOf || st.turn < 5 || st.turn > 72) return null;
-    const plan = songPlan(st, sc);
-    if (plan && plan.step === "done") return null;
-    const wanted = songAdvice(st, sc).filter((a) => !a.avoid && !a.affordable)
-      .sort((a, b) => (b.focus - a.focus) || (b.perToken - a.perToken)).slice(0, 2);
-    if (!wanted.length) return null;
-    const have = (st.gl && st.gl.tokens) || [0, 0, 0, 0, 0];
-    const cap = tokenCap(st, sc);
+    const plan = tokenPlan(st, sc);
+    if (!plan || !plan.songs.length) return null;
     let add = 0;
     const bits = [];
     tokenGain(f, st, sc, true).forEach((g) => {
-      let left = Math.max(0, Math.min(g.amount, cap - (have[g.type] || 0)));
-      let used = 0;
-      wanted.forEach((w) => {
-        const take = Math.min(left, w.short[g.type] || 0);
-        if (take <= 0) return;
-        add += take * w.perToken * 0.5;
-        used += take;
-        left -= take;
-      });
-      if (used) bits.push("+" + Math.round(used) + " " + sc.tokens[g.type]);
+      const room = Math.max(0, plan.cap - (plan.have[g.type] || 0));
+      const useful = Math.min(g.amount, room, plan.short[g.type]);
+      if (useful <= 0) return;
+      add += useful * plan.price[g.type] * 0.6;
+      bits.push("+" + Math.round(useful) + " " + sc.tokens[g.type] + " (short " + Math.round(plan.short[g.type]) + ")");
     });
     if (!add) return null;
-    // Tokens come with most trainings anyway, so they tip close calls rather than decide.
-    return { add: Math.min(add, 0.12 * ctx.typ), note: bits.join(", ") + " toward " + wanted.map((w) => w.song.name).join(" / ") };
+    // Stats still decide between trainings of different strength: tokens tip close calls and
+    // steer toward the types you'll run short of, but can't outweigh a much stronger training.
+    add = Math.min(add, 0.35 * ctx.typ);
+    return { add, tokens: true, note: bits.join(", ") + " toward the " + plan.songs.length + " songs left to buy" };
   }
 
   // ---- Support card events (Umamusume Wiki) ----
@@ -1313,6 +1355,7 @@
     if (o.parts.hint > 0) o.notes.push(dg ? (f.hints || []).filter((i) => (f.members || []).indexOf(i) !== -1).length + " skill hint(s), with extra bond" : "skill hint");
     if (hook.facility) {
       const r = hook.facility(f, ctx, o) || {};
+      if (r.tokenAdd) o.parts.tokens = r.tokenAdd;
       o.parts.scenario += r.add || 0;
       if (r.energy) o.energyDelta += r.energy;
       if (r.fail0) { o.fail = 0; o.failEst = false; }
@@ -1328,7 +1371,7 @@
         o.notes.push("focus card" + (here.length > 1 ? "s" : "") + " here: " + here.map((fc) => fc.card.n + " (bond " + Math.round(fc.bond) + ")").join(", ") + ". Max your Wit and Speed focus cards' bonds first");
       }
     }
-    o.raw = o.parts.stats + o.parts.sp + o.parts.bond + o.parts.hint + o.parts.scenario;
+    o.raw = o.parts.stats + o.parts.sp + o.parts.bond + o.parts.hint + o.parts.scenario + (o.parts.tokens || 0);
     scoreRisk(o, ctx);
     return o;
   }
@@ -1489,7 +1532,7 @@
   }
 
   const PART_LABELS = {
-    stats: "stat gains", sp: "skill points", bond: "bond building", hint: "skill hint", scenario: "scenario bonus",
+    stats: "stat gains", sp: "skill points", bond: "bond building", hint: "skill hint", scenario: "scenario bonus", tokens: "tokens for songs",
     energy: "energy", mood: "mood", risk: "failure risk", condition: "curing the condition", fans: "fans", item: "item or buff", goal: "goal race", opening: "the scenario's opening plan"
   };
 
@@ -1833,15 +1876,16 @@
       facility(f, ctx) {
         const t = ctx.state.turn;
         const tok = songTokenValue(f, ctx);
-        if (t < 5 || t > 11 || !ctx.deck || !Array.isArray(f.members)) return tok;
-        let add = tok ? tok.add : 0;
+        const tokenAdd = tok ? tok.add : 0;
+        if (t < 5 || t > 11 || !ctx.deck || !Array.isArray(f.members)) return tok ? { tokenAdd, note: tok.note } : null;
+        let add = 0;
         const notes = tok ? [tok.note] : [];
         f.members.forEach((i) => {
           const sl = ctx.deck.slots[i];
           if (!sl) return;
           if (sl.card.ty !== "friend" && sl.bond >= 50 && sl.bond < 80) { add += 0.12 * ctx.typ; notes.push(sl.card.n + " is close to friendship (" + Math.round(sl.bond) + ")"); }
         });
-        return add ? { add, note: notes.join("; ") } : null;
+        return add || tokenAdd ? { add, tokenAdd, note: notes.join("; ") } : null;
       },
       // Done on a training adds its performance tokens (what you typed, else the estimate).
       afterTurn(s, option, sc) {
@@ -2176,7 +2220,7 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, turnsToDebut, applyOpening, NEW_YEAR,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows

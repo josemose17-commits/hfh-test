@@ -164,7 +164,9 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 .stats[open] summary h2::before { content: "▾ "; }
 .stats { min-width: 0; grid-template-columns: minmax(0, 1fr); }
 .stat-table input { width: 84px; padding: 5px 6px; text-align: right; }
-@media (max-width: 520px) { .stat-table input { width: 62px; } .stat-table input.sparks { width: 56px; } }
+@media (max-width: 520px) { .stat-table input { width: 54px; padding: 5px 4px; } }
+.stat-table th small { display: block; font-size: .66rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+#statsPanel .table-wrap { max-width: 100%; }
 .stat-table th[scope="row"] { color: var(--c); font-family: var(--font-display); font-size: 1rem; }
 
 /* The call */
@@ -458,3 +460,20 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 .ev-label { font-style: italic; }
 
 .fac > * { min-width: 0; }
+
+/* Grand Concert token plan */
+.token-plan { margin: 6px 0; }
+.token-plan summary { cursor: pointer; font-size: .9rem; }
+table.tp th, table.tp td { padding: 4px 6px; font-size: .82rem; }
+table.tp tr.tp-short td:last-child { color: var(--bad); font-weight: 600; }
+table.tp tr.tp-tight td:last-child { color: var(--gold); }
+
+/* "This call looks wrong" report */
+.report { margin-top: 8px; }
+.report summary { cursor: pointer; font-size: .82rem; color: var(--muted); }
+.report textarea { width: 100%; margin: 6px 0; padding: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--fg); font: inherit; font-size: .82rem; }
+@media (max-width: 520px) { .stat-table th, .stat-table td { padding: 5px 3px; } .stat-table thead th { font-size: .66rem; letter-spacing: 0; } .stat-table th[scope="row"] { font-size: .85rem; } }
+@media (max-width: 520px) { .stat-table input.sparks { width: 46px; } }
+/* Number boxes in the stats table: no spinner, so 4-digit stats fit narrow columns. */
+.stat-table input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.stat-table input[type="number"]::-webkit-inner-spin-button, .stat-table input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }

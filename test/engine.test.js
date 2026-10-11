@@ -588,6 +588,8 @@ test("your own target stats replace the build's", () => {
   const st = (targets) => base({ stats: { speed: 1100 }, targets, facilities: facs({ speed: { cards: 1, gain: 20 } }) });
   const v = (t) => E.evaluate(st(t), ura).options.find((o) => o.stat === "speed").parts.stats;
   assert.ok(v({ speed: 1000 }) < v({ speed: 1500 }), "past your target, Speed counts less");
+  // A target above the scenario's cap counts as the cap (URA caps every stat at 1400).
+  assert.strictEqual(E.evaluate(st({ speed: 2000 }), ura).ctx.target.speed, 1400);
 });
 
 test("Chairman Akikawa: training with her is worth more before the bond check and raises her bond", () => {
@@ -606,9 +608,18 @@ test("Grand Concert: trainings count the tokens they give toward the songs you s
   const st = (tokens) => base({ turn: 40, gl: { songs: {}, tokens, lessons: {} }, facilities: facs({ guts: { cards: 2 } }) });
   const guts = (s) => E.evaluate(s, gl).options.find((o) => o.stat === "guts");
   const none = guts(st([0, 0, 0, 0, 0]));
-  assert.ok(none.notes.some((n) => /Visual toward/.test(n)));
+  assert.ok(none.notes.some((n) => /Visual \(short \d+\) toward the \d+ songs left/.test(n)));
+  assert.ok(none.parts.tokens > 0, "tokens are their own part of the breakdown");
   const full = guts(st([200, 200, 200, 200, 200]));
   assert.ok(none.value > full.value, "tokens you don't need add nothing");
+  // The plan covers every song still to buy (up to 18), and a type you'll run short of is
+  // worth more per token than one you'll have plenty of.
+  const plan = E.tokenPlan(base({ turn: 6, gl: { songs: {}, tokens: [0, 0, 0, 0, 0] } }), gl);
+  assert.strictEqual(plan.songs.length, 18);
+  const vis = 3;
+  const dance = 0;
+  assert.ok(plan.short[vis] / plan.supply[vis] > plan.short[dance] / plan.supply[dance]);
+  assert.ok(plan.price[vis] > plan.price[dance]);
 });
 
 test("support card events from the wiki: chain and other events, ranges by LB, best choice ranked", () => {
