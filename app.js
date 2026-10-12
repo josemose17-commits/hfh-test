@@ -1658,16 +1658,21 @@
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
-      optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, independent: !!c.independent, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       wish = null;
       optRun = null;
       if (state.tab === "cm") renderCM();
     };
     const fail = (err) => { flash(String(err.message || err)); optRun = null; if (state.tab === "cm") renderCM(); };
+    let link = null;
     setTimeout(() => {
       try {
-        const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked: c.locked.slice(), comp: Object.assign({}, c.comp) });
-        const bp = c.borrow ? borrowPool() : [];
+        let bp = c.borrow ? borrowPool() : [];
+        const locked = c.locked.slice();
+        link = itLink(c, pool, bp);
+        if (link && link.lock && locked.indexOf(link.lock) === -1) locked.push(link.lock);
+        if (link && link.borrow) bp = [link.borrow];
+        const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked, comp: Object.assign({}, c.comp) });
         const r = T.buildDeck(opts, pool, bp);
         if (!tg) { done(r, opts, null); return; }
         // Target stats: start from Euophrys' pick and swap cards toward the targets, a slot at
@@ -1690,6 +1695,21 @@
         setTimeout(tick, 0);
       } catch (err) { fail(err); }
     }, 30);
+  }
+
+  // Independent Training: uma.guide calls the scenario's link card mandatory there (Grand
+  // Concert: Light Hello), so she goes in: your best copy is locked in, or she's the borrowed
+  // card. Returns what happened, for the result's note, or null when it doesn't apply.
+  const IT_LINK = { GL: "Light Hello" };
+  function itLink(c, pool, bp) {
+    const name = c.independent && IT_LINK[euScen()];
+    if (!name) return null;
+    if (c.comp.friend === 0) return { name, blocked: true };
+    const mine = pool.filter((x) => D.card(x.id).n === name).sort((a, b) => D.card(b.id).r - D.card(a.id).r || b.lb - a.lb)[0];
+    if (mine) return { name, lock: mine.id };
+    const lend = bp.find((x) => D.card(x.id).n === name);
+    if (lend) return { name, borrow: lend, lock: lend.id };
+    return { name, missing: true };
   }
 
   // Your target stats for the optimizer (blank ones take the race build's), or null when none set.
@@ -1781,7 +1801,7 @@
         <label class="chip-toggle" title="The 50-minute auto mode"><input type="checkbox" data-cm="independent" ${c.independent ? "checked" : ""}> Independent Training</label>
         ${goal === "race" ? `<label class="field"><span>Skill hints count</span><select data-cm="skillW">${opt(SKILL_W, c.skillW)}</select></label>` : ""}
       </div>
-      ${c.independent ? `<p class="mini it-note"><b>Independent Training:</b> a card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.</p>` : ""}
+      ${c.independent ? `<p class="mini it-note"><b>Independent Training:</b> a card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>` : ""}
       ${compHTML(c)}
       ${targetsHTML(p, c)}
       ${euSettingsHTML("speed")}
@@ -1870,12 +1890,13 @@
         return `<div class="opt-card ty-${card.ty}">
         <span class="tydot" aria-hidden="true"></span>
         <div class="opt-name"><b>${esc(card.n)}</b> <span class="mini">${esc(card.t)}</span>
-          <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""}${c.locked.indexOf(x.id) !== -1 ? " · locked" : ""}</div>
+          <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""}${c.locked.indexOf(x.id) !== -1 ? " · locked" : r.link && r.link.lock === x.id ? " · scenario card" : ""}</div>
           ${x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => esc(debuffOrSkillName(id))).join(", ")}</div>` : ""}
           ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? ", but no must-have" : ""})</div>` : ""}</div>
         <div class="num" title="Euophrys score with the other five cards fixed, plus skills">${Math.round(x.score)}<div class="mini">${Math.round(x.base)} + ${Math.round(x.skill)} skills</div></div>
       </div>`;
       }).join("")}</div>
+      ${r.link ? `<p class="mini${r.link.lock ? "" : " warn"}">${r.link.lock ? `<b>${esc(r.link.name)}</b> is in${r.link.borrow ? " as the borrowed card" : ""}: uma.guide calls the scenario's link card mandatory for Independent Training.` : r.link.blocked ? `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but your deck makeup allows no Friend card.` : `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but you don't own her: mark her owned, or allow a borrowed card.`}</p>` : ""}
       ${mustResultHTML(r, c)}
       ${predictedHTML(r)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>

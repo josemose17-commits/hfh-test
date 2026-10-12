@@ -140,6 +140,10 @@
       return { card: c.card, level, base, spec, init: D.initialBond(c.card, level), ev: D.eventRewards(c.card), hintRate: HINT_CHANCE * (1 + (base[18] || 0) / 100), hintLv: 1 + (base[17] || 0) };
     });
     ctx.deckTypes = new Set(deck.map((d) => d.card.ty)).size;
+    // Cards' starting bonuses: Initial Speed..Wit (effects 9-13) and Initial Skill Points (32).
+    const initial = [0, 0, 0, 0, 0];
+    let initialSp = 0;
+    deck.forEach((d) => { for (let i = 0; i < 5; i++) initial[i] += d.base[9 + i] || 0; initialSp += d.base[32] || 0; });
     const raceBonus = deck.reduce((a, d) => a + (d.base[15] || 0), 0);
     const R = ctx.runs;
     let total = 0, spTotal = 0, rainbowTotal = 0;
@@ -150,8 +154,8 @@
     let rests = 0, races = 0, fails = 0;
     for (let run = 0; run < R; run++) {
       const rand = rng(ctx.seed + run * 7919);
-      const x = ctx.start.slice();
-      let sp = 120;
+      const x = ctx.start.map((v, i) => Math.min(ctx.caps[STATS[i]], v + initial[i]));
+      let sp = 120 + initialSp;
       let energy = 100;
       let typ = 0;
       const bond = deck.map((d) => d.init);
@@ -247,6 +251,8 @@
       races: races / R,
       fails: fails / R,
       skills: skill.list,
+      initial,
+      initialSp,
     };
   }
 
@@ -417,8 +423,9 @@
   // and a swap stays when the simulated careers end closer to the targets, counting the
   // deck's skills (tiers.js) and must-haves too. Locked cards stay. Up to 2 passes.
   // Friend and Group cards help every training, so balanced targets would pull in several;
-  // real decks rarely run more than one of each, so the search stays at 1 (or the start
-  // deck's count, or your deck makeup's).
+  // racing decks rarely run more than one of each, so the search stays at 1 (or the start
+  // deck's count, or your deck makeup's). Parent decks may take 2 of each: players report
+  // they add a lot of skill points toward an SS rating in Independent Training.
   // opts: the tier list options (scenario key, skills, must, comp, locked, skillWeight...);
   // sim: buildCtx options (coach scenario, build, trainee, target, caps).
   // Returns a stepper so the page can show progress: next() does one slot, result() ends it.
@@ -453,7 +460,8 @@
     if (giveUp != null) floor = (1 - giveUp) * Tr.deckSkills(opts, deck).value;
     let cur = score(deck);
     const nOf = (cards, t) => cards.filter((x) => D.card(x.id).ty === t).length;
-    const most = { friend: comp.friend != null ? comp.friend : Math.max(1, nOf(deck, "friend")), group: comp.group != null ? comp.group : Math.max(1, nOf(deck, "group")) };
+    const cap = opts.parent ? 2 : 1;
+    const most = { friend: comp.friend != null ? comp.friend : Math.max(cap, nOf(deck, "friend")), group: comp.group != null ? comp.group : Math.max(cap, nOf(deck, "group")) };
     const slots = deck.map((_, i) => i).filter((i) => !locked.has(deck[i].id));
     const swaps = [];
     let step = 0, pass = 0, changed = false;
