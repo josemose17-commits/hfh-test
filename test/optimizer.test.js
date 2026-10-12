@@ -213,3 +213,12 @@ test("target stats: locked cards, deck makeup and must-have skills hold", () => 
   assert.ok(r.cards.some((c) => c.id === lock));
   assert.ok(r.cards.some((c) => (D.card(c.id).hs || []).concat(D.card(c.id).es || []).map(String).includes(must)), "must-have still covered");
 });
+
+test("simulated careers start with the cards' initial stats and skill points", () => {
+  const fuku = pick((c) => c.n === "Matikanefukukitaru" && c.r === 3 && c.ty === "speed" && D.onGlobal(c, TODAY));
+  const lv = D.levelFor(fuku, 4);
+  const base = D.baseEffects(fuku, lv);
+  const r = O.simulate(O.buildCtx({ scenario: ura, build: "medium", runs: 2 }), [{ card: fuku, lb: 4 }]);
+  assert.deepStrictEqual(r.initial, [9, 10, 11, 12, 13].map((i) => base[i] || 0));
+  assert.ok(r.initial.every((v) => v === 30), "SSR Speed Fukukitaru: +30 to every stat");
+});
