@@ -342,100 +342,168 @@
   }
 
   // ---- Reset advice ----
-  // Is this run still worth playing? state.resetMode: "ace" (default) for Champions Meeting
-  // aces, "finish" to flag only a run that can't meet a career goal, "off". Each item has a
-  // status: ok, wait (not decided yet), unknown (the coach can't tell), borderline or reset.
-  // The verdict is the worst of them. Null when nothing applies on this turn.
+  // Is this run still worth playing? At each reset point (sc.resetChecks, plus bonds going into
+  // Classic) the coach asks you a question or two, with its own guess, and on a miss says
+  // reset: start over, or carry on and finish the run (your call, remembered). Career goals
+  // the races can't reach count in every mode. state.resetMode: "ace" (default), "finish"
+  // (goals only) or "off". Answers and decisions: state.runChecks[key] = { a: { question:
+  // answer }, decision: "continue" }.
+  // Item status: ask (questions open), ok (passed), reset (missed: reset or continue), warn (a
+  // miss that's only a warning), continued (missed, finishing anyway), wait (coming up), done
+  // (the run is over). The verdict is the most pressing one.
   const isStatCard = (sl) => sl.card.ty !== "friend" && sl.card.ty !== "group";
   // The coach's bonds come from logged turns; with fewer than half logged they're estimates.
   const bondsStale = (state) => state.turn > 6 && (state.log || []).length < (state.turn - 1) / 2;
+  const isYes = (v) => v === "yes";
+  const isNo = (v) => v === "no";
+  const numAns = (v) => (v == null || v === "" || isNaN(+v) ? null : +v);
+  // Each check: (state, sc, window, answers) -> { label, kind, questions, result, why }.
+  // result: "pass", "fail" or null (still open); why: text for wait / ask / ok / fail.
   const RESET_CHECKS = {
     // Grand Concert (CM ace guide): one card rainbowing or Light Hello's +20 event by the debut.
-    debut(state, sc, c) {
-      const label = "Debut check";
+    debut(state, sc, c, a) {
       const x = state.extras || {};
       const deck = deckInfo(state);
-      const lh = deck && deck.used.some((sl) => sl.card.n === "Light Hello");
+      const lh = !deck || deck.used.some((sl) => sl.card.n === "Light Hello");
       const rb = deck ? deck.used.filter((sl) => isStatCard(sl) && sl.bond >= 80) : [];
-      if (x.lh20) return { label, status: "ok", why: "Light Hello's +20 event is in. Keep going." };
-      if (rb.length) return { label, status: "ok", why: rb.map((sl) => sl.card.n).join(", ") + (rb.length > 1 ? " are" : " is") + " at friendship. Keep going." };
-      const goal = "By the debut (turn " + c.at + ") the guide wants one card rainbowing" + (lh || !deck ? " or Light Hello's +20 event (tick it under " + sc.name + " when it happens)" : "") + ".";
-      if (!deck) return { label, status: "unknown", why: goal + " Set your deck under Trainee and deck so the coach can see bonds." };
-      if (bondsStale(state)) return { label, status: "unknown", why: goal + " The coach's bonds are estimates (few turns logged), so check the game: if no card shows a rainbow, reset." };
-      if (state.turn < c.at) return { label, status: "borderline", why: goal + " Not yet: focus one or two cards." };
-      return { label, status: "reset", why: "No card at friendship and no Light Hello +20 event by the debut. The guide resets here (around 85% of CM-ace runs in this scenario do)." };
+      const aL = a.lh20 != null ? a.lh20 : x.lh20 ? "yes" : undefined;
+      const questions = [{
+        id: "rainbow", type: "yesno", text: "Is any stat card's bond orange (80+), so it can rainbow?", answer: a.rainbow,
+        guess: deck && !bondsStale(state) ? (rb.length ? "yes" : "no") : null,
+        guessWhy: rb.length ? rb.map((sl) => sl.card.n).join(", ") + " at 80+" : "no stat card at 80+ in the coach's count"
+      }];
+      if (lh) questions.push({ id: "lh20", type: "yesno", text: "Has Light Hello given her +20 event (Another Day's Hard Work!)?", answer: aL });
+      const result = isYes(a.rainbow) || isYes(aL) ? "pass" : isNo(a.rainbow) && (!lh || isNo(aL)) ? "fail" : null;
+      return {
+        label: "Debut check", kind: "reset", questions, result,
+        why: {
+          wait: "On turn " + c.at + " (your debut) the coach asks whether a card is rainbowing" + (lh ? " or Light Hello has given her +20 event" : "") + ". The guide resets on " + (lh ? "neither" : "no") + ".",
+          ask: "By the debut the guide wants one stat card at friendship (orange bond)" + (lh ? " or Light Hello's +20 event" : "") + ", or it resets (around 85% of CM-ace runs here do).",
+          ok: "Passed. Keep going.",
+          fail: "No card at friendship" + (lh ? " and no Light Hello +20 event" : "") + " by the debut: the guide resets here."
+        }
+      };
     },
-    // Grand Concert: 5 songs bought in year one (the 6th held for after the 1st live).
-    songs1(state, sc, c) {
-      const label = "Year one songs";
-      const gl = state.gl || {};
-      const learned = gl.songs || {};
-      const bought = Object.values(learned).filter((t) => t >= 5 && glPeriod(sc, t) === 0).length;
-      const lessons = (gl.lessons || {})[0] || 0;
-      const goal = "5 songs by the 1st Promo Live (turn " + sc.lives[0] + "), with the 6th showing and held.";
-      if (!bought && !lessons) return { label, status: "unknown", why: goal + " Mark the songs you buy in the Songs panel so the coach can count them." };
-      if (bought >= 5) return { label, status: "ok", why: bought + " songs bought. Keep going." };
-      if (state.turn < c.at) return bought <= 2 ? { label, status: "borderline", why: "Only " + bought + " of 5 songs bought. Goal: " + goal } : { label, status: "wait", why: bought + " of 5 songs bought. Goal: " + goal };
-      if (bought === 4) return { label, status: "borderline", why: "4 of 5 songs. Buy the 5th before the live if your tokens allow it; if they can't, reset." };
-      return { label, status: "reset", why: "Only " + bought + " of 5 songs by the end of year one. The guide resets when the year-one song plan fails." };
+    // Grand Concert: 5 songs bought in year one and a 6th showing, held for after the 1st live.
+    songs1(state, sc, c, a) {
+      const marked = Object.values((state.gl && state.gl.songs) || {}).filter((t) => t >= 5 && glPeriod(sc, t) === 0).length;
+      const n = numAns(a.songs);
+      const questions = [
+        { id: "songs", type: "number", text: "How many songs have you bought so far?", answer: n, guess: marked, guessWhy: marked ? "marked in the Songs panel" : "none marked in the Songs panel" },
+        { id: "sixth", type: "yesno", text: "Is a 6th song showing in your lessons, held to buy right after the live?", answer: a.sixth }
+      ];
+      const result = n != null && n < 5 ? "fail" : isNo(a.sixth) ? "fail" : n != null && isYes(a.sixth) ? "pass" : null;
+      return {
+        label: "Year one songs", kind: "reset", questions, result,
+        why: {
+          wait: "On turn " + c.at + " the coach asks about your songs: the guide wants 5 bought and a 6th showing by the 1st Promo Live (turn " + sc.lives[0] + ").",
+          ask: "Year-one plan: 5 songs bought, then 2 more technique lessons so a 6th shows, held for after the live. The guide resets if you can't manage it.",
+          ok: "Year-one song plan done. Keep going.",
+          fail: (n != null && n < 5 ? "Only " + n + " of 5 songs" : "No 6th song showing") + " by the end of year one: the guide resets here."
+        }
+      };
     },
     // Mecha (game8): S in every Upgrade Exam; any A restarts the run.
-    exam(state, sc, c) {
-      const t = c.turns.find((e) => state.turn >= e - 2 && state.turn <= e + 3);
-      if (t == null) return null;
-      const n = c.turns.indexOf(t) + 1;
-      const label = "Upgrade Exam " + n;
-      const r = (state.extras || {})[c.input];
-      if (state.turn < t) return { label, status: "wait", why: "Exam on turn " + t + ". game8 restarts the run on any A, so keep your Research Levels up for an S." };
-      if (!r) return { label, status: state.turn === t ? "wait" : "unknown", why: "Set the rank under " + sc.name + " once you see it: an A or lower means reset for an ace." };
-      if (r === "S") return { label, status: "ok", why: "S rank. Keep going." };
-      return { label, status: "reset", why: (r === "A" ? "A" : "B or lower") + " in exam " + n + ". game8 restarts the run on any A when building an ace." };
+    exam(state, sc, c, a) {
+      const r = a.rank;
+      return {
+        label: "Upgrade Exam " + c.n, kind: "reset",
+        questions: [{ id: "rank", type: "choice", options: [["S", "S"], ["A", "A"], ["B", "B or lower"]], text: "What rank did you get in Upgrade Exam " + c.n + "?", answer: r }],
+        result: r === "S" ? "pass" : r ? "fail" : null,
+        why: {
+          wait: "Upgrade Exam " + c.n + " on turn " + c.at + ": game8 restarts the run on any A, so keep your Research Levels up for an S.",
+          ask: "Once you see the rank: an A or lower means reset for an ace (game8).",
+          ok: "S rank. Keep going.",
+          fail: (r === "A" ? "A" : "B or lower") + " in exam " + c.n + ": game8 restarts the run on any A when building an ace."
+        }
+      };
     },
     // Onsen (game8): fewer than 2 springs dug by Junior November is a bad start.
-    springs(state, sc, c) {
-      const label = "Springs dug";
-      const v = (state.extras || {}).springs;
-      if (v == null || v === "") return { label, status: "unknown", why: "Type how many springs you've dug under " + sc.name + ". Fewer than 2 by turn " + c.at + " (Junior November) means reset." };
-      if (+v >= 2) return { label, status: "ok", why: v + " springs dug. Keep going." };
-      if (state.turn < c.at) return { label, status: "borderline", why: "Only " + v + " dug. You want 2 by turn " + c.at + " (Junior November), or reset." };
-      return { label, status: "reset", why: "Only " + v + " spring" + (+v === 1 ? "" : "s") + " by Junior November. game8 calls it a bad start: reset." };
+    springs(state, sc, c, a) {
+      const n = numAns(a.springs);
+      return {
+        label: "Springs dug", kind: "reset",
+        questions: [{ id: "springs", type: "number", text: "How many springs have you finished digging?", answer: n }],
+        result: n == null ? null : n >= 2 ? "pass" : "fail",
+        why: {
+          wait: "On turn " + c.at + " (Junior November) the coach asks how many springs you've dug: fewer than 2 is a reset (game8).",
+          ask: "game8 calls fewer than 2 springs by Junior November a bad start: reset.",
+          ok: "Good start. Keep going.",
+          fail: "Only " + n + " spring" + (n === 1 ? "" : "s") + " by Junior November: game8 says reset."
+        }
+      };
+    },
+    // Every scenario: most stat cards at friendship going into Classic (a rule of thumb for
+    // aces, so a miss is only a warning).
+    bonds(state, sc, c, a) {
+      const deck = deckInfo(state);
+      const stat = deck ? deck.used.filter(isStatCard) : [];
+      const rb = stat.filter((sl) => sl.bond >= 80).length;
+      return {
+        label: "Bonds", kind: "warn",
+        questions: [{
+          id: "most", type: "yesno", text: "Are most of your stat cards (60% or more) at friendship, with an orange bond?", answer: a.most,
+          guess: stat.length && !bondsStale(state) ? (rb / stat.length >= 0.6 ? "yes" : "no") : null,
+          guessWhy: stat.length ? "the coach counts " + rb + " of " + stat.length : ""
+        }],
+        result: isYes(a.most) ? "pass" : isNo(a.most) ? "fail" : null,
+        why: {
+          wait: "Going into Classic the coach asks how many stat cards are at friendship.",
+          ask: "Aces usually have most stat cards at friendship by Classic.",
+          ok: "Bonds on track. Keep going.",
+          fail: "Most stat cards aren't at friendship going into Classic, so training will be weaker than an ace needs. Not a reset on its own, but with another miss it's a good time to start over."
+        }
+      };
     }
   };
-  const RESET_RANK = { reset: 4, borderline: 3, unknown: 2, wait: 1, ok: 0 };
+  const RESET_RANK = { reset: 6, ask: 5, warn: 4, done: 3, continued: 2, wait: 1, ok: 0 };
+
+  // One check in its window (c: { from, at, to }): coming up, asking, passed, or missed. A
+  // miss stays until you choose to reset or continue.
+  function checkItem(state, sc, c, key, check) {
+    const t = state.turn;
+    if (t < c.from) return null;
+    const e = (state.runChecks && state.runChecks[key]) || {};
+    const r = check(state, sc, c, e.a || {});
+    const item = { key, label: r.label, kind: r.kind, questions: r.questions };
+    if (r.result === "fail") {
+      const status = e.decision === "continue" ? "continued" : r.kind === "warn" ? "warn" : "reset";
+      if (status === "continued" && t > c.to) return null;
+      return Object.assign(item, { status, why: r.why.fail });
+    }
+    if (t < c.at) return { key, label: r.label, kind: r.kind, status: "wait", why: r.why.wait };
+    if (t > c.to) return null;
+    return Object.assign(item, r.result === "pass" ? { status: "ok", why: r.why.ok } : { status: "ask", why: r.why.ask });
+  }
 
   function runCheck(state, sc) {
     const mode = state.resetMode || "ace";
     if (mode === "off") return null;
     const items = [];
-    // Career goals: missing one ends the run, so a goal you can't reach is a reset.
-    const goalItem = (label, plan, text) => {
+    const runChecks = state.runChecks || {};
+    // Career goals: missing one ends the run, so a goal the races can't reach is a reset.
+    const goalItem = (key, label, plan, text) => {
       if (!plan || plan.status !== "short") return;
+      if ((runChecks[key] || {}).decision === "continue") return;
       const left = plan.turnsLeft;
       // Races outside your aptitudes can still save it, so it's a reset only at the very end.
-      items.push({ id: label, label, status: left <= 2 ? "reset" : "borderline", why: text + (left <= 2 ? " With " + left + " turn" + (left === 1 ? "" : "s") + " left the run is lost: reset." : " Race everything you can, outside your aptitudes too; if it still falls short, reset.") });
+      items.push({ key, label, kind: left <= 2 ? "reset" : "warn", status: left <= 2 ? "reset" : "warn", why: text + (left <= 2 ? " With " + left + " turn" + (left === 1 ? "" : "s") + " left the run is lost: reset." : " Race everything you can, outside your aptitudes too; if it still falls short, reset.") });
     };
     const fp = fanPlan(state, sc);
-    if (fp) goalItem("Fan goal", fp, "Even winning every race that fits you, you're short of " + Math.round(fp.left || fp.need).toLocaleString("en-US") + " fans by turn " + fp.goal.turn + ".");
+    if (fp) goalItem("fans" + fp.goal.turn, "Fan goal", fp, "Even winning every race that fits you, you're short of " + Math.round(fp.left || fp.need).toLocaleString("en-US") + " fans by turn " + fp.goal.turn + ".");
     const gp = gradePlan(state, sc);
-    if (gp) goalItem("Grade Points", gp, "Even winning every race that fits you, you can't reach " + gp.need + " Grade Points by turn " + gp.due + ".");
+    if (gp) goalItem("gp" + gp.due, "Grade Points", gp, "Even winning every race that fits you, you can't reach " + gp.need + " Grade Points by turn " + gp.due + ".");
     if (mode === "ace") {
       (sc.resetChecks || []).forEach((c) => {
-        if (!c.turns && (state.turn < c.from || state.turn > c.to)) return;
-        const r = RESET_CHECKS[c.id] && RESET_CHECKS[c.id](state, sc, c);
-        if (r) items.push(Object.assign({ id: c.id }, r));
+        const check = RESET_CHECKS[c.id];
+        if (!check) return;
+        if (c.turns) c.turns.forEach((T, i) => { const it = checkItem(state, sc, { from: T - 2, at: T, to: T + 3, n: i + 1 }, c.id + (i + 1), check); if (it) items.push(it); });
+        else { const it = checkItem(state, sc, c, c.id, check); if (it) items.push(it); }
       });
-      // Every scenario: stat cards at friendship going into Classic (a rule of thumb for aces,
-      // so it's never a reset on its own).
-      const deck = deckInfo(state);
-      if (deck && state.turn >= 22 && state.turn <= 28 && !bondsStale(state)) {
-        const stat = deck.used.filter(isStatCard);
-        const rb = stat.filter((sl) => sl.bond >= 80).length;
-        if (stat.length >= 2) {
-          const ok = rb / stat.length >= 0.6;
-          items.push({ id: "bonds", label: "Bonds", status: ok ? "ok" : "borderline", why: rb + " of " + stat.length + " stat cards at friendship (80+)." + (ok ? "" : " Aces usually have most of them by Classic, so training will be weaker than it should. Not a reset on its own, but with another miss it's a good time to start over.") });
-        }
-      }
+      if (deckInfo(state)) { const it = checkItem(state, sc, { from: 22, at: 24, to: 27 }, "bonds", RESET_CHECKS.bonds); if (it) items.push(it); }
     }
+    // The end of the run: a last chance to copy the run summary.
+    if (state.turn >= sc.totalTurns) items.push({ key: "end", label: "Run finished", kind: "info", status: "done", why: "Copy the run summary if anything in this run looked off, so the coach can be fixed." });
     if (!items.length) return null;
     const verdict = items.reduce((a, it) => (RESET_RANK[it.status] > RESET_RANK[a] ? it.status : a), "ok");
     return { verdict, mode, items };
@@ -606,18 +674,40 @@
     return FACILITY[stat].split;
   }
 
+  // Your stat priority (Stats panel), most important first, replaces the build's stat weights:
+  // 1, 0.85, 0.72, 0.6, 0.48 by rank. Targets still decide when a stat has had enough.
+  const PRIORITY_W = [1, 0.85, 0.72, 0.6, 0.48];
+  function validPriority(p) {
+    return Array.isArray(p) && p.length === 5 && STATS.every((s) => p.indexOf(s) !== -1);
+  }
+  function statWeights(state) {
+    const p = state && state.priority;
+    if (validPriority(p)) {
+      const w = {};
+      p.forEach((s, i) => { w[s] = PRIORITY_W[i]; });
+      return w;
+    }
+    return (BUILDS[state && state.build] || BUILDS.medium).w;
+  }
+  // The build's own order, most important first (what the priority boxes start from).
+  function buildPriority(build) {
+    const w = (BUILDS[build] || BUILDS.medium).w;
+    return STATS.slice().sort((a, b) => w[b] - w[a]);
+  }
+
   function makeCtx(state, sc) {
     const build = BUILDS[state.build] || BUILDS.medium;
+    const sw = statWeights(state);
     const caps = capsFor(state, sc);
     const calib = calibFactor(state);
     const target = Object.assign({}, build.target, state.targets || {});
     STATS.forEach((k) => { target[k] = Math.min(target[k], caps[k]); });
     const ctx = {
       state, sc, calib, caps,
-      w: build.w,
+      w: sw,
       // Your own targets (the Stats table) override the build's; none goes past the cap.
       target,
-      need: needFactors(state.stats || {}, target, build.w),
+      need: needFactors(state.stats || {}, target, sw),
       stats: state.stats || {},
       E: clamp(Math.round(state.energy), 0, state.maxEnergy || 100),
       maxE: state.maxEnergy || 100,
@@ -636,7 +726,7 @@
     ctx.evNow = evNow;
     ctx.energyValue = (delta) => ctx.V[clamp(Math.round(ctx.E + delta + evNow), 0, ctx.maxE)] - ctx.V[clamp(ctx.E + evNow, 0, ctx.maxE)];
     ctx.moodStep = (from) => moodStepValue(from, state, sc, calib);
-    ctx.avgW = STATS.reduce((a, s) => a + build.w[s], 0) / STATS.length;
+    ctx.avgW = STATS.reduce((a, s) => a + sw[s], 0) / STATS.length;
     return ctx;
   }
 
@@ -688,7 +778,7 @@
     const clampE = (e) => (e < 0 ? 0 : e > maxE ? maxE : Math.round(e));
     const avgCost = ["speed", "stamina", "power", "guts"].reduce((a, st) => a + baseCost(st, sc), 0) / 4;
     const witBase = baseCost("wit", sc);
-    const bw = (BUILDS[state.build] || BUILDS.medium).w;
+    const bw = statWeights(state);
     const avgW = STATS.reduce((a, st) => a + bw[st], 0) / STATS.length;
     let next = new Float64Array(maxE + 1);
     for (let t = sc.totalTurns; t > state.turn; t--) {
@@ -933,46 +1023,62 @@
     return v;
   }
 
-  // The run's token plan: the songs still to buy (the best value per token, up to 18 in all,
-  // counting ones that unlock later), the tokens they cost, what you hold, and about what
-  // training brings in by the Grand Live. A token type you'll run short of is worth more.
+  // How much a song matters for this run: its bonus over the turns left once you can buy it,
+  // at your stat weights, with the song plan's picks first and its skips last.
+  function songImportance(song, state, sc, w) {
+    const at = Math.max(state.turn, song.from);
+    let v = songBaseValue(song, { w }, Math.max(0, sc.totalTurns - at));
+    const p = glPeriod(sc, at);
+    if ((GL_FOCUS[p] || []).indexOf(song.id) !== -1) v *= 1.6;
+    if ((GL_AVOID[p] || []).indexOf(song.id) !== -1) v *= 0.3;
+    return v;
+  }
+
+  // The run's token plan. queue: the songs to buy, in order: the ones you can buy now, most
+  // important first, then the ones that unlock later (the 18 that matter most, counting what
+  // you've learned). Each song's shortfall counts the tokens the songs before it use first, so
+  // the aim is always the next song in line. need/short/supply: the whole queue against what
+  // training brings by the Grand Live.
   const GL_SONG_GOAL = 18;
+  const AIM_W = [1, 0.7, 0.5, 0.35, 0.25];
   function tokenPlan(state, sc) {
     if (!sc.songs || !sc.tokenOf || state.turn > 72) return null;
     const learned = (state.gl && state.gl.songs) || {};
     const have = ((state.gl && state.gl.tokens) || [0, 0, 0, 0, 0]).slice();
-    const build = BUILDS[state.build] || BUILDS.medium;
+    const w = statWeights(state);
     const nLearned = Object.keys(learned).length;
     const toBuy = Math.max(0, GL_SONG_GOAL - nLearned);
-    const cands = sc.songs.filter((song) => learned[song.id] == null && song.from <= 72).map((song) => {
-      const at = Math.max(state.turn, song.from);
-      const v = songBaseValue(song, build, Math.max(0, sc.totalTurns - at));
-      const cost = song.cost.reduce((a, b) => a + b, 0);
-      return { song, v, cost, per: v / Math.max(1, cost) };
-    }).sort((a, b) => b.per - a.per).slice(0, toBuy || 0);
+    const picked = sc.songs.filter((song) => learned[song.id] == null && song.from <= 72).map((song) => ({
+      song, v: songImportance(song, state, sc, w), cost: song.cost.reduce((a, b) => a + b, 0), now: song.from <= state.turn
+    })).sort((a, b) => b.v - a.v).slice(0, toBuy);
+    const queue = picked.filter((x) => x.now).concat(picked.filter((x) => !x.now).sort((a, b) => a.song.from - b.song.from || b.v - a.v));
+    const left = have.slice();
+    queue.forEach((x, k) => {
+      x.short = x.song.cost.map((c, i) => Math.max(0, c - left[i]));
+      x.song.cost.forEach((c, i) => { left[i] = Math.max(0, left[i] - c); });
+      x.ready = x.now && x.short.every((n) => n === 0);
+      x.w = k < AIM_W.length ? AIM_W[k] : 0.2;
+    });
     const need = [0, 0, 0, 0, 0];
-    cands.forEach((c) => c.song.cost.forEach((x, i) => { need[i] += x; }));
+    queue.forEach((x) => x.song.cost.forEach((c, i) => { need[i] += c; }));
     // Expected tokens from training until the Grand Live: about 3 in 4 turns are trainings,
-    // spread over the facilities like your build's stat weights, ~18 tokens each, and about
-    // 40% of them friendship trainings that add a second type.
+    // spread over the facilities like your stat weights, ~18 tokens each, and about 40% of
+    // them friendship trainings that add a second type.
     const turnsLeft = Math.max(0, 72 - state.turn);
-    const wsum = STATS.reduce((a, k) => a + build.w[k], 0);
+    const wsum = STATS.reduce((a, k) => a + w[k], 0);
     const supply = [0, 0, 0, 0, 0];
     const per = 16 + 2 * Math.min(4, Math.floor(state.turn / 18));
     STATS.forEach((k) => {
       const [pri, sec] = sc.tokenOf[k];
-      const n = turnsLeft * 0.75 * (build.w[k] / wsum);
+      const n = turnsLeft * 0.75 * (w[k] / wsum);
       supply[pri] += n * per;
       supply[sec] += n * per * 0.6 * 0.4;
     });
     const short = need.map((x, i) => Math.max(0, x - have[i]));
-    const totalV = cands.reduce((a, c) => a + c.v, 0);
-    const totalCost = cands.reduce((a, c) => a + c.cost, 0);
+    const totalV = queue.reduce((a, x) => a + x.v, 0);
+    const totalCost = queue.reduce((a, x) => a + x.cost, 0);
     const base = totalCost ? totalV / totalCost : 0;
-    // Price per token: a type you're short of by more than training will bring is a
-    // bottleneck (up to 1.5x a song's value per token); a type you have plenty of is worth little.
-    const price = short.map((x, i) => base * Math.min(1.5, x / Math.max(20, supply[i])));
-    return { songs: cands, toBuy, need, have, supply, short, price, base, cap: tokenCap(state, sc) };
+    return { songs: queue, queue, aim: queue[0] || null, toBuy, need, have, supply, short, base, cap: tokenCap(state, sc) };
   }
 
   // Ranks songs you can learn now: value of the bonus over the rest of the run per token spent,
@@ -981,7 +1087,7 @@
     if (!sc.songs) return [];
     const learned = (state.gl && state.gl.songs) || {};
     const tokens = (state.gl && state.gl.tokens) || [0, 0, 0, 0, 0];
-    const build = BUILDS[state.build] || BUILDS.medium;
+    const build = { w: statWeights(state) };
     const left = Math.max(0, sc.totalTurns - state.turn);
     const hype = hypeStatus(state, sc);
     return sc.songs.filter((song) => learned[song.id] == null && song.from <= state.turn).map((song) => {
@@ -1000,29 +1106,40 @@
     }).sort((a, b) => (b.affordable - a.affordable) || (b.perToken - a.perToken));
   }
 
-  // Tokens a training gives, valued by the run's token plan: worth more for a type you'll run
-  // short of before the songs left are bought, nothing past the cap or for a type you have
-  // plenty of.
+  // Tokens a training gives, valued by the token aim: they fill the next song's shortfall
+  // first, then the next one's, each song in line counting a little less. Nothing past the cap
+  // or past what the songs need.
   function songTokenValue(f, ctx) {
     const st = ctx.state;
     const sc = ctx.sc;
     if (!sc.songs || !sc.tokenOf || st.turn < 5 || st.turn > 72) return null;
     const plan = tokenPlan(st, sc);
-    if (!plan || !plan.songs.length) return null;
+    if (!plan || !plan.queue.length) return null;
+    const shorts = plan.queue.map((x) => x.short.slice());
     let add = 0;
-    const bits = [];
+    let first = Infinity;
+    const got = [0, 0, 0, 0, 0];
     tokenGain(f, st, sc, true).forEach((g) => {
-      const room = Math.max(0, plan.cap - (plan.have[g.type] || 0));
-      const useful = Math.min(g.amount, room, plan.short[g.type]);
-      if (useful <= 0) return;
-      add += useful * plan.price[g.type] * 0.6;
-      bits.push("+" + Math.round(useful) + " " + sc.tokens[g.type] + " (short " + Math.round(plan.short[g.type]) + ")");
+      let amount = Math.min(g.amount, Math.max(0, plan.cap - (plan.have[g.type] || 0)));
+      let used = 0;
+      plan.queue.forEach((x, k) => {
+        const take = Math.min(amount, shorts[k][g.type]);
+        if (take <= 0) return;
+        shorts[k][g.type] -= take;
+        amount -= take;
+        used += take;
+        add += take * plan.base * 0.75 * x.w;
+        first = Math.min(first, k);
+      });
+      got[g.type] += used;
     });
     if (!add) return null;
+    const bits = got.map((n, i) => (n > 0 ? "+" + Math.round(n) + " " + sc.tokens[i] : "")).filter(Boolean);
     // Stats still decide between trainings of different strength: tokens tip close calls and
-    // steer toward the types you'll run short of, but can't outweigh a much stronger training.
+    // steer toward the songs you need next, but can't outweigh a much stronger training.
     add = Math.min(add, 0.35 * ctx.typ);
-    return { add, tokens: true, note: bits.join(", ") + " toward the " + plan.songs.length + " songs left to buy" };
+    const song = plan.queue[first].song;
+    return { add, tokens: true, note: bits.join(", ") + " toward " + song.name + (first === 0 ? " (your next song)" : " (song " + (first + 1) + " in your token aim)") };
   }
 
   // ---- Support card events (Umamusume Wiki) ----
@@ -1093,6 +1210,19 @@
   // the best for this turn. Other cards fall back to typical values.
   const dateCard = (id) => (Dates && Dates.cards && Dates.cards[id]) || null;
   const DATE_STATS = ["speed", "stamina", "power", "guts", "wit"];
+
+  // Max energy for this career: 100 plus what the outings done so far added (Light Hello's
+  // first: +4). An outing with a choice counts its best max energy.
+  function careerMaxEnergy(state) {
+    let me = 100;
+    ((state.deck && state.deck.slots) || []).forEach((sl) => {
+      const dc = sl && sl.id ? dateCard(sl.id) : null;
+      const done = (sl && sl.dates && sl.dates.done) || 0;
+      if (!dc || !done) return;
+      dc.dates.slice(0, done).forEach((d) => { me += Math.max(0, ...(d.opts || []).map((o) => o.me || 0)); });
+    });
+    return me;
+  }
 
   function hintValue(h, ctx) {
     return (h || []).reduce((a, [id, lv]) => {
@@ -1253,9 +1383,9 @@
 
   // ---- Opening focus ----
   // From the start, pick one Wit card and one Speed card (each the one with the highest
-  // specialty priority, so it shows up on its own training most) and max their bonds first.
-  // Once both are maxed, the usual rule (train where the most cards still building bond are)
-  // takes over.
+  // specialty priority, so it shows up on its own training most) and get them to friendship
+  // (bond 80, orange) first. Once both are there, the usual rule (train where the most cards
+  // still building bond are) takes over.
   // Full weight through Junior year, fading out by Classic summer.
   const FOCUS_K = 2.0;
   function focusWeight(turn) {
@@ -1331,7 +1461,7 @@
         const bonding = deckMode ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
         const hints = deckMode ? (fac.hints || []).length : fac.hint ? 1 : 0;
         // Your Wit/Speed focus cards come first, so a training with one always counts as strong.
-        const focus = deckMode ? ctx.focus.filter((fc) => fc.bond < 100 && fac.members.indexOf(fc.idx) !== -1).length : 0;
+        const focus = deckMode ? ctx.focus.filter((fc) => fc.bond < 80 && fac.members.indexOf(fc.idx) !== -1).length : 0;
         return bonding + hints + (o.stat === "wit" ? 1 : 0) + (x.flames > 0 ? 1 : 0) + 2 * (x.burst || 0) + 3 * focus;
       };
       const best = Math.max.apply(null, trains.map(points).concat([0]));
@@ -1464,11 +1594,12 @@
     const aki = akikawaValue(f, ctx);
     if (aki) { o.parts.bond += aki.add; o.notes.push(aki.note); }
     if (dg && ctx.focus.length && focusWeight(state.turn) > 0) {
-      const here = ctx.focus.filter((fc) => fc.bond < 100 && f.members.indexOf(fc.idx) !== -1);
+      // Friendship (orange, 80) is the goal: bond past it adds nothing here.
+      const here = ctx.focus.filter((fc) => fc.bond < 80 && f.members.indexOf(fc.idx) !== -1);
       if (here.length) {
         o.parts.bond += here.length * focusWeight(state.turn) * typ;
         o.focus = here.length;
-        o.notes.push("focus card" + (here.length > 1 ? "s" : "") + " here: " + here.map((fc) => fc.card.n + " (bond " + Math.round(fc.bond) + ")").join(", ") + ". Max your Wit and Speed focus cards' bonds first");
+        o.notes.push("focus card" + (here.length > 1 ? "s" : "") + " here: " + here.map((fc) => fc.card.n + " (bond " + Math.round(fc.bond) + ")").join(", ") + ". Get your Wit and Speed focus cards to friendship (80) first");
       }
     }
     o.raw = o.parts.stats + o.parts.sp + o.parts.bond + o.parts.hint + o.parts.scenario + (o.parts.tokens || 0);
@@ -1512,7 +1643,9 @@
     const failMult = hook.failMult ? hook.failMult(ctx) : 1;
     const moodDrop = mood > 0 ? ctx.moodStep(mood - 1) : 0;
     let risk = -(o.fail / 100) * (o.raw + 0.5 * ctx.typ + moodDrop) * failMult;
-    if (o.fail > ctx.state.risk) risk -= ((o.fail - ctx.state.risk) / 100) * ctx.typ * 2;
+    // Past your limit (Settings) each point costs 8% of a typical training on top: a little
+    // over can still win a close call, far over almost never does.
+    if (o.fail > ctx.state.risk) risk -= ((o.fail - ctx.state.risk) / 100) * ctx.typ * 8;
     o.parts.risk = risk;
     o.value = sumParts(o.parts);
   }
@@ -1769,8 +1902,6 @@
       snapshot: JSON.stringify(Object.assign({}, state, { log: undefined }))
     }]).slice(-90);
     s.turn = Math.min(scenario.totalTurns, s.turn + 1);
-    // A reset check's input that belongs to one event (Mecha's exam rank) clears when the next one comes.
-    (scenario.resetChecks || []).forEach((c) => { if (c.input && c.turns && c.turns.indexOf(s.turn) !== -1) delete s.extras[c.input]; });
     s.facilities = s.facilities.map((f) => ({ stat: f.stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 }));
     s.goalRace = isGoalTurn(s, scenario, s.turn);
     s.race = "";
@@ -2002,9 +2133,11 @@
         if (ctx.state.turn < 5) return;
         const best = options[0];
         if (!best) return;
-        const adv = songAdvice(ctx.state, ctx.sc);
         const plan = songPlan(ctx.state, ctx.sc);
-        const buy = adv.find((a) => a.affordable && !a.avoid);
+        // The first song in the token aim you can buy without taking tokens a more important
+        // song above it needs.
+        const aim = tokenPlan(ctx.state, ctx.sc);
+        const buy = aim && aim.queue.find((x) => x.ready);
         const hype = hypeStatus(ctx.state, ctx.sc);
         if (plan) best.notes.push("song plan: " + plan.text);
         if (buy && plan && plan.step === "song") {
@@ -2322,7 +2455,7 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, turnsToDebut, applyOpening, NEW_YEAR,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows

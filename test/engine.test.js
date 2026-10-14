@@ -608,18 +608,33 @@ test("Grand Concert: trainings count the tokens they give toward the songs you s
   const st = (tokens) => base({ turn: 40, gl: { songs: {}, tokens, lessons: {} }, facilities: facs({ guts: { cards: 2 } }) });
   const guts = (s) => E.evaluate(s, gl).options.find((o) => o.stat === "guts");
   const none = guts(st([0, 0, 0, 0, 0]));
-  assert.ok(none.notes.some((n) => /Visual \(short \d+\) toward the \d+ songs left/.test(n)));
+  assert.ok(none.notes.some((n) => /\+\d+ (Visual|Dance).* toward .+ \((your next song|song \d+ in your token aim)\)/.test(n)), none.notes.join(" | "));
   assert.ok(none.parts.tokens > 0, "tokens are their own part of the breakdown");
   const full = guts(st([200, 200, 200, 200, 200]));
   assert.ok(none.value > full.value, "tokens you don't need add nothing");
-  // The plan covers every song still to buy (up to 18), and a type you'll run short of is
-  // worth more per token than one you'll have plenty of.
+});
+
+test("Grand Concert token aim: songs you can buy now first, most important first, then later ones", () => {
+  const gl = sc("grandlive");
   const plan = E.tokenPlan(base({ turn: 6, gl: { songs: {}, tokens: [0, 0, 0, 0, 0] } }), gl);
-  assert.strictEqual(plan.songs.length, 18);
-  const vis = 3;
-  const dance = 0;
-  assert.ok(plan.short[vis] / plan.supply[vis] > plan.short[dance] / plan.supply[dance]);
-  assert.ok(plan.price[vis] > plan.price[dance]);
+  assert.strictEqual(plan.queue.length, 18, "18 songs in all");
+  const nowN = plan.queue.filter((x) => x.now).length;
+  assert.ok(plan.queue.slice(0, nowN).every((x) => x.song.from <= 6) && plan.queue.slice(nowN).every((x) => x.song.from > 6), "available songs come first");
+  for (let k = 1; k < nowN; k++) assert.ok(plan.queue[k - 1].v >= plan.queue[k].v, "most important first");
+  assert.strictEqual(plan.aim, plan.queue[0]);
+  // A song's shortfall counts what the songs above it use first.
+  const rich = E.tokenPlan(base({ turn: 6, gl: { songs: {}, tokens: [40, 0, 40, 20, 20] } }), gl);
+  assert.ok(rich.queue[0].ready, "the top song is affordable with these tokens");
+  const used = rich.queue[0].song.cost;
+  const second = rich.queue[1];
+  second.song.cost.forEach((c, i) => assert.strictEqual(second.short[i], Math.max(0, c - Math.max(0, [40, 0, 40, 20, 20][i] - used[i]))));
+  // Tokens for the top song count for more than the same tokens for a song further down.
+  const fac2 = (stat) => base({ turn: 6, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} }, facilities: facs({ [stat]: { cards: 2 } }) });
+  const tok = (stat) => E.evaluate(fac2(stat), gl).options.find((o) => o.stat === stat).parts.tokens || 0;
+  const top = plan.queue[0].song.cost;
+  const topStat = E.STATS.find((k) => top[gl.tokenOf[k][0]] > 0);
+  const offStat = E.STATS.find((k) => top[gl.tokenOf[k][0]] === 0 && top[gl.tokenOf[k][1]] === 0);
+  assert.ok(tok(topStat) > tok(offStat), topStat + " " + tok(topStat) + " vs " + offStat + " " + tok(offStat));
 });
 
 test("support card events from the wiki: chain and other events, ranges by LB, best choice ranked", () => {
@@ -817,82 +832,129 @@ test("summer camp trainings don't raise facility levels", () => {
 
 // ---- Reset advice ----
 const logged = (n) => Array.from({ length: n }, (_, i) => ({ turn: i + 1, kind: "train" }));
-const rcItem = (rc, id) => rc && rc.items.find((it) => it.id === id);
+const rcItem = (rc, key) => rc && rc.items.find((it) => it.key === key);
+const answered = (key, a, decision) => ({ runChecks: { [key]: Object.assign({ a }, decision ? { decision } : {}) } });
 
-test("reset advice: Grand Concert debut check wants a rainbow or Light Hello's +20 event", () => {
+test("reset check: Grand Concert's debut check asks, then says reset or keep going", () => {
   const gl = sc("grandlive");
   const at = (o) => E.runCheck(base(Object.assign({ turn: 12, deck: openDeck(), log: logged(11) }, o)), gl);
-  assert.strictEqual(at({}).verdict, "reset");
-  assert.strictEqual(rcItem(at({ extras: { lh20: true } }), "debut").status, "ok");
-  // Curren Chan (a stat card) at friendship is enough; Light Hello (a friend card) isn't.
-  assert.strictEqual(at({ deck: openDeck([null, null, 85, null, null, null]) }).verdict, "ok");
-  assert.strictEqual(at({ deck: openDeck([null, null, null, null, null, 90]) }).verdict, "reset");
-  // Before the debut it's a warning, and with few turns logged the bonds aren't trusted.
-  assert.strictEqual(at({ turn: 11, log: logged(10) }).verdict, "borderline");
-  assert.strictEqual(at({ log: logged(2) }).verdict, "unknown");
-  assert.strictEqual(at({ deck: undefined }).verdict, "unknown");
-  assert.strictEqual(E.runCheck(base({ turn: 16, deck: openDeck(), log: logged(15) }), gl), null, "nothing to check after the window");
-  // Settings: "finish" skips the ace checks, "off" turns advice off.
+  const ask = at({});
+  assert.strictEqual(ask.verdict, "ask");
+  assert.deepStrictEqual(rcItem(ask, "debut").questions.map((q) => q.id), ["rainbow", "lh20"]);
+  assert.strictEqual(rcItem(ask, "debut").questions[0].guess, "no", "the coach's guess from its bonds");
+  assert.strictEqual(at(answered("debut", { rainbow: "no", lh20: "no" })).verdict, "reset");
+  assert.strictEqual(at(answered("debut", { rainbow: "yes" })).verdict, "ok");
+  assert.strictEqual(at(Object.assign(answered("debut", { rainbow: "no" }), { extras: { lh20: true } })).verdict, "ok", "the +20 event box counts as a yes");
+  // Continue: the miss stays as "finishing this run", then goes once the window passes.
+  assert.strictEqual(at(answered("debut", { rainbow: "no", lh20: "no" }, "continue")).verdict, "continued");
+  assert.strictEqual(at(Object.assign(answered("debut", { rainbow: "no", lh20: "no" }, "continue"), { turn: 15, log: logged(14) })), null);
+  // A miss you haven't decided on stays until you do.
+  assert.strictEqual(at(Object.assign(answered("debut", { rainbow: "no", lh20: "no" }), { turn: 16, log: logged(15) })).verdict, "reset");
+  assert.strictEqual(at({ turn: 10, log: logged(9) }).verdict, "wait");
   assert.strictEqual(at({ resetMode: "finish" }), null);
   assert.strictEqual(at({ resetMode: "off" }), null);
 });
 
-test("reset advice: Grand Concert wants 5 songs in year one", () => {
+test("reset check: Grand Concert's year one songs", () => {
   const gl = sc("grandlive");
-  const songs = (n) => ({ songs: Object.fromEntries(gl.songs.slice(0, n).map((s, i) => [s.id, 6 + 3 * i])) });
-  const at = (turn, n) => rcItem(E.runCheck(base({ turn, gl: songs(n) }), gl), "songs1");
-  assert.strictEqual(at(23, 5).status, "ok");
-  assert.strictEqual(at(23, 4).status, "borderline");
-  assert.strictEqual(at(23, 3).status, "reset");
-  assert.strictEqual(at(20, 3).status, "wait");
-  assert.strictEqual(at(20, 2).status, "borderline");
-  assert.strictEqual(at(23, 0).status, "unknown", "no songs marked: ask instead of resetting");
+  const at = (a, o) => E.runCheck(base(Object.assign({ turn: 23 }, a ? answered("songs1", a) : {}, o)), gl);
+  assert.strictEqual(at(null).verdict, "ask");
+  assert.strictEqual(at({ songs: 4 }).verdict, "reset");
+  assert.strictEqual(at({ songs: 5 }).verdict, "ask", "still needs the 6th song answer");
+  assert.strictEqual(at({ songs: 5, sixth: "yes" }).verdict, "ok");
+  assert.strictEqual(at({ songs: 6, sixth: "no" }).verdict, "reset");
+  const songs = Object.fromEntries(gl.songs.slice(0, 3).map((x, i) => [x.id, 6 + i]));
+  assert.strictEqual(rcItem(at(null, { gl: { songs, tokens: [0, 0, 0, 0, 0], lessons: {} } }), "songs1").questions[0].guess, 3, "guess from the Songs panel");
 });
 
-test("reset advice: Mecha restarts on an A, and the rank clears at the next exam", () => {
+test("reset check: Mecha asks each exam's rank and restarts on an A", () => {
   const me = sc("mecha");
-  const at = (turn, examRank) => E.runCheck(base({ turn, extras: { examRank } }), me);
-  assert.strictEqual(at(25, "A").verdict, "reset");
-  assert.strictEqual(at(25, "B").verdict, "reset");
-  assert.strictEqual(at(25, "S").verdict, "ok");
-  assert.strictEqual(at(25, "").verdict, "unknown");
-  assert.strictEqual(at(24, "").verdict, "wait");
-  assert.match(rcItem(at(37, "A"), "exam").label, /Exam 2/);
-  assert.strictEqual(at(30, "A"), null);
-  const r = E.recommend(base({ turn: 35, extras: { examRank: "S" } }), me);
-  assert.strictEqual(E.advance(base({ turn: 35, extras: { examRank: "S" } }), me, r.action).extras.examRank, undefined);
-  assert.strictEqual(E.advance(base({ turn: 33, extras: { examRank: "S" } }), me, r.action).extras.examRank, "S");
+  const at = (turn, a) => E.runCheck(base(Object.assign({ turn }, a ? answered("exam1", a) : {})), me);
+  assert.strictEqual(at(22).verdict, "wait");
+  assert.strictEqual(rcItem(at(24), "exam1").questions[0].type, "choice");
+  assert.strictEqual(at(25, { rank: "A" }).verdict, "reset");
+  assert.strictEqual(at(25, { rank: "B" }).verdict, "reset");
+  assert.strictEqual(at(25, { rank: "S" }).verdict, "ok");
+  assert.ok(rcItem(at(37), "exam2"), "the next exam asks again");
+  assert.strictEqual(at(30), null);
 });
 
-test("reset advice: Onsen wants 2 springs by Junior November", () => {
+test("reset check: Onsen asks how many springs are dug", () => {
   const on = sc("onsen");
-  const at = (turn, springs) => E.runCheck(base({ turn, extras: springs == null ? {} : { springs } }), on);
-  assert.strictEqual(at(21, 1).verdict, "reset");
-  assert.strictEqual(at(21, 2).verdict, "ok");
-  assert.strictEqual(at(18, 1).verdict, "borderline");
-  assert.strictEqual(at(21).verdict, "unknown");
+  const at = (turn, a) => E.runCheck(base(Object.assign({ turn }, a ? answered("springs", a) : {})), on);
+  assert.strictEqual(at(18).verdict, "wait");
+  assert.strictEqual(at(21).verdict, "ask");
+  assert.strictEqual(at(21, { springs: 1 }).verdict, "reset");
+  assert.strictEqual(at(21, { springs: 2 }).verdict, "ok");
 });
 
-test("reset advice: a fan goal the races can't reach, and bonds going into Classic", () => {
+test("reset check: a fan goal the races can't reach, and bonds going into Classic", () => {
   const D = require("../deck.js");
   const ura = sc("ura");
   const tm = D.DATA.trainees.find((t) => t.n === "Tamamo Cross"); // 5,000 fans by turn 29
   const st = (turn, fans, o) => base(Object.assign({ turn, fans, deck: { trainee: tm.id, slots: [] } }, o));
-  assert.strictEqual(rcItem(E.runCheck(st(24, 0), ura), "Fan goal").status, "borderline");
-  assert.strictEqual(rcItem(E.runCheck(st(27, 0), ura), "Fan goal").status, "reset");
-  assert.strictEqual(rcItem(E.runCheck(st(27, 0, { resetMode: "finish" }), ura), "Fan goal").status, "reset", "goals count in every mode");
+  assert.strictEqual(rcItem(E.runCheck(st(24, 0), ura), "fans29").status, "warn");
+  assert.strictEqual(rcItem(E.runCheck(st(27, 0), ura), "fans29").status, "reset");
+  assert.strictEqual(rcItem(E.runCheck(st(27, 0, { resetMode: "finish" }), ura), "fans29").status, "reset", "goals count in every mode");
+  assert.strictEqual(E.runCheck(st(27, 0, answered("fans29", {}, "continue")), ura), null, "continue: finish the run");
   assert.strictEqual(E.runCheck(st(27, 6000), ura), null);
-  // Bonds: a warning only, never a reset on its own.
-  const bonds = (b) => E.runCheck(base({ turn: 24, deck: openDeck(b), log: logged(23) }), ura);
-  assert.strictEqual(bonds([40, 40, 40, 40, 40, 40]).verdict, "borderline");
-  assert.strictEqual(bonds([90, 90, 90, 40, 40, 40]).verdict, "ok");
+  // Bonds: asked going into Classic; a miss is only a warning.
+  const bonds = (b, a) => E.runCheck(base(Object.assign({ turn: 24, deck: openDeck(b), log: logged(23) }, a ? answered("bonds", a) : {})), ura);
+  assert.strictEqual(rcItem(bonds([40, 40, 40, 40, 40, 40]), "bonds").questions[0].guess, "no");
+  assert.strictEqual(rcItem(bonds([90, 90, 90, 40, 40, 40]), "bonds").questions[0].guess, "yes");
+  assert.strictEqual(bonds([40, 40, 40, 40, 40, 40], { most: "no" }).verdict, "warn");
+  assert.strictEqual(bonds([40, 40, 40, 40, 40, 40], { most: "yes" }).verdict, "ok");
 });
 
-test("reset advice runs on every scenario and turn", () => {
+test("reset check runs on every scenario and turn, and offers the run summary at the end", () => {
   SCENARIOS.forEach((s) => {
     for (let t = 1; t <= s.totalTurns; t++) {
       const rc = E.runCheck(base({ turn: t, deck: openDeck(), log: logged(t - 1) }), s);
-      if (rc) assert.ok(rc.items.length && ["ok", "wait", "unknown", "borderline", "reset"].includes(rc.verdict), s.id + " " + t);
+      if (rc) assert.ok(rc.items.length && ["ok", "wait", "ask", "warn", "reset", "continued", "done"].includes(rc.verdict), s.id + " " + t);
     }
+    assert.ok(rcItem(E.runCheck(base({ turn: s.totalTurns }), s), "end"), s.id + " run finished");
   });
+});
+
+// ---- Fixes from the turn 17 report (Grand Concert, sprint, energy 28) ----
+const t17 = (o) => base(Object.assign({
+  turn: 17, energy: 28, mood: 4, build: "sprint", risk: 17, maxEnergy: 100, fans: 784,
+  extras: { consec: 0, akiBond: 21, lh20: true }, stats: { speed: 321, stamina: 139, power: 333, guts: 218, wit: 216 },
+  targets: { speed: 1500, stamina: 300, power: 1200, guts: 600, wit: 1100 }, log: logged(16),
+  gl: { tokens: [43, 0, 92, 28, 63], songs: {}, lessons: {} },
+  deck: { trainee: null, slots: [{ id: 30101, lb: 4, bond: 100 }, { id: 30052, lb: 4, bond: 61, dates: { done: 0, unlocked: true } }, { id: 30015, lb: 2, bond: 59 }, { id: 30078, lb: 4, bond: 46 }, { id: 30111, lb: 2, bond: 51 }, { id: 30146, lb: 4, bond: 64 }] },
+  facilities: dfac({ speed: { members: [5], hints: [5], fail: 44, extras: { aki: true } }, stamina: { members: [1, 3], fail: 26 }, power: { members: [4], fail: 44 } })
+}, o));
+
+test("a training far past your failure limit loses to a safe one, even with a focus card on it", () => {
+  const r = E.recommend(t17(), sc("grandlive"));
+  assert.notStrictEqual(r.action.stat, "speed", "44% failure against a 17% limit");
+  assert.ok(r.action.kind !== "train" || r.action.fail <= 17, r.action.label + " " + r.action.fail);
+  const speed = r.ranked.find((o) => o.stat === "speed");
+  assert.ok(speed.parts.risk < -3 * r.typ, "past the limit costs a lot");
+});
+
+test("friendship is the bond goal: a focus card at 80 (orange) gets no more focus", () => {
+  const r = (bond) => E.evaluate(t17({ energy: 90, facilities: dfac({ speed: { members: [5], fail: 0 } }), deck: Object.assign({}, t17().deck, { slots: t17().deck.slots.map((x, i) => (i === 5 ? Object.assign({}, x, { bond }) : x)) }) }), sc("grandlive")).options.find((o) => o.stat === "speed");
+  assert.ok(r(64).notes.some((n) => /focus card here/.test(n)));
+  assert.ok(!r(80).notes.some((n) => /focus card here/.test(n)));
+  assert.ok(r(64).parts.bond > r(80).parts.bond + r(64).parts.stats * 0.5);
+});
+
+test("max energy belongs to one career: 100 plus what its outings added", () => {
+  const lh = (done) => ({ deck: { slots: [{ id: 30052, lb: 4, dates: { done, unlocked: true } }] } });
+  assert.strictEqual(E.careerMaxEnergy(lh(0)), 100);
+  assert.strictEqual(E.careerMaxEnergy(lh(1)), 104, "Light Hello's first outing: +4");
+  assert.strictEqual(E.careerMaxEnergy(lh(3)), 104, "only her first outing raises it");
+});
+
+test("stat priority replaces the build's weights, most important first", () => {
+  assert.deepStrictEqual(E.buildPriority("sprint").slice(0, 2), ["speed", "power"]);
+  const w = E.statWeights({ build: "sprint", priority: ["stamina", "speed", "power", "wit", "guts"] });
+  assert.ok(w.stamina > w.speed && w.speed > w.power && w.power > w.wit && w.wit > w.guts);
+  assert.deepStrictEqual(E.statWeights({ build: "sprint", priority: ["stamina", "speed"] }), E.BUILDS.sprint.w, "an incomplete order is ignored");
+  // With Stamina first (and still far from its 300 target), a Stamina training gains on Speed.
+  const f = dfac({ speed: { members: [0], fail: 0 }, stamina: { members: [2], fail: 0 } });
+  const val = (o) => { const ev = E.evaluate(t17(Object.assign({ energy: 90, facilities: f }, o)), sc("grandlive")); const v = (st) => ev.options.find((x) => x.stat === st).parts.stats; return v("stamina") / v("speed"); };
+  assert.ok(val({ priority: ["stamina", "speed", "power", "wit", "guts"] }) > val({}));
 });

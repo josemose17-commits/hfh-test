@@ -24,13 +24,20 @@
       build: k.build || "medium",
       risk: k.risk != null ? k.risk : 12,
       raceBonus: k.raceBonus || 0,
-      maxEnergy: k.maxEnergy || 100,
+      // Each career starts at 100; outings (Light Hello's first: +4) raise it during the run.
+      maxEnergy: 100,
+      meFix: 1,
       resetMode: k.resetMode || "ace",
       trackStats: k.trackStats != null ? k.trackStats : true,
       calib: k.calib || [],
       fcal: k.fcal || [],
       caps: k.caps || {},
       sparks: k.sparks || {},
+      // Your targets, stat priority and tier list settings carry over to the next career.
+      targets: k.targets || {},
+      priority: k.priority,
+      eu: k.eu,
+      tier: k.tier,
       deck: k.deck ? resetBonds(k.deck) : blankDeck(),
       gl: blankGl(),
       facLevels: {},
@@ -76,6 +83,13 @@
         s.facLevels = s.facLevels || {};
         s.facilities.forEach((f) => { f.members = f.members || []; f.hints = f.hints || []; f.extra = f.extra || 0; });
         s.gl = s.gl || blankGl();
+        // Older saves carried max energy from career to career (100 → 104 → 108...): once, set
+        // it back to 100 plus what this career's outings added.
+        if (!s.meFix) {
+          const me = E.careerMaxEnergy(s);
+          if ((s.maxEnergy || 100) > me) { s.maxEnergy = me; s.energy = Math.min(s.energy, me); }
+          s.meFix = 1;
+        }
         return s;
       }
     } catch (e) { /* storage unavailable */ }
@@ -206,6 +220,7 @@
           <details class="panel stats" id="statsPanel">
             <summary><h2>Stats and caps</h2><span class="mini">Optional. Lets the coach stop pushing stats that are capped or already enough.</span></summary>
             <div class="table-wrap"><table class="stat-table" id="statTable"></table></div>
+            <div class="prio" id="prioRow"></div>
             <p class="mini" id="statNote"></p>
             <label class="chip-toggle"><input type="checkbox" id="trackStats"> Add training gains to these when I press Done</label>
           </details>
@@ -352,6 +367,15 @@
     });
     $("#facilities").addEventListener("focusin", (e) => { if (e.target.select && e.target.type === "number") e.target.select(); });
 
+    $("#prioRow").addEventListener("change", (e) => {
+      const i = e.target.dataset.prio; if (i == null) return;
+      // The picked stat moves to that rank and the others keep their order around it.
+      const order = (Array.isArray(state.priority) && state.priority.length === 5 ? state.priority : E.buildPriority(state.build)).filter((x) => x !== e.target.value);
+      order.splice(+i, 0, e.target.value);
+      state.priority = order;
+      commit(true);
+    });
+    $("#prioRow").addEventListener("click", (e) => { if (e.target.closest("#prioReset")) { delete state.priority; commit(true); } });
     $("#statTable").addEventListener("input", (e) => {
       const s = e.target.dataset.stat; if (!s) return;
       if (e.target.dataset.kind === "sparks") {
@@ -487,10 +511,35 @@
       const row = e.target.closest("[data-row]");
       if (row) { openRow = openRow === +row.dataset.row ? null : +row.dataset.row; renderOptions(); }
     });
+    // Number answers (songs bought, springs dug) count once you leave the box or press Enter.
+    $("#call").addEventListener("change", (e) => {
+      const n = e.target.dataset.rcNum;
+      if (!n) return;
+      const [key, qid] = n.split("|");
+      rcAnswer(key, qid, e.target.value === "" ? null : Math.max(0, +e.target.value || 0));
+    });
     $("#call").addEventListener("click", (e) => {
       if (e.target.closest("#doneBtn")) done(rec && rec.action);
       if (e.target.closest("#undoBtn")) undoTurn();
       if (e.target.closest("#rcNew")) newCareer($("#rcNew"));
+      const ans = e.target.closest("[data-rc-ans]");
+      if (ans) { const [key, qid, v] = ans.dataset.rcAns.split("|"); const cur = (((state.runChecks || {})[key] || {}).a || {})[qid]; rcAnswer(key, qid, cur === v ? null : v); return; }
+      const cont = e.target.closest("[data-rc-continue]");
+      if (cont) {
+        state.runChecks = state.runChecks || {};
+        cont.dataset.rcContinue.split(",").forEach((key) => { (state.runChecks[key] = state.runChecks[key] || {}).decision = "continue"; });
+        commit(true);
+        flash("Finishing this run. The coach won't ask about that check again.");
+        return;
+      }
+      if (e.target.closest("#rcCopy")) {
+        const text = runSummary($("#rcWhy").value);
+        const out = $("#rcOut");
+        out.hidden = false;
+        out.value = text;
+        try { navigator.clipboard.writeText(text).then(() => flash("Run summary copied: paste it to me"), () => { out.select(); flash("Select the summary and copy it"); }); } catch (err) { out.select(); flash("Select the summary and copy it"); }
+        return;
+      }
       if (e.target.closest("#reportCopy")) {
         const text = turnReport($("#reportWhy").value);
         const out = $("#reportOut");
@@ -804,6 +853,20 @@
   // ---- Grand Concert songs panel ----
   // The run's token plan: what the songs left to buy cost, what you hold, roughly what training
   // brings in by the Grand Live, and which types you'll run short of (those count most).
+  // The token aim: songs to buy, most important first (the ones available now, then the ones
+  // that unlock later). Trainings are credited for filling the first song's gap first.
+  function tokenAimHTML(sc) {
+    const p = E.tokenPlan(state, sc);
+    if (!p || !p.queue.length) return "";
+    const needs = (short) => short.map((x, i) => (x ? sc.tokens[i] + " " + x : "")).filter(Boolean).join(", ");
+    const items = p.queue.slice(0, 6).map((x) => `<li${x.ready ? ' class="ready"' : ""}><b>${esc(x.song.name)}</b> ${x.now
+      ? (x.ready ? '<span class="pill c-clear-pick">affordable</span>' : `<span class="mini">needs ${esc(needs(x.short))} more</span>`)
+      : `<span class="mini">unlocks turn ${x.song.from}${x.short.some(Boolean) ? ", needs " + esc(needs(x.short)) + " more" : ""}</span>`}</li>`).join("");
+    return `<div class="token-aim"><b>Token aim</b>, most important first<ol>${items}</ol>
+      ${p.queue.length > 6 ? `<p class="mini">${p.queue.length - 6} more after these.</p>` : ""}
+      <p class="mini">Order: what each song is worth for your stat priority over the rest of the run, with the song plan's picks first and its skips last; songs you can buy now come before ones that unlock later. Each "needs" counts the tokens the songs above it use first, and trainings get credit for filling the top song's gap first.</p></div>`;
+  }
+
   function tokenPlanHTML(sc) {
     const p = E.tokenPlan(state, sc);
     if (!p || !p.songs.length) return "";
@@ -815,7 +878,7 @@
     const worst = sc.tokens.map((n, i) => [n, p.short[i] - p.supply[i]]).filter(([, g]) => g > 0).sort((a, b) => b[1] - a[1]).map(([n]) => n);
     return `<details class="token-plan"><summary><b>Token plan</b>: ${p.songs.length} songs left to buy${worst.length ? ` · short on ${worst.join(", ")}` : " · tokens look fine"}</summary>
       <div class="table-wrap"><table class="tp"><thead><tr><th>Token</th><th>Songs left cost</th><th>You have</th><th>Training brings</th><th></th></tr></thead><tbody>${row}</tbody></table></div>
-      <p class="mini">Songs left: the best value per token, up to 18 in all, including ones that unlock later (${p.songs.map((x) => esc(x.song.name)).join(", ")}). "Training brings" is a rough estimate to the Grand Live. Trainings that give the token types you're short of count for more, so the coach steers you toward buying them all.</p>
+      <p class="mini">Songs left: the ${p.queue.length} that matter most for your stat priority (18 in all with the ones you've learned), including ones that unlock later. "Training brings" is a rough estimate to the Grand Live. Trainings that give the token types you're short of count for more, so the coach steers you toward buying them all.</p>
     </details>`;
   }
 
@@ -827,7 +890,6 @@
     const gl = state.gl;
     const hype = E.hypeStatus(state, sc);
     const bon = E.songBonuses(state, sc);
-    const adv = E.songAdvice(state, sc);
     const learnedN = Object.keys(gl.songs).length;
     const extras = Object.entries(bon.extra).filter(([, v]) => v).map(([k, v]) => "+" + v + " " + (k === "sp" ? "SP" : E.STAT_LABELS[k])).join(", ");
     $("#songSummary").textContent = learnedN + " of 21 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
@@ -839,7 +901,6 @@
       song.live || ""
     ].filter(Boolean).join(" · ");
     const groups = [[5, "Available from the start"], [25, "After the 1st Promo Live"], [37, "After the 2nd Promo Live"], [49, "After the 3rd Promo Live"]];
-    const top = adv.slice(0, 3);
     $("#songsBody").innerHTML = `
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
       <p class="mini">Tokens go up by themselves when you press <b>Done</b> on a training (set the token type and amount each training shows on its card; blank uses the estimate), capped at ${E.tokenCap(state, sc)} for now (+50 after each live). Ticking a song takes its cost off. You can still correct the numbers here.</p>
@@ -850,7 +911,7 @@
       </div>
       ${songPlanHTML(sc)}
       ${tokenPlanHTML(sc)}
-      ${top.length ? `<div class="song-advice"><b>Best next:</b> ${top.map((a) => `${esc(a.song.name)} ${a.affordable ? '<span class="pill c-clear-pick">affordable</span>' : `<span class="mini">(need ${a.short.map((x, i) => (x ? sc.tokens[i].slice(0, 2) + " " + x : "")).filter(Boolean).join(", ")})</span>`}`).join(" · ")}</div>` : ""}
+      ${tokenAimHTML(sc)}
       ${groups.map(([from, label]) => `<div class="song-group"><h3>${label}</h3>${sc.songs.filter((x) => x.from === from).map((song) => {
         const t = gl.songs[song.id];
         const locked = song.from > state.turn && t == null;
@@ -882,12 +943,13 @@
     return "";
   }
 
-  // Token typing only refreshes the advice line, so the box keeps focus.
+  // Token typing only refreshes the token aim, so the box keeps focus.
   function renderSongsLight() {
-    const sc = scenario();
-    const adv = E.songAdvice(state, sc).slice(0, 3);
-    const el = $("#songsBody .song-advice");
-    if (el) el.innerHTML = `<b>Best next:</b> ${adv.map((a) => `${esc(a.song.name)} ${a.affordable ? '<span class="pill c-clear-pick">affordable</span>' : `<span class="mini">(need ${a.short.map((x, i) => (x ? sc.tokens[i].slice(0, 2) + " " + x : "")).filter(Boolean).join(", ")})</span>`}`).join(" · ")}`;
+    const el = $("#songsBody .token-aim");
+    if (!el) return;
+    const tmp = document.createElement("div");
+    tmp.innerHTML = tokenAimHTML(scenario());
+    if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild); else el.remove();
   }
 
   function renderFacilities() {
@@ -1017,7 +1079,7 @@
           <span class="tydot" aria-hidden="true"></span>
           <input class="slot-name" data-slot-name="${i}" list="cardList" value="${esc(D.label(c))}" autocomplete="off" aria-label="Support card ${i + 1}">
           <select data-slot-lb="${i}" aria-label="Limit break">${[0, 1, 2, 3, 4].map((lb) => `<option value="${lb}" ${lb === sl.lb ? "selected" : ""}>LB${lb} · Lv${D.levelFor(c, lb)}</option>`).join("")}</select>
-          ${focus.has(i) ? `<span class="chip focus" title="Opening focus: your ${focus.get(i).type === "wit" ? "Wit" : "Speed"} card with the highest specialty priority (${focus.get(i).spec}). The coach maxes its bond first.">${bond >= 100 ? "Focus ✓" : "Focus"}</span>` : ""}
+          ${focus.has(i) ? `<span class="chip focus" title="Opening focus: your ${focus.get(i).type === "wit" ? "Wit" : "Speed"} card with the highest specialty priority (${focus.get(i).spec}). The coach gets it to friendship (80, orange) first.">${bond >= 80 ? "Focus ✓" : "Focus"}</span>` : ""}
           <label class="bond${bond >= 80 ? " full" : ""}"><span>Bond</span><input type="number" inputmode="numeric" data-slot-bond="${i}" min="0" max="100" value="${Math.round(bond)}"></label>
           <button type="button" class="btn ghost small square" data-slot-clear="${i}" aria-label="Remove card">✕</button>
         </div>
@@ -1319,7 +1381,18 @@
         <td><input type="text" inputmode="numeric" class="sparks" data-stat="${s}" data-kind="sparks" value="${esc(sparks[s] || "")}" placeholder="3 2" aria-label="${E.STAT_LABELS[s]} blue spark stars"></td>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="cap" min="0" max="2500" value="${state.caps[s] || ""}" placeholder="${capNow[s]}" title="Base ${sc.caps[i]}${capNow[s] > sc.caps[i] ? " + " + (capNow[s] - sc.caps[i]) + " from sparks" : ""}" aria-label="${E.STAT_LABELS[s]} cap"></td>
         <td><input type="number" inputmode="numeric" data-stat="${s}" data-kind="target" min="0" max="2500" value="${tg[s] || ""}" placeholder="${Math.min(build.target[s], state.caps[s] || capNow[s])}" aria-label="${E.STAT_LABELS[s]} target"></td></tr>`).join("")}</tbody>`;
+    $("#prioRow").innerHTML = prioHTML(build);
     $("#statNote").textContent = "Cap is the game's limit for each stat in " + sc.name + ": training can't take it higher (blue sparks and some events raise it). Target is your goal for a " + build.label + " build: past it the coach values that stat less. A target above the cap counts as the cap. Stats over 1200 count half in races, so most targets stop near 1200.";
+  }
+
+  // Stat priority: five boxes, most important first. Picking a stat for a rank moves it there
+  // and shifts the others. The build's order until you change one.
+  function prioHTML(build) {
+    const mine = Array.isArray(state.priority) && state.priority.length === 5;
+    const order = mine ? state.priority : E.buildPriority(state.build);
+    return `<span class="mini"><b>Stat priority</b>, most important first${mine ? "" : ` (now the ${esc(build.label)} build's order)`}. The coach fills stats in this order, each up to its target.</span>
+      <div class="prio-row">${order.map((st, i) => `${i ? '<span class="prio-gt" aria-hidden="true">›</span>' : ""}<label class="prio-f"><span class="sr-only">${["1st", "2nd", "3rd", "4th", "5th"][i]}</span><select data-prio="${i}" aria-label="${["1st", "2nd", "3rd", "4th", "5th"][i]} priority">${E.STATS.map((x) => `<option value="${x}" ${x === st ? "selected" : ""}>${E.STAT_LABELS[x]}</option>`).join("")}</select></label>`).join("")}
+      ${mine ? '<button type="button" class="btn ghost small" id="prioReset">Use the build\'s order</button>' : ""}</div>`;
   }
 
   function syncLight() {
@@ -1357,6 +1430,80 @@
   document.addEventListener("input", (e) => { if (e.target.id === "reportWhy") reportWhy = e.target.value; });
 
   // Everything needed to check a call: the turn's inputs, deck, tokens and every option's score.
+  // ---- Reset check: questions, then reset or finish the run, with a run summary ----
+  let rcWhy = "";
+  let rcOpen = false;
+  document.addEventListener("toggle", (e) => { if (e.target.id === "rcSummary") rcOpen = e.target.open; }, true);
+  document.addEventListener("input", (e) => { if (e.target.id === "rcWhy") rcWhy = e.target.value; });
+  const RC_HEAD = { reset: "Reset this run", warn: "This run is behind", ask: "Reset check: answer to decide", done: "Run finished", continued: "Finishing this run", wait: "Reset check coming up", ok: "Run check: keep going" };
+  function rcQuestionHTML(it, q) {
+    const id = it.key + "|" + q.id;
+    const shown = (v) => (v === "yes" ? "Yes" : v === "no" ? "No" : String(v));
+    const guess = q.guess != null && q.answer == null ? `<span class="mini rc-guess">Coach's guess: ${esc(shown(q.guess))}${q.guessWhy ? " (" + esc(q.guessWhy) + ")" : ""}</span>` : "";
+    const ctl = q.type === "number"
+      ? `<input type="number" inputmode="numeric" min="0" max="30" class="rc-num" data-rc-num="${id}" value="${q.answer != null ? q.answer : ""}" placeholder="${q.guess != null ? q.guess : ""}" aria-label="${esc(q.text)}">`
+      : (q.type === "choice" ? q.options : [["yes", "Yes"], ["no", "No"]]).map(([v, l]) => `<button type="button" class="btn ghost small rc-ans" data-rc-ans="${id}|${v}" aria-pressed="${String(q.answer) === v}">${esc(l)}</button>`).join("");
+    return `<div class="rc-q"><span class="rc-qt">${esc(q.text)}</span><span class="rc-ctl">${ctl}</span>${guess}</div>`;
+  }
+  function runBoxHTML(rc) {
+    if (!rc) return "";
+    const open = rc.items.filter((it) => it.status === "reset" || it.status === "warn");
+    const summary = open.length || rc.items.some((it) => it.status === "done");
+    return `<div class="runcheck rc-${rc.verdict}" ${rc.verdict === "reset" ? 'role="alert"' : ""}>
+      <div class="rc-head">${esc(RC_HEAD[rc.verdict])}</div>
+      ${rc.items.map((it) => `<div class="rc-item rc-${it.status}"><div><b>${esc(it.label)}:</b> ${esc(it.why)}</div>
+        ${it.questions && it.status !== "wait" && it.status !== "continued" ? it.questions.map((q) => rcQuestionHTML(it, q)).join("") : ""}</div>`).join("")}
+      ${open.length ? `<div class="rc-actions">
+          <button type="button" class="btn small rc-reset-btn" id="rcNew">Reset: start a new career</button>
+          <button type="button" class="btn ghost small" data-rc-continue="${open.map((it) => it.key).join(",")}">Continue and finish this run</button>
+        </div>` : ""}
+      ${summary ? `<details class="rc-summary" id="rcSummary" ${rcOpen || open.length ? "open" : ""}><summary>Run summary</summary>
+          <p class="mini">Copy it and paste it to me: it has this run's checks and your answers, stats, deck, songs and every turn you logged, so the coach can be fixed.</p>
+          <textarea id="rcWhy" rows="2" placeholder="Anything that went wrong in this run?">${esc(rcWhy)}</textarea>
+          <button type="button" class="btn ghost small" id="rcCopy">Copy run summary</button>
+          <textarea id="rcOut" rows="4" readonly hidden></textarea>
+        </details>` : ""}
+    </div>`;
+  }
+  function rcAnswer(key, qid, value) {
+    state.runChecks = state.runChecks || {};
+    const e = (state.runChecks[key] = state.runChecks[key] || {});
+    e.a = e.a || {};
+    if (value === null) delete e.a[qid]; else e.a[qid] = value;
+    // Light Hello's +20 event is also the box under the scenario's turn inputs.
+    if (qid === "lh20") state.extras.lh20 = value === "yes";
+    commit(true);
+  }
+
+  // The whole run so far, for the coach to be fixed: a short readable recap, then the data.
+  function runSummary(why) {
+    const sc = scenario();
+    const rc = E.runCheck(state, sc);
+    const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
+    const info = E.deckInfo(state);
+    const tg = Object.assign({}, E.BUILDS[state.build].target, state.targets || {});
+    const songs = Object.entries((state.gl && state.gl.songs) || {}).sort((a, b) => a[1] - b[1]).map(([id, turn]) => ((sc.songs || []).find((x) => x.id === id) || { name: id }).name + " (turn " + turn + ")");
+    const lines = [
+      "Uma coach run summary",
+      sc.name + " · " + E.BUILDS[state.build].label + (t ? " · " + t.n : "") + " · turn " + state.turn + " of " + sc.totalTurns + " (" + E.turnInfo(state.turn, sc).text + ")",
+      (why || "").trim() ? "What went wrong: " + why.trim() : "",
+      "Checks: " + (rc ? rc.items.map((it) => it.label + " " + it.status).join("; ") : "none"),
+      "Stats: " + E.STATS.map((s) => E.STAT_LABELS[s] + " " + (state.stats[s] || "?") + "/" + tg[s]).join(", ") + (state.priority ? " · priority " + state.priority.map((s) => E.STAT_LABELS[s]).join(" > ") : ""),
+      info ? "Deck: " + info.used.map((sl) => sl.card.n + " LB" + (state.deck.slots[sl.idx].lb) + " bond " + Math.round(sl.bond)).join(", ") : "",
+      sc.songs ? "Songs: " + (songs.join(", ") || "none") + " · tokens " + sc.tokens.map((n, i) => n + " " + ((state.gl.tokens || [])[i] || 0)).join(", ") : "",
+      "Energy " + state.energy + "/" + (state.maxEnergy || 100) + " · mood " + E.MOODS[state.mood] + " · fans " + (state.fans || 0),
+      "Turns: " + ((state.log || []).map((l) => l.turn + " " + l.label).join("; ") || "none logged")
+    ].filter(Boolean);
+    const data = {
+      v: 1, kind: "run", why: (why || "").trim(), scenario: sc.id, build: state.build, priority: state.priority, trainee: t ? t.n : null, turn: state.turn,
+      stats: state.stats, targets: state.targets || {}, caps: state.caps, sparks: state.sparks, maxEnergy: state.maxEnergy, energy: state.energy, mood: E.MOODS[state.mood], risk: state.risk, fans: state.fans,
+      extras: state.extras, gl: state.gl, runChecks: state.runChecks || {}, checks: rc ? rc.items.map((it) => ({ label: it.label, status: it.status })) : [],
+      deck: (state.deck.slots || []).map((sl) => sl && sl.id ? { id: sl.id, card: D.card(sl.id) ? D.card(sl.id).n : sl.id, lb: sl.lb, bond: Math.round(slotBond(sl)), dates: sl.dates } : null),
+      log: (state.log || []).map((l) => ({ t: l.turn, a: l.label, e: l.energy, m: l.mood }))
+    };
+    return lines.join("\n") + "\n\n" + JSON.stringify(data);
+  }
+
   function turnReport(why) {
     const sc = scenario();
     const typ = rec.typ || 1;
@@ -1365,7 +1512,7 @@
     const rep = {
       v: 1, why: (why || "").trim(), scenario: sc.id, turn: state.turn, when: rec.turn.text, build: state.build,
       energy: state.energy + "/" + (state.maxEnergy || 100), mood: E.MOODS[state.mood], risk: state.risk,
-      stats: state.stats, targets: state.targets || {}, caps: state.caps, extras: state.extras, fans: state.fans,
+      stats: state.stats, targets: state.targets || {}, priority: state.priority, caps: state.caps, extras: state.extras, fans: state.fans,
       gl: state.gl ? { tokens: state.gl.tokens, songs: Object.keys(state.gl.songs || {}), lessons: state.gl.lessons } : undefined,
       deck: (state.deck.slots || []).map((sl) => sl && sl.id ? { card: name(state.deck.slots.indexOf(sl)), id: sl.id, lb: sl.lb, bond: Math.round(slotBond(sl)), dates: sl.dates } : null),
       trainings: state.facilities.map((f) => ({ stat: f.stat, cards: (f.members || []).map(name), hints: (f.hints || []).map(name), others: f.extra || 0, gain: f.gain, fail: f.fail, extras: f.extras })),
@@ -1381,13 +1528,7 @@
     const a = rec.action;
     const kind = a.kind;
     $("#call").className = "panel call k-" + kind + (a.stat ? " s-" + a.stat : "");
-    const rc = E.runCheck(state, sc);
-    const rcHead = { reset: "Reset this run", borderline: "Borderline run", unknown: "Reset check: the coach needs to know", wait: "Reset check coming up", ok: "Run check: keep going" };
-    const runBox = rc ? `<div class="runcheck rc-${rc.verdict}" ${rc.verdict === "reset" ? 'role="alert"' : ""}>
-        <div class="rc-head">${esc(rcHead[rc.verdict])}</div>
-        <ul>${rc.items.map((it) => `<li class="rc-${it.status}"><b>${esc(it.label)}:</b> ${esc(it.why)}</li>`).join("")}</ul>
-        ${rc.verdict === "reset" ? `<button type="button" class="btn ghost small warn" id="rcNew">Start a new career</button>` : ""}
-      </div>` : "";
+    const runBox = runBoxHTML(E.runCheck(state, sc));
     const vs = rec.versus ? `<div class="versus">Beats <b>${esc(rec.versus.label)}</b> by ${score(rec.versus.gap)} points, mostly on ${esc(rec.versus.because)}.</div>` : "";
     const after = a.forced ? "" : `<div class="after">After this: energy about <b>${rec.after.energy}</b>, mood <b>${E.MOODS[rec.after.mood]}</b>.</div>`;
     $("#call").innerHTML = `

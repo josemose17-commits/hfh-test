@@ -15,8 +15,8 @@
 // train:     base training values at facility level 1 per facility:
 //            [speed, stamina, power, guts, wit, skill points, energy] (GameTora scenario pages).
 //            trainApprox marks scenarios whose values aren't published yet (Island values are used).
-// resetChecks: when to tell you to reset (see runCheck in engine.js): an id, the turns it
-//            looks at (from-to, or exam turns), and "at", the turn a miss means reset.
+// resetChecks: when the coach asks whether to reset (see runCheck in engine.js): an id, and
+//            from (shows it's coming), at (asks), to (last turn it asks); or exam turns.
 // inputs:    extra fields. scope "facility" shows on each training, "turn" once per turn.
 //            type is "number", "check" or "select" (with options).
 (function (root) {
@@ -274,7 +274,7 @@
       inputs: [
         { id: "lh20", label: "Light Hello +20 event", scope: "turn", type: "check", help: "Her Training Together event gave you 20 points of a token type. Tick it once it happens: the debut reset check counts it." }
       ],
-      resetChecks: [{ id: "debut", from: 10, to: 14, at: 12 }, { id: "songs1", from: 19, to: 25, at: 23 }],
+      resetChecks: [{ id: "debut", from: 10, at: 12, to: 14 }, { id: "songs1", from: 20, at: 23, to: 25 }],
       events: [
         { turn: 4, label: "Rest before Light Hello", tip: "The game shows 9 turns to your debut. Rest unless energy is 85+: Light Hello shows up from turn 5, and you train with her the first time she does." },
         { turn: 5, label: "Lessons unlock", tip: "The Grand Live plan starts. Train with Light Hello the first time she shows up, then favour the cards closest to friendship until the debut. Song plan for year one: 5 songs, then carry the 6th over." },
@@ -527,10 +527,9 @@
       keyCards: [],
       inputs: [
         { id: "gear", label: "Mecha Gear here", scope: "facility", type: "check" },
-        { id: "overdrive", label: "Overdrive ready", scope: "turn", type: "check" },
-        { id: "examRank", label: "Exam rank", scope: "turn", type: "select", options: [["", "Not yet"], ["S", "S"], ["A", "A"], ["B", "B or lower"]], help: "Your last Upgrade Exam's rank. It clears when the next exam comes. game8 restarts the run on any A." }
+        { id: "overdrive", label: "Overdrive ready", scope: "turn", type: "check" }
       ],
-      resetChecks: [{ id: "exam", turns: [24, 36, 48, 60], input: "examRank" }],
+      resetChecks: [{ id: "exam", turns: [24, 36, 48, 60] }],
       events: [
         { turn: 24, label: "Upgrade Exam 1", tip: "Research Levels decide the rank. S in every exam unlocks extra skill evolutions. Reset check: game8 restarts on an A. Tune to 6/6/0 (Head/Chest/Legs)." },
         { turn: 36, label: "Upgrade Exam 2", tip: "Reset check: an A here means restart for an ace. Tune Head to 15 for camp Overdrives." },
@@ -658,10 +657,9 @@
       inputs: [
         { id: "baths", label: "Bath tickets", scope: "turn", type: "number", max: 3 },
         { id: "bathOn", label: "Bath buff active", scope: "turn", type: "check" },
-        { id: "pr", label: "PR activity open", scope: "turn", type: "check" },
-        { id: "springs", label: "Springs dug", scope: "turn", type: "number", max: 9, help: "How many springs you've finished digging. Fewer than 2 by Junior November (turn 21) is a reset." }
+        { id: "pr", label: "PR activity open", scope: "turn", type: "check" }
       ],
-      resetChecks: [{ id: "springs", from: 17, to: 24, at: 21 }],
+      resetChecks: [{ id: "springs", from: 18, at: 21, to: 24 }],
       events: [
         { turn: 3, label: "Pick a spring", tip: "Choose what to dig. Give up on Shikku if it isn't dug by now. You can switch when a spring is finished or after a bathing party." },
         { turn: 21, label: "Reset check", tip: "Fewer than 2 springs dug by now (game8 says Early or Late November) is a bad start: reset if you're building an ace." },

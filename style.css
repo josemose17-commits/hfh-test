@@ -184,17 +184,30 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 .versus, .after { font-size: .9rem; }
 .phase { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; font-size: .88rem; }
 .events { display: grid; gap: 6px; }
-/* Reset advice: the run's verdict and its reasons, coloured by how bad it is. */
-.runcheck { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; font-size: .9rem; min-width: 0; }
-.runcheck ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+/* Reset advice: the run's verdict, the checks with their questions, then reset or continue. */
+.runcheck { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 10px; display: grid; gap: 8px; font-size: .9rem; min-width: 0; }
 .runcheck .rc-head { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; letter-spacing: .02em; }
 .runcheck.rc-reset { border-color: var(--bad); border-left-width: 6px; }
-.runcheck.rc-reset .rc-head, li.rc-reset b { color: var(--bad); }
-.runcheck.rc-borderline, .runcheck.rc-unknown { border-left-color: var(--warn); }
-.runcheck.rc-borderline .rc-head, li.rc-borderline b, li.rc-unknown b { color: var(--warn); }
-.runcheck.rc-wait { border-left-color: var(--gold); }
-li.rc-ok b { color: var(--accent); }
-.runcheck .btn { justify-self: start; }
+.runcheck.rc-reset .rc-head { color: var(--bad); }
+.runcheck.rc-warn, .runcheck.rc-ask { border-left-color: var(--warn); }
+.runcheck.rc-warn .rc-head, .runcheck.rc-ask .rc-head { color: var(--warn); }
+.runcheck.rc-wait, .runcheck.rc-continued, .runcheck.rc-done { border-left-color: var(--gold); }
+.rc-item { display: grid; gap: 6px; min-width: 0; }
+.rc-item.rc-reset > div:first-child b { color: var(--bad); }
+.rc-item.rc-warn > div:first-child b, .rc-item.rc-ask > div:first-child b { color: var(--warn); }
+.rc-item.rc-ok > div:first-child b { color: var(--accent); }
+.rc-item.rc-continued, .rc-item.rc-wait { color: var(--muted); }
+.rc-q { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding-left: 10px; border-left: 2px solid var(--line); }
+.rc-qt { flex: 1 1 220px; min-width: 0; }
+.rc-ctl { display: inline-flex; gap: 6px; align-items: center; }
+.rc-ans[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.rc-num { width: 64px; }
+.rc-guess { flex-basis: 100%; }
+.rc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn.rc-reset-btn { background: var(--bad); border-color: var(--bad); color: var(--surface); }
+.rc-summary summary { cursor: pointer; color: var(--accent); font-size: .88rem; }
+.rc-summary { display: grid; gap: 6px; }
+.rc-summary textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: .85rem; }
 .ev { border-left: 3px solid var(--gold); padding-left: 8px; font-size: .9rem; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .actions .btn:first-child { flex: 1 1 auto; }
@@ -516,3 +529,15 @@ table.pred .short { color: var(--bad); }
 table.pred .over { color: var(--accent); }
 .pred-help summary { cursor: pointer; font-size: .85rem; color: var(--accent); }
 .pred-help p { margin: 6px 0 0; }
+
+/* Stat priority: five selects in a row, most important first. */
+.prio { display: grid; gap: 6px; margin-top: 8px; }
+.prio-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.prio-f select { min-width: 0; padding: 4px 6px; }
+.prio-gt { color: var(--muted); font-weight: 700; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Grand Concert token aim: the songs to buy, in order. */
+.token-aim { display: grid; gap: 4px; font-size: .9rem; }
+.token-aim ol { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
+.token-aim li.ready b { color: var(--accent); }
