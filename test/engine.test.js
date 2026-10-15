@@ -722,20 +722,36 @@ test("Grand Concert song tokens only tip close calls", () => {
 const openDeck = (bonds) => ({ trainee: null, slots: [30028, 30002, 30068, 30082, 30004, 30052].map((id, i) => ({ id, lb: 4, bond: bonds ? bonds[i] : null })) });
 const dfac = (o) => E.STATS.map((s) => Object.assign(fac(s), { members: [], hints: [], extra: 0 }, (o || {})[s]));
 
-test("opening: the Wit and Speed cards with the highest specialty priority are maxed first", () => {
+test("focus cards: the highest specialty card must reach orange, the second gets a small push", () => {
   const info = E.deckInfo({ deck: openDeck() });
   const focus = E.focusCards(info);
-  assert.deepStrictEqual(focus.map((f) => f.card.n), ["Curren Chan", "Kitasan Black"]);
-  // Curren Chan alone on Wit beats three other cards building bond on Speed.
-  const r = pick(base({ turn: 2, energy: 90, deck: openDeck(), facilities: dfac({ speed: { members: [1, 3, 4] }, wit: { members: [2] } }) }));
-  assert.strictEqual(r.action.stat, "wit");
-  assert.ok(r.reasons.some((n) => /focus card/.test(n)));
-  // Kitasan Black counts wherever she shows up.
+  // Kitasan Black (specialty 100), then Silence Suzuka (65, Friendship 35) over Curren Chan (65, 30).
+  assert.deepStrictEqual(focus.map((f) => [f.card.n, f.rank]), [["Kitasan Black", 1], ["Silence Suzuka", 2]]);
+  // The main focus card alone beats three other cards building bond, wherever she is.
   const g = pick(base({ turn: 3, energy: 90, deck: openDeck(), facilities: dfac({ speed: { members: [1, 3, 4] }, guts: { members: [0] } }) }));
   assert.strictEqual(g.action.stat, "guts");
-  // Once both are maxed, back to the training with the most cards building bond.
-  const done = pick(base({ turn: 6, energy: 90, deck: openDeck([100, null, 100, null, null, null]), facilities: dfac({ speed: { members: [1, 3, 4] }, wit: { members: [2] } }) }));
+  assert.ok(g.reasons.some((n) => /main focus card here: Kitasan Black/.test(n)));
+  // The second one only tips a close call: three cards building bond still win over her alone.
+  const s2 = pick(base({ turn: 3, energy: 90, deck: openDeck(), facilities: dfac({ wit: { members: [2, 3, 4] }, guts: { members: [1] } }) }));
+  assert.strictEqual(s2.action.stat, "wit");
+  assert.ok(E.focusWeight(3, 2) < E.focusWeight(3, 1) / 4);
+  // Once the main one is orange, back to the training with the most cards building bond.
+  const done = pick(base({ turn: 6, energy: 90, deck: openDeck([100, 100, null, null, null, null]), facilities: dfac({ speed: { members: [2, 3, 4] }, guts: { members: [0] } }) }));
   assert.strictEqual(done.action.stat, "speed");
+});
+
+test("the second focus card's push never outweighs extra song tokens", () => {
+  const gl = sc("grandlive");
+  // Turn 8: Silence Suzuka (second focus) alone on Speed, Gold Ship alone on Stamina. Your
+  // Dance and Visual are full, so Speed's tokens are worth nothing and Stamina's Passion counts.
+  const st = base({ turn: 8, energy: 90, deck: openDeck([100, null, null, null, null, null]), gl: { songs: {}, tokens: [200, 0, 0, 200, 0], lessons: {} }, facilities: dfac({ speed: { members: [1] }, stamina: { members: [4] } }) });
+  const ev = E.evaluate(st, gl);
+  const sp = ev.options.find((o) => o.stat === "speed");
+  const sta = ev.options.find((o) => o.stat === "stamina");
+  const maxTok = Math.max(...ev.options.map((o) => o.parts.tokens || 0));
+  assert.ok(sp.secondFocus > 0 && (sta.parts.tokens || 0) > (sp.parts.tokens || 0));
+  assert.ok(Math.abs(sp.secondFocusCut - Math.min(sp.secondFocus, maxTok - (sp.parts.tokens || 0))) < 1e-9, "cut by the token gap to the best training");
+  assert.ok(sp.notes.some((n) => /second focus push/.test(n)));
 });
 
 test("Grand Concert: rest on turn 4 (9 turns to the debut) unless energy is very high", () => {
@@ -783,8 +799,8 @@ test("Unity Cup opening: Recreation for mood by uma.guide's turn points, Riko's 
   // Four cards building bond on one training: train.
   const strong = E.recommend(st({ deck: deck([null, null, null, null, null, 30]), facilities: dfac({ speed: { members: [1, 3, 4, 5] } }) }), u);
   assert.strictEqual(strong.action.kind, "train");
-  // A focus card (Curren Chan, Wit) on a training beats the Recreation rule.
-  const focus = E.recommend(st({ facilities: dfac({ wit: { members: [2] }, speed: { members: [1] } }) }), u);
+  // The main focus card (Kitasan Black, specialty 100) on a training beats the Recreation rule.
+  const focus = E.recommend(st({ facilities: dfac({ wit: { members: [0] }, speed: { members: [1] } }) }), u);
   assert.strictEqual(focus.action.stat, "wit");
   // Great mood already: no Recreation push.
   const great = E.recommend(st({ mood: 4, facilities: dfac({ speed: { members: [1] }, stamina: { members: [4] } }) }), u);
@@ -935,7 +951,8 @@ test("a training far past your failure limit loses to a safe one, even with a fo
 });
 
 test("friendship is the bond goal: a focus card at 80 (orange) gets no more focus", () => {
-  const r = (bond) => E.evaluate(t17({ turn: 5, log: logged(4), energy: 90, facilities: dfac({ speed: { members: [5], fail: 0 } }), deck: Object.assign({}, t17().deck, { slots: t17().deck.slots.map((x, i) => (i === 5 ? Object.assign({}, x, { bond }) : x)) }) }), sc("grandlive")).options.find((o) => o.stat === "speed");
+  // Agnes Tachyon (specialty 80) is this deck's main focus card.
+  const r = (bond) => E.evaluate(t17({ turn: 5, log: logged(4), energy: 90, facilities: dfac({ speed: { members: [0], fail: 0 } }), deck: Object.assign({}, t17().deck, { slots: t17().deck.slots.map((x, i) => (i === 0 ? Object.assign({}, x, { bond }) : x)) }) }), sc("grandlive")).options.find((o) => o.stat === "speed");
   assert.ok(r(64).notes.some((n) => /focus card here/.test(n)));
   assert.ok(!r(80).notes.some((n) => /focus card here/.test(n)));
   assert.ok(r(64).parts.bond > r(80).parts.bond + r(64).parts.stats * 0.5);
@@ -1005,15 +1022,15 @@ test("Grand Concert: no tokens from training before the lessons open on turn 5",
   assert.ok(train(5).gl.tokens.some((x) => x > 0), "from turn 5 they add up");
 });
 
-test("after the opening, a rainbow beats a few bond points on a focus card (turn 13 report)", () => {
+test("once the main focus card is orange, a rainbow beats the second one's bond (turn 13 report)", () => {
   const gl = sc("grandlive");
   const st = (turn) => t17({
     turn, energy: 51, log: logged(turn - 1), extras: { consec: 1, lh20: true }, gl: { tokens: [43, 10, 10, 64, 36], songs: {}, lessons: {} },
     deck: { trainee: null, slots: [{ id: 30101, lb: 4, bond: 80 }, { id: 30052, lb: 4, bond: 61, dates: { done: 0, unlocked: true } }, { id: 30015, lb: 2, bond: 57 }, { id: 30078, lb: 4, bond: 27 }, { id: 30111, lb: 2, bond: 25 }, { id: 30146, lb: 4, bond: 55 }] },
     facilities: dfac({ speed: { members: [0] }, stamina: { members: [5, 3] } })
   });
-  // Agnes Tachyon (Speed, bond 80) rainbows alone on Speed; Oguri Cap (the Wit focus card,
-  // bond 55) and Fukukitaru build bond on Stamina.
+  // Agnes Tachyon (the main focus card, already orange) rainbows alone on Speed; Oguri Cap
+  // (the second focus card, bond 55) and Fukukitaru build bond on Stamina.
   assert.strictEqual(E.recommend(st(13), gl).action.stat, "speed");
-  assert.ok(E.focusWeight(13) < E.focusWeight(6) / 2 && E.focusWeight(24) === 0);
+  assert.ok(E.focusWeight(13, 2) < 0.5 && E.focusWeight(24, 1) === 0 && E.focusWeight(12, 1) === 2);
 });
