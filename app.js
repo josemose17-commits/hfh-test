@@ -117,6 +117,8 @@
   const ownedCode = () => D.encodeOwned(owned);
   const readOwnedCode = (text) => D.decodeOwned(text);
   let rec = null;
+  // The Scenario rewards list stays open across re-renders once you open it.
+  let rewardsOpen = false;
   let openRow = null;
   let resetArmed = null;
 
@@ -510,6 +512,7 @@
       commit();
       renderSongsLight();
     });
+    $("#songsBody").addEventListener("toggle", (e) => { if (e.target.classList && e.target.classList.contains("rewards")) rewardsOpen = e.target.open; }, true);
     $("#techBody").addEventListener("change", (e) => {
       const offer = e.target.dataset.techOffer;
       const type = e.target.dataset.techType;
@@ -949,9 +952,9 @@
     const gl = state.gl;
     const hype = E.hypeStatus(state, sc);
     const bon = E.songBonuses(state, sc);
-    const learnedN = Object.keys(gl.songs).length;
+    const learnedN = E.songsLearned(state);
     const extras = Object.entries(bon.extra).filter(([, v]) => v).map(([k, v]) => "+" + v + " " + (k === "sp" ? "SP" : E.STAT_LABELS[k])).join(", ");
-    $("#songSummary").textContent = learnedN + " of 21 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
+    $("#songSummary").textContent = learnedN + " of 22 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
     const tok = (cost) => cost.map((c, i) => (c ? `<span class="tok t${i}">${sc.tokens[i].slice(0, 2)} ${c}</span>` : "")).join("");
     const effect = (song) => [
       ...Object.entries(song.extra || {}).map(([k, v]) => "+" + v + " " + (k === "sp" ? "SP" : E.STAT_LABELS[k]) + " on every " + (k === "sp" ? "training" : E.STAT_LABELS[k] + " training")),
@@ -966,8 +969,9 @@
       <div class="song-status">
         ${hype && hype.next != null ? `<div><b>${hype.since}/3</b> songs since the last live. Next live: turn ${hype.next} (${esc(E.turnInfo(hype.next, sc).text)})${hype.need ? `, ${hype.need} more for a guaranteed Great Success.` : ", Hype gauge full."}</div>` : ""}
         <div>Active now: ${extras || "no extra stat gains yet"}${bon.fb ? ` · Friendship +${bon.fb}%` : ""}${bon.pendingFb ? ` · +${bon.pendingFb}% Friendship waiting for the next live` : ""}</div>
-        <div>${learnedN >= 18 ? "18+ songs: special Girls' Legend U unlocked." : (18 - learnedN) + " more song(s) by Senior Late Dec for the special Girls' Legend U (16 by Senior Early Nov for the lyrics event)."}</div>
+        <div>${learnedN >= 18 ? "18+ songs: special Girls' Legend U unlocked." : (18 - learnedN) + " more song(s) by Senior Late Dec for the special Girls' Legend U (16 by Senior Early Nov for the lyrics event)."}${state.turn >= 5 ? " Make Debut! counts." : ""}</div>
       </div>
+      ${rewardsHTML(sc)}
       ${songPlanHTML(sc)}
       ${tokenPlanHTML(sc)}
       ${tokenAimHTML(sc)}
@@ -979,6 +983,22 @@
           <span class="song-cost">${tok(song.cost)}</span>
           <span class="mini song-fx">${esc(effect(song))}</span></label>`;
       }).join("")}</div>`).join("")}`;
+  }
+
+  // What the scenario gives at fixed points, with what you've done toward each so far.
+  function rewardsHTML(sc) {
+    const list = E.glRewards(state, sc);
+    if (!list.length) return "";
+    const nextLive = list.find((x) => x.stats && x.status !== "done");
+    const chip = { done: "done", now: "this turn", next: "", once: "once" };
+    return `<details class="rewards"${rewardsOpen ? " open" : ""}><summary><b>Scenario rewards</b>${nextLive ? ` · next: ${esc(nextLive.label)} on turn ${nextLive.turn}` : ""}</summary>
+      <ol class="reward-list">${list.map((x) => `<li class="rw-${x.status}">
+        <div class="rw-head"><span class="rw-turn">Turn ${x.turn}${x.status === "once" ? "+" : ""}</span> <b>${esc(x.label)}</b> <span class="mini">${esc(E.turnInfo(x.turn, sc).text)}</span>${chip[x.status] ? ` <span class="chip">${chip[x.status]}</span>` : ""}</div>
+        <div class="mini">${esc(x.gain)}</div>
+        ${x.sofar && x.status !== "once" ? `<div class="rw-sofar">${esc(x.sofar)}</div>` : ""}
+      </li>`).join("")}</ol>
+      <p class="mini">Done adds Make Debut!'s tokens going into turn 5 and each live's stats (when the coach tracks your stats). Skill points aren't tracked. Amounts from uma.guide and GameTora; GameTora says a Great Success also raises your stat caps.</p>
+    </details>`;
   }
 
   // The song plan for this half year, with a technique lesson counter.

@@ -567,3 +567,14 @@ table.pred .over { color: var(--accent); }
 .tech-cost select.t0 { --tc: var(--guts); } .tech-cost select.t1 { --tc: var(--stamina); } .tech-cost select.t2 { --tc: var(--speed); } .tech-cost select.t3 { --tc: var(--power); } .tech-cost select.t4 { --tc: var(--wit); }
 .tech-why { grid-column: 1 / -1; overflow-wrap: anywhere; }
 .tech-more summary { cursor: pointer; font-size: .85rem; margin: 2px 0 4px; }
+
+/* Grand Concert: what the scenario gives at fixed points. */
+.rewards { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--surface); }
+.rewards summary { cursor: pointer; overflow-wrap: anywhere; }
+.reward-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.reward-list li { border-left: 3px solid var(--line); padding: 2px 0 2px 8px; overflow-wrap: anywhere; }
+.reward-list li.rw-now { border-color: var(--accent); }
+.reward-list li.rw-next { border-color: var(--gold); }
+.reward-list li.rw-done { opacity: .75; }
+.rw-turn { font-family: var(--font-mono); font-size: .8rem; }
+.rw-sofar { font-size: .85rem; font-weight: 600; }
