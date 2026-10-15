@@ -580,3 +580,7 @@ table.pred .over { color: var(--accent); }
 .reward-list li.rw-done { opacity: .75; }
 .rw-turn { font-family: var(--font-mono); font-size: .8rem; }
 .rw-sofar { font-size: .85rem; font-weight: 600; }
+.songs-have { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: .9rem; }
+.songs-have .mini { flex-basis: 100%; }
+.tech-head { font-size: .9rem; margin-top: 2px; }
+.shop-songs summary { overflow-wrap: anywhere; }
