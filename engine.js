@@ -915,6 +915,8 @@
   // type you have least of, uma.guide). Left out when Done adds real tokens.
   function tokenGain(f, state, sc, expected) {
     if (!sc.tokenOf || !sc.tokenOf[f.stat]) return [];
+    // No tokens before the lessons open (Grand Concert: turn 5).
+    if (sc.tokensFrom && state.turn < sc.tokensFrom) return [];
     const ex = f.extras || {};
     const L = facLevelFor(state, sc, f.stat);
     let cards = f.cards || 0;
@@ -1224,6 +1226,16 @@
     return me;
   }
 
+  // What curing your conditions is worth: a bad condition can cost mood, energy or stats;
+  // Practice Poor adds 2% to every stat training's failure until it's cured (umamusu.wiki),
+  // worth more the more turns are left.
+  function cureValue(state, ctx) {
+    let v = 0;
+    if (state.badCondition) v += 0.7 * ctx.typ * Math.min(1, ctx.turnsLeft / 10);
+    if (state.practicePoor) v += Math.min(0.8, 0.02 * ctx.turnsLeft) * ctx.typ;
+    return v;
+  }
+
   function hintValue(h, ctx) {
     return (h || []).reduce((a, [id, lv]) => {
       const gold = Dates && Dates.gold && Dates.gold.indexOf(id) !== -1;
@@ -1247,7 +1259,7 @@
       sp: (o.sp || 0) * SP_VALUE,
       hint: hintValue(o.h, ctx),
       bond: (o.b || 0) > 0 ? 0.04 * ctx.typ : 0,
-      condition: o.cure && st.badCondition ? 0.7 * ctx.typ * Math.min(1, ctx.turnsLeft / 10) : 0
+      condition: o.cure ? cureValue(st, ctx) : 0
     };
   }
 
@@ -1334,6 +1346,7 @@
         if (out.me) notes.push("max energy goes up to " + (ctx.maxE + out.me));
         const statGains = {};
         DATE_STATS.forEach((k, i) => { const g = ((out.s || [])[i] || 0) + (out.r ? (out.r * (out.rn || 1)) / 5 : 0); if (g) statGains[k] = g; });
+        if (out.cure) base.consume = { badCondition: false, practicePoor: false };
         return Object.assign(base, {
           label: "Outing with " + sl.card.n + " (" + n + "/" + info.dates.length + ")",
           energyDelta: out.e || 0, moodDelta: Math.max(-state.mood, Math.min(4 - state.mood, out.mo || 0)),
@@ -1536,7 +1549,7 @@
       unbonded = dg.unbonded;
       spPts = dg.sp * scale;
       energyDelta = dg.energy;
-      fail = failBlank ? Math.round(estimateFail(f.stat, ctx.E) * dg.failMult) : clamp(+f.fail, 0, 100);
+      fail = failBlank ? clamp(Math.round(estimateFail(f.stat, ctx.E) * dg.failMult) + (state.practicePoor ? 2 : 0), 0, 100) : clamp(+f.fail, 0, 100);
     } else {
       cards = f.cards || 0;
       rainbows = Math.min(f.rainbows || 0, cards);
@@ -1552,7 +1565,7 @@
       spPts = (est ? rawGain : gain) * SP_RATE[f.stat];
       const ec = energyCost(f.stat, state.turn, sc, facLevelFor(state, sc, f.stat));
       energyDelta = ec < 0 ? -ec + 2 * rainbows : -ec;
-      fail = failBlank ? estimateFail(f.stat, ctx.E) : clamp(+f.fail, 0, 100);
+      fail = failBlank ? clamp(estimateFail(f.stat, ctx.E) + (state.practicePoor ? 2 : 0), 0, 100) : clamp(+f.fail, 0, 100);
     }
     let stats = 0;
     Object.keys(statGains).forEach((st) => { stats += ctx.gainValue(st, statGains[st]); });
@@ -1701,11 +1714,12 @@
         });
       }
       outingOptions(ctx).forEach((o) => options.push(o));
-      if (state.badCondition) {
-        const p = { condition: 0.7 * typ * Math.min(1, ctx.turnsLeft / 10), energy: ctx.energyValue(20) };
+      if (state.badCondition || state.practicePoor) {
+        const p = { condition: cureValue(state, ctx), energy: ctx.energyValue(20) };
         options.push({
-          kind: "infirmary", label: "Infirmary", energyDelta: 20, moodDelta: 0, prefix: [], consume: { badCondition: false },
-          notes: ["clears the bad condition before it costs more mood, energy or stats"], parts: p, value: sumParts(p)
+          kind: "infirmary", label: "Infirmary", energyDelta: 20, moodDelta: 0, prefix: [], consume: { badCondition: false, practicePoor: false },
+          notes: [state.practicePoor && !state.badCondition ? "cures Practice Poor (+2% failure on every stat training until then)" : "clears the bad condition before it costs more mood, energy or stats" + (state.practicePoor ? ", and cures Practice Poor" : "")],
+          parts: p, value: sumParts(p)
         });
       }
       const plan = fanPlan(state, sc);
@@ -1862,7 +1876,7 @@
     if (evE) s.energy = clamp(s.energy + evE, 0, maxE);
     if (evM) s.mood = clamp(s.mood + evM, 0, 4);
     Object.entries(option.consume || {}).forEach(([k, v]) => {
-      if (k === "badCondition") s.badCondition = v;
+      if (k === "badCondition" || k === "practicePoor") s[k] = v;
       else s.extras[k] = typeof v === "function" ? v(s.extras[k]) : v;
     });
     const hook = HOOKS[scenario.hook] || {};

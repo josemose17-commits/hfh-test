@@ -48,6 +48,7 @@
       mood: 2,
       goalRace: false,
       badCondition: false,
+      practicePoor: false,
       race: "",
       raceName: "",
       fans: 0,
@@ -200,6 +201,7 @@
               <label class="field grow"><span>Optional race open</span><select id="race"></select></label>
               <label class="field"><span>Fans</span><input id="fans" type="number" inputmode="numeric" min="0" max="9999999" placeholder="0"></label>
               <label class="chip-toggle"><input type="checkbox" id="badCondition"> Bad condition</label>
+              <label class="chip-toggle" title="+2% failure on every stat training until the Infirmary (or an outing that cures) clears it"><input type="checkbox" id="practicePoor"> Practice Poor</label>
             </div>
             <p class="mini fanplan" id="fanPlan" hidden></p>
             <div id="turnExtras" class="extras"></div>
@@ -290,6 +292,7 @@
     });
     $("#fans").addEventListener("input", (e) => { const v = numOrNull(e.target.value); state.fans = v == null ? 0 : Math.max(0, v); commit(); });
     $("#badCondition").addEventListener("change", (e) => { state.badCondition = e.target.checked; commit(); });
+    $("#practicePoor").addEventListener("change", (e) => { state.practicePoor = e.target.checked; commit(); });
     $("#trackStats").addEventListener("change", (e) => { state.trackStats = e.target.checked; commit(); });
 
     $("#prev").addEventListener("click", () => setTurn(state.turn - 1));
@@ -513,6 +516,7 @@
     });
     // Number answers (songs bought, springs dug) count once you leave the box or press Enter.
     $("#call").addEventListener("change", (e) => {
+      if (e.target.id === "gotPoor") { poorPick = e.target.checked; return; }
       const n = e.target.dataset.rcNum;
       if (!n) return;
       const [key, qid] = n.split("|");
@@ -523,7 +527,7 @@
       if (e.target.closest("#undoBtn")) undoTurn();
       if (e.target.closest("#rcNew")) newCareer($("#rcNew"));
       const fb = e.target.closest("[data-fail]");
-      if (fb) { failPick = fb.dataset.fail; $$("#call [data-fail]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.fail === failPick))); return; }
+      if (fb) { failPick = fb.dataset.fail; if (!failPick) poorPick = false; renderCall(); return; }
       const ans = e.target.closest("[data-rc-ans]");
       if (ans) { const [key, qid, v] = ans.dataset.rcAns.split("|"); const cur = (((state.runChecks || {})[key] || {}).a || {})[qid]; rcAnswer(key, qid, cur === v ? null : v); return; }
       const cont = e.target.closest("[data-rc-continue]");
@@ -712,17 +716,21 @@
   // The training's result for the next Done: "" (success), "fail" or "bad". It applies to
   // whichever training you log, then goes back to success.
   let failPick = "";
+  let poorPick = false;
   function done(option) {
     if (!option) return;
     state.example = false;
     const failed = option.kind === "train" ? failPick : "";
+    const poor = !!failed && poorPick;
     state = E.advance(state, scenario(), option, failed || undefined);
+    if (poor) state.practicePoor = true;
     failPick = "";
+    poorPick = false;
     openRow = null;
     commit(true);
     const last = state.log[state.log.length - 1];
     flash("Logged turn " + (state.turn - 1) + ": " + (last ? last.label : option.label) +
-      (failed ? (failed === "bad" ? ". Mood -3, " + E.STAT_LABELS[option.stat] + " -10: fix the 2 random stats it took in Stats, and tick Bad condition if you got Practice Poor." : ". Mood -1, " + E.STAT_LABELS[option.stat] + " -5. Got Practice Poor? Tick Bad condition.") : ""));
+      (failed ? (failed === "bad" ? ". Mood -3, " + E.STAT_LABELS[option.stat] + " -10: fix the 2 random stats it took in Stats." : ". Mood -1, " + E.STAT_LABELS[option.stat] + " -5.") + (poor ? " Practice Poor is on: +2% failure until the Infirmary cures it." : "") : ""));
   }
 
   function undoTurn() {
@@ -829,6 +837,7 @@
   // estimate; type what the training shows and Done adds it to your tokens.
   function tokenRow(f, sc) {
     const g = E.tokenGain(f, state, sc);
+    if (!g.length) return "";
     const ex = f.extras || {};
     // The picker's left edge takes the token's colour (no separate badge, so it fits narrow columns).
     const sel = (key, cur) => `<select class="t${cur}" data-gltok="${key}" aria-label="Token type">${sc.tokens.map((n, i) => `<option value="${i}" ${cur === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
@@ -1368,6 +1377,7 @@
     $("#race").value = state.raceName && races.some((r) => r.n === state.raceName) ? "named:" + state.raceName : state.race || "";
     if (document.activeElement !== $("#fans")) $("#fans").value = state.fans || "";
     $("#badCondition").checked = !!state.badCondition;
+    $("#practicePoor").checked = !!state.practicePoor;
     $("#trackStats").checked = !!state.trackStats;
 
     const turnInputs = sc.inputs.filter((i) => i.scope === "turn");
@@ -1522,6 +1532,7 @@
       v: 1, why: (why || "").trim(), scenario: sc.id, turn: state.turn, when: rec.turn.text, build: state.build,
       energy: state.energy + "/" + (state.maxEnergy || 100), mood: E.MOODS[state.mood], risk: state.risk,
       stats: state.stats, targets: state.targets || {}, priority: state.priority, caps: state.caps, extras: state.extras, fans: state.fans,
+      badCondition: !!state.badCondition, practicePoor: !!state.practicePoor,
       gl: state.gl ? { tokens: state.gl.tokens, songs: Object.keys(state.gl.songs || {}), lessons: state.gl.lessons } : undefined,
       deck: (state.deck.slots || []).map((sl) => sl && sl.id ? { card: name(state.deck.slots.indexOf(sl)), id: sl.id, lb: sl.lb, bond: Math.round(slotBond(sl)), dates: sl.dates } : null),
       trainings: state.facilities.map((f) => ({ stat: f.stat, cards: (f.members || []).map(name), hints: (f.hints || []).map(name), others: f.extra || 0, gain: f.gain, fail: f.fail, extras: f.extras })),
@@ -1549,7 +1560,8 @@
       ${vs}${after}
       ${rec.events.length ? `<div class="events">${rec.events.map((e) => `<div class="ev"><b>${esc(e.label)}</b> ${esc(e.tip || "")}</div>`).join("")}</div>` : ""}
       <div class="phase"><b>${esc(rec.phase.name)}:</b> ${esc(rec.phase.tip)}</div>
-      <div class="fail-row" role="radiogroup" aria-label="Training result"><span class="mini">Training result:</span>${[["", "Success", ""], ["fail", "Failed", "Get Well Soon!: mood -1, -5 to that stat"], ["bad", "Failed badly", "Don't Overdo It! (20%+ failure only): mood -3, -10 to that stat and 2 random stats"]].map(([v, l, t]) => `<button type="button" class="btn ghost small" role="radio" data-fail="${v}" aria-checked="${failPick === v}"${t ? ` title="${esc(t)}"` : ""}>${l}</button>`).join("")}</div>
+      <div class="fail-row" role="radiogroup" aria-label="Training result"><span class="mini">Training result:</span>${[["", "Success", ""], ["fail", "Failed", "Get Well Soon!: mood -1, -5 to that stat"], ["bad", "Failed badly", "Don't Overdo It! (20%+ failure only): mood -3, -10 to that stat and 2 random stats"]].map(([v, l, t]) => `<button type="button" class="btn ghost small" role="radio" data-fail="${v}" aria-checked="${failPick === v}"${t ? ` title="${esc(t)}"` : ""}>${l}</button>`).join("")}
+        ${failPick && !state.practicePoor ? `<label class="chip-toggle"><input type="checkbox" id="gotPoor" ${poorPick ? "checked" : ""}> Got Practice Poor</label>` : ""}</div>
       <div class="actions">
         <button type="button" class="btn" id="doneBtn">Done, next turn ▶</button>
         <button type="button" class="btn ghost" id="undoBtn" ${(state.log || []).length ? "" : "disabled"}>Undo last</button>

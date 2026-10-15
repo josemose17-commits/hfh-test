@@ -241,6 +241,8 @@
       ],
       lives: [24, 36, 48, 60, 72],
       tokens: ["Dance", "Passion", "Vocal", "Visual", "Mental"],
+      // Trainings give no tokens until the lessons open with Light Hello on turn 5.
+      tokensFrom: 5,
       // Main and second token each training gives (about 60% / 30% of the time).
       tokenOf: { speed: [0, 3], stamina: [1, 2], power: [2, 4], guts: [3, 0], wit: [4, 1] },
       linkChars: ["Light Hello", "Smart Falcon", "Silence Suzuka", "Agnes Tachyon", "Mihono Bourbon"],

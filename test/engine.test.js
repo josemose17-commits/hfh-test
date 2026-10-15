@@ -982,3 +982,25 @@ test("a failed training: energy used, mood and the trained stat down, no bonds o
   const rest = E.evaluate(st, gl).options.find((o) => o.kind === "rest");
   assert.strictEqual(E.advance(st, gl, rest, "fail").mood, E.advance(st, gl, rest).mood);
 });
+
+test("Practice Poor: +2% estimated failure, the Infirmary cures it", () => {
+  const ura = sc("ura");
+  const st = (o) => base(Object.assign({ turn: 20, energy: 40, facilities: facs({ speed: { cards: 2 }, power: { cards: 1, fail: 9 } }) }, o));
+  const opt = (s, stat) => E.evaluate(s, ura).options.find((o) => o.stat === stat);
+  assert.strictEqual(opt(st({ practicePoor: true }), "speed").fail, opt(st({}), "speed").fail + 2, "estimated failure +2%");
+  assert.strictEqual(opt(st({ practicePoor: true }), "power").fail, 9, "a failure you typed already includes it");
+  const inf = E.evaluate(st({ practicePoor: true }), ura).options.find((o) => o.kind === "infirmary");
+  assert.ok(inf && inf.parts.condition > 0 && /Practice Poor/.test(inf.notes.join(" ")));
+  assert.ok(!E.evaluate(st({}), ura).options.some((o) => o.kind === "infirmary"));
+  assert.strictEqual(E.advance(st({ practicePoor: true }), ura, inf).practicePoor, false);
+});
+
+test("Grand Concert: no tokens from training before the lessons open on turn 5", () => {
+  const gl = sc("grandlive");
+  const st = (turn) => base({ turn, energy: 90, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} }, facilities: facs({ speed: { cards: 2 } }) });
+  const f = st(3).facilities.find((x) => x.stat === "speed");
+  assert.deepStrictEqual(E.tokenGain(f, st(3), gl), []);
+  const train = (turn) => E.advance(st(turn), gl, E.evaluate(st(turn), gl).options.find((o) => o.stat === "speed"));
+  assert.deepStrictEqual(train(3).gl.tokens, [0, 0, 0, 0, 0]);
+  assert.ok(train(5).gl.tokens.some((x) => x > 0), "from turn 5 they add up");
+});
