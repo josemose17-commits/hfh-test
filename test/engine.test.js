@@ -935,7 +935,7 @@ test("a training far past your failure limit loses to a safe one, even with a fo
 });
 
 test("friendship is the bond goal: a focus card at 80 (orange) gets no more focus", () => {
-  const r = (bond) => E.evaluate(t17({ energy: 90, facilities: dfac({ speed: { members: [5], fail: 0 } }), deck: Object.assign({}, t17().deck, { slots: t17().deck.slots.map((x, i) => (i === 5 ? Object.assign({}, x, { bond }) : x)) }) }), sc("grandlive")).options.find((o) => o.stat === "speed");
+  const r = (bond) => E.evaluate(t17({ turn: 5, log: logged(4), energy: 90, facilities: dfac({ speed: { members: [5], fail: 0 } }), deck: Object.assign({}, t17().deck, { slots: t17().deck.slots.map((x, i) => (i === 5 ? Object.assign({}, x, { bond }) : x)) }) }), sc("grandlive")).options.find((o) => o.stat === "speed");
   assert.ok(r(64).notes.some((n) => /focus card here/.test(n)));
   assert.ok(!r(80).notes.some((n) => /focus card here/.test(n)));
   assert.ok(r(64).parts.bond > r(80).parts.bond + r(64).parts.stats * 0.5);
@@ -1003,4 +1003,17 @@ test("Grand Concert: no tokens from training before the lessons open on turn 5",
   const train = (turn) => E.advance(st(turn), gl, E.evaluate(st(turn), gl).options.find((o) => o.stat === "speed"));
   assert.deepStrictEqual(train(3).gl.tokens, [0, 0, 0, 0, 0]);
   assert.ok(train(5).gl.tokens.some((x) => x > 0), "from turn 5 they add up");
+});
+
+test("after the opening, a rainbow beats a few bond points on a focus card (turn 13 report)", () => {
+  const gl = sc("grandlive");
+  const st = (turn) => t17({
+    turn, energy: 51, log: logged(turn - 1), extras: { consec: 1, lh20: true }, gl: { tokens: [43, 10, 10, 64, 36], songs: {}, lessons: {} },
+    deck: { trainee: null, slots: [{ id: 30101, lb: 4, bond: 80 }, { id: 30052, lb: 4, bond: 61, dates: { done: 0, unlocked: true } }, { id: 30015, lb: 2, bond: 57 }, { id: 30078, lb: 4, bond: 27 }, { id: 30111, lb: 2, bond: 25 }, { id: 30146, lb: 4, bond: 55 }] },
+    facilities: dfac({ speed: { members: [0] }, stamina: { members: [5, 3] } })
+  });
+  // Agnes Tachyon (Speed, bond 80) rainbows alone on Speed; Oguri Cap (the Wit focus card,
+  // bond 55) and Fukukitaru build bond on Stamina.
+  assert.strictEqual(E.recommend(st(13), gl).action.stat, "speed");
+  assert.ok(E.focusWeight(13) < E.focusWeight(6) / 2 && E.focusWeight(24) === 0);
 });
