@@ -1249,3 +1249,34 @@ test("Grand Concert rewards: each live adds its stats on Done (+10 on a Great Su
   // On the live turn the call says what the live gives.
   assert.ok(E.recommend(st(24, { kiseki: 8, gothisway: 14 }), gl).action.notes.some((n) => /1st Promo Live after this turn/.test(n)));
 });
+
+test("Lesson shop songs: the call learns the most important song on offer, Done marks it and takes its cost", () => {
+  const gl = sc("grandlive");
+  const st = (shop, lessons, songs) => base({ turn: 12, energy: 80, gl: { songs: songs || {}, tokens: [60, 50, 40, 30, 60], lessons: lessons || { 0: 1 }, shop }, facilities: facs({ speed: { cards: 2 } }) });
+  const r = E.rankTechniques(st({}), gl);
+  assert.strictEqual(r.songs.length, 8, "the 8 songs open from the start");
+  assert.ok(r.songs[0].aim <= r.songs[1].aim, "token aim order");
+  // Two on offer: the one higher in your token aim wins; the +Guts one is a year-one skip.
+  const offer = st({ "song:nigekiri": {}, "song:kiseki": {}, "song:gothisway": {} });
+  const rk = E.rankTechniques(offer, gl);
+  assert.strictEqual(rk.songsOffered, 3);
+  assert.notStrictEqual(rk.bestSong.song.id, "nigekiri");
+  const call = pick(offer, "grandlive");
+  assert.match(call.headline, new RegExp("^Learn " + rk.bestSong.song.name.replace(/[!?()]/g, "\\$&")), call.headline);
+  const after = E.advance(offer, gl, call.action);
+  const id = rk.bestSong.song.id;
+  assert.strictEqual(after.gl.songs[id], 12);
+  assert.deepStrictEqual(after.gl.shop, {});
+  // Bought from the panel, then Undo.
+  const s = st({ "song:kiseki": {} });
+  E.buySong(s, gl, "kiseki");
+  assert.deepStrictEqual(s.gl.tokens, [60, 29, 40, 30, 39]);
+  assert.strictEqual(s.gl.songs.kiseki, 12);
+  E.undoBuy(s);
+  assert.deepStrictEqual(s.gl.tokens, [60, 50, 40, 30, 60]);
+  assert.strictEqual(s.gl.songs.kiseki, undefined);
+  // When the plan holds a song for after the live, the call doesn't learn it.
+  const held = st({ "song:kiseki": {} }, { 0: 16 }, { a: 6, b: 8, c: 10, d: 11, e: 12 });
+  held.turn = 22;
+  assert.doesNotMatch(pick(held, "grandlive").headline, /Learn/);
+});
