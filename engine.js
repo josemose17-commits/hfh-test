@@ -1040,14 +1040,80 @@
     return out;
   }
 
-  // Songs learned since the last live (3 fill the Hype gauge) and the next live turn.
+  // Songs learned since the last live (3 fill the Hype gauge) and the next live turn. Make
+  // Debut!, the song you get by itself on turn 5, counts for the 1st live (GameTora).
+  const GL_DEBUT_SONG = 5;
   function hypeStatus(state, sc) {
     if (!sc.songs) return null;
     const learned = (state.gl && state.gl.songs) || {};
     const next = sc.lives.find((l) => l >= state.turn);
     const prev = sc.lives.filter((l) => l < state.turn).pop() || 0;
-    const since = Object.values(learned).filter((t) => t > prev && t <= (next || 99)).length;
+    const since = Object.values(learned).filter((t) => t > prev && t <= (next || 99)).length + (prev === 0 ? 1 : 0);
     return { next, prev, since, need: Math.max(0, 3 - since), turnsToLive: next != null ? next - state.turn : null };
+  }
+  // Songs learned so far, counting Make Debut! from turn 5 (it counts toward the 18 too).
+  function songsLearned(state) {
+    return Object.keys((state.gl && state.gl.songs) || {}).length + (state.turn >= GL_DEBUT_SONG ? 1 : 0);
+  }
+
+  // ---- Grand Concert: what you get at fixed points (uma.guide, GameTora) ----
+  // Make Debut! on turn 5 (+10 of every token), Light Hello's first training, the New Year
+  // events, each Promo Live (all stats +10 on a Great Success, +3 otherwise; 5 SP per technique
+  // and 25 per song since the last live; token cap +50), the lyrics event (16+ songs) and the
+  // Grand Live's GIRLS' LEGEND U (all stats +10, Friendship +10%). Each with what you've done
+  // toward it so far.
+  function glRewards(state, sc) {
+    if (!sc.songs) return [];
+    const t = state.turn;
+    const gl = state.gl || {};
+    const learned = gl.songs || {};
+    const lessons = gl.lessons || {};
+    const status = (turn) => (turn < t ? "done" : turn === t ? "now" : "next");
+    const out = [];
+    out.push({ turn: GL_DEBUT_SONG, label: "Make Debut! (a free song)", gain: "+10 of every token; Specialty Rate +5 after the 1st live. It counts as a song for the Hype gauge and toward the 18.", tokens: 10, status: status(GL_DEBUT_SONG) });
+    const ch = sc.opening && sc.opening.chase;
+    if (ch && ch.event) {
+      const ev = ch.event;
+      const bits = (ev.mood ? ["mood +" + ev.mood] : []).concat(Object.entries(ev.stats || {}).map(([k, n]) => STAT_LABELS[k] + " +" + n), ev.bond ? ["+" + ev.bond + " bond"] : []);
+      out.push({ turn: ch.from, label: ch.name + "'s first training", gain: bits.join(", ") + " (a little less at lower LB). After that her Training Together event can add 20 of your scarcest token (45% chance).", status: "once" });
+    }
+    Object.keys(NEW_YEAR).forEach((k) => {
+      const ny = NEW_YEAR[k];
+      out.push({ turn: +k, label: "New Year", gain: "+" + ny.e + " energy, or " + (ny.stats >= 25 ? "all stats +" + ny.stats / 5 : "a stat +" + ny.stats) + ", or " + ny.sp + " skill points (you pick).", status: status(+k) });
+    });
+    sc.lives.forEach((L, i) => {
+      const last = i === sc.lives.length - 1;
+      const prev = i ? sc.lives[i - 1] : 0;
+      const songs = Object.values(learned).filter((x) => x > prev && x <= L).length + (i === 0 ? 1 : 0);
+      const tech = lessons[i] || 0;
+      const sp = 5 * tech + 25 * songs;
+      const great = songs >= 3;
+      const cap = 200 + 50 * (i + 1);
+      const st = status(L);
+      const sofar = st === "done" ? "You had " : "So far: ";
+      // A live whose half year hasn't started has nothing to count yet.
+      const started = prev < t || i === 0;
+      if (!last) {
+        out.push({
+          turn: L, label: ["1st", "2nd", "3rd", "4th"][i] + " Promo Live", status: st,
+          gain: (i === 0 ? "Great Success (3+ songs so far, Make Debut! counts): all stats +10; fewer songs: +3. Skill points: 5 per technique and 25 per song so far."
+            : "Great Success (3+ songs since the last live): all stats +10; fewer songs: +3. Skill points: 5 per technique and 25 per song since the last live.") + " Token cap +50 (to " + cap + ").",
+          sofar: !started ? null : sofar + songs + " song" + (songs === 1 ? "" : "s") + (i === 0 ? " (with Make Debut!)" : "") + " and " + tech + " technique" + (tech === 1 ? "" : "s") + ": " + (great ? "Great Success, all stats +10" : st === "done" ? "all stats +3" : "all stats +3 (" + (3 - songs) + " more song" + (3 - songs === 1 ? "" : "s") + " for +10)") + ", +" + sp + " SP.",
+          stats: great ? 10 : 3, sp
+        });
+      } else {
+        const n = songsLearned(Object.assign({}, state, { turn: Math.max(t, GL_DEBUT_SONG) }));
+        out.push({
+          turn: L, label: "Grand Live: GIRLS' LEGEND U", status: st,
+          gain: "All stats +10 and Friendship +10% (both versions). With 18+ songs before it (Make Debut! counts) you get the special version and the scenario's gold skill, I Wanna Win with You; otherwise the white Halfway to a Dream. Like the Promo Lives it should pay SP per lesson.",
+          sofar: sofar + n + " of 18 songs" + (n >= 18 ? ": special version unlocked." : "."),
+          stats: 10
+        });
+      }
+    });
+    const nL = songsLearned(Object.assign({}, state, { turn: Math.max(t, GL_DEBUT_SONG) }));
+    out.push({ turn: 69, label: "Lyrics event", gain: "With 16+ songs: pick a lyrics line for a skill hint (gold if it's a scenario-link character you're using).", sofar: "So far: " + nL + " of 16 songs.", status: status(69) });
+    return out.sort((a, b) => a.turn - b.turn);
   }
 
   // ---- Grand Concert song plan (CM ace guide, with 5 songs in year one) ----
@@ -2193,6 +2259,7 @@
     });
     const hook = HOOKS[scenario.hook] || {};
     if (hook.afterTurn && !fr) hook.afterTurn(s, option, scenario);
+    if (hook.endOfTurn) hook.endOfTurn(s, scenario);
     // Deck bonds: +7 for every card that trained with you this turn.
     if (option.kind === "train" && s.deck && s.deck.slots && !fr) {
       const fac = s.facilities.find((f) => f.stat === option.stat);
@@ -2483,6 +2550,21 @@
         const cap = tokenCap(s, sc);
         tokenGain(f, s, sc).forEach((g) => { s.gl.tokens[g.type] = Math.min(cap, (s.gl.tokens[g.type] || 0) + Math.max(0, g.amount)); });
       },
+      // Fixed rewards at the end of the turn: Make Debut!'s +10 of every token going into turn 5,
+      // and each live's stats (all +10 on a Great Success, +3 otherwise; GIRLS' LEGEND U +10).
+      endOfTurn(s, sc) {
+        s.gl = s.gl || { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} };
+        if (s.turn === GL_DEBUT_SONG - 1) {
+          const cap = tokenCap(Object.assign({}, s, { turn: GL_DEBUT_SONG }), sc);
+          s.gl.tokens = s.gl.tokens.map((n) => Math.min(cap, (n || 0) + 10));
+        }
+        const li = sc.lives.indexOf(s.turn);
+        if (li !== -1 && s.trackStats && s.stats) {
+          const r = glRewards(s, sc).find((x) => x.turn === s.turn && x.stats);
+          const add = r ? r.stats : 0;
+          STATS.forEach((k) => { if (s.stats[k] > 0) s.stats[k] = Math.round(s.stats[k] + add); });
+        }
+      },
       items(ctx, options) {
         if (ctx.state.turn < 5) return;
         const aim = tokenPlan(ctx.state, ctx.sc);
@@ -2546,6 +2628,8 @@
         if (!energyOffer && ctx.E < 50 && aim && Math.max.apply(null, aim.have) >= 25 && (best.kind === "rest" || best.kind === "recreation" || best.stat === "wit")) {
           best.notes.push("if your shop offers an Energy technique, tick it under Technique lessons: it's a technique lesson too and can beat resting");
         }
+        const live = glRewards(ctx.state, ctx.sc).find((x) => x.turn === ctx.state.turn && x.sofar && x.stats);
+        if (live) best.notes.push(live.label + " after this turn. " + live.sofar);
         if (hype && hype.next != null && hype.need > 0 && hype.turnsToLive <= 4) {
           best.notes.push(hype.need + " more song(s) needed before the live on turn " + hype.next + " for a guaranteed Great Success");
         }
@@ -2860,7 +2944,7 @@
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, calibSamples, relearnCalib, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, focusWeight, turnsToDebut, applyOpening, NEW_YEAR,
-    songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, buyTechnique, undoBuy
+    songBonuses, hypeStatus, songsLearned, glRewards, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, buyTechnique, undoBuy
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;

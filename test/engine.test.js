@@ -1216,3 +1216,36 @@ test("Grand Concert year one: tokens count enough that a friendship Speed beats 
   const spd = r.ranked.find((o) => o.stat === "speed");
   assert.ok(spd.parts.tokens > 3 * wit.parts.tokens, "Wit gives the fewest tokens, and only Mental you have plenty of");
 });
+
+test("Grand Concert rewards: Make Debut! counts for the 1st live and gives +10 of every token on turn 5", () => {
+  const gl = sc("grandlive");
+  const st = (o) => base(Object.assign({ turn: 10, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} } }, o));
+  assert.strictEqual(E.hypeStatus(st({ gl: { songs: { kiseki: 7, gothisway: 9 }, tokens: [0, 0, 0, 0, 0], lessons: {} } }), gl).need, 0, "2 bought + Make Debut! fill the 1st live's gauge");
+  assert.strictEqual(E.hypeStatus(st({ turn: 30, gl: { songs: { kiseki: 7, gothisway: 26 }, tokens: [0, 0, 0, 0, 0], lessons: {} } }), gl).need, 2, "not for the 2nd live");
+  assert.strictEqual(E.songsLearned(st({ turn: 4 })), 0);
+  assert.strictEqual(E.songsLearned(st({ turn: 5 })), 1);
+  const s4 = st({ turn: 4, energy: 90, facilities: facs({ speed: { cards: 1 } }) });
+  const rest = E.evaluate(s4, gl).options.find((o) => o.kind === "rest");
+  assert.deepStrictEqual(E.advance(s4, gl, rest).gl.tokens, [10, 10, 10, 10, 10], "Done going into turn 5 adds Make Debut!'s tokens");
+});
+
+test("Grand Concert rewards: each live adds its stats on Done (+10 on a Great Success, +3 otherwise), the timeline says why", () => {
+  const gl = sc("grandlive");
+  const stats = { speed: 300, stamina: 200, power: 250, guts: 150, wit: 200 };
+  const st = (turn, songs, o) => base(Object.assign({ turn, energy: 60, trackStats: true, stats: Object.assign({}, stats), gl: { songs, tokens: [0, 0, 0, 0, 0], lessons: { 0: 6 } }, facilities: facs({ wit: { cards: 1 } }) }, o));
+  const restAt = (s) => E.advance(s, gl, E.evaluate(s, gl).options.find((o) => o.kind === "rest"));
+  assert.strictEqual(restAt(st(24, { kiseki: 8, gothisway: 14 })).stats.speed, 310, "2 songs + Make Debut!: Great Success, +10");
+  assert.strictEqual(restAt(st(24, { kiseki: 8 })).stats.speed, 303, "fewer songs: +3");
+  assert.strictEqual(restAt(st(23, { kiseki: 8 })).stats.speed, 300, "nothing before the live turn");
+  assert.strictEqual(restAt(st(72, {})).stats.wit, 210, "GIRLS' LEGEND U: all stats +10");
+  // A failed training on the live turn still gets the live.
+  const s = st(24, { kiseki: 8, gothisway: 14 });
+  const wit = E.evaluate(s, gl).options.find((o) => o.stat === "wit");
+  assert.strictEqual(E.advance(s, gl, wit, "fail").stats.speed, 310);
+  const live = E.glRewards(st(20, { kiseki: 8, gothisway: 14 }), gl).find((x) => x.turn === 24);
+  assert.match(live.sofar, /3 songs \(with Make Debut!\) and 6 techniques: Great Success, all stats \+10, \+105 SP/);
+  const r = E.glRewards(st(20, {}), gl);
+  assert.deepStrictEqual(r.map((x) => x.turn), [5, 5, 24, 25, 36, 48, 49, 60, 69, 72]);
+  // On the live turn the call says what the live gives.
+  assert.ok(E.recommend(st(24, { kiseki: 8, gothisway: 14 }), gl).action.notes.some((n) => /1st Promo Live after this turn/.test(n)));
+});
