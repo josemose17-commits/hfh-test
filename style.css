@@ -549,3 +549,21 @@ table.pred .over { color: var(--accent); }
 .fail-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .fail-row [aria-checked="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .fail-row [data-fail="fail"][aria-checked="true"], .fail-row [data-fail="bad"][aria-checked="true"] { background: var(--bad); border-color: var(--bad); color: var(--surface); }
+
+/* Grand Concert technique shop: one row per technique, best first. */
+.techs-body { display: grid; gap: 8px; }
+.tech-get { border-left: 4px solid var(--accent); padding: 4px 8px; background: var(--surface); border-radius: 6px; overflow-wrap: anywhere; }
+.tech-last { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: .85rem; }
+.tech-list { display: grid; gap: 4px; }
+.tech-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 2px 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; background: var(--surface); }
+.tech-row.on { border-color: var(--accent); }
+.tech-row.best { border-color: var(--accent); border-left-width: 4px; box-shadow: 0 0 0 1px var(--accent) inset; }
+.tech-row.cant .tech-name { color: var(--muted); }
+.tech-pick { display: flex; gap: 6px; align-items: center; min-width: 0; cursor: pointer; }
+.tech-name { font-weight: 600; overflow-wrap: anywhere; }
+.tech-cost { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.tech-cost .tok-any { font-size: .8rem; white-space: nowrap; }
+.tech-cost select { max-width: 92px; font-size: .8rem; border: 1px solid var(--line); border-left: 4px solid var(--tc, var(--line)); border-radius: 6px; padding: 2px; background: var(--surface); }
+.tech-cost select.t0 { --tc: var(--guts); } .tech-cost select.t1 { --tc: var(--stamina); } .tech-cost select.t2 { --tc: var(--speed); } .tech-cost select.t3 { --tc: var(--power); } .tech-cost select.t4 { --tc: var(--wit); }
+.tech-why { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.tech-more summary { cursor: pointer; font-size: .85rem; margin: 2px 0 4px; }

@@ -1120,19 +1120,85 @@ test("Grand Concert: buy the technique lessons the plan needs, keeping the next 
 
 test("Grand Concert: an Energy technique in the shop beats resting, counts as a lesson and takes its tokens", () => {
   const gl = sc("grandlive");
-  const st = (etech) => base({ turn: 18, energy: 22, extras: { etech }, gl: { songs: {}, tokens: [60, 50, 30, 9, 100], lessons: {} }, facilities: facs({ speed: { cards: 3, rainbows: 1 } }) });
-  const r = pick(st("20"), "grandlive");
-  assert.match(r.headline, /Buy the Energy \+20 technique \(25 tokens, no turn used\).*Train Speed/, r.headline);
+  const st = (shop) => base({ turn: 18, energy: 22, gl: { songs: {}, tokens: [60, 50, 30, 9, 100], lessons: {}, shop }, facilities: facs({ speed: { cards: 3, rainbows: 1 } }) });
+  const r = pick(st({ "energy:20": { type: 4 } }), "grandlive");
+  assert.match(r.headline, /Buy the Energy \+20 technique \(25 Mental, no turn used\).*Train Speed/, r.headline);
   assert.doesNotMatch(r.headline, /Buy 1 technique lesson/, "the energy technique is the lesson the plan needs");
-  const after = E.advance(st("20"), gl, r.action);
-  const plain = r.ranked.find((o) => o.stat === "speed" && !o.etech);
-  assert.strictEqual(after.energy, Math.round(22 + 20 + plain.energyDelta), "the +20 energy carries into Done");
+  const after = E.advance(st({ "energy:20": { type: 4 } }), gl, r.action);
+  const plain = r.ranked.find((o) => o.stat === "speed" && !o.tech);
+  assert.strictEqual(after.energy, Math.round(22 + 20 + plain.energyDelta), "the +20 energy carries into Done, once");
   assert.strictEqual(after.gl.lessons[0], 1);
-  assert.strictEqual(after.extras.etech, "0");
-  assert.ok(after.gl.tokens[4] < 100, "its cost comes off the biggest pile");
-  // Without one, low energy notes that the shop may have one.
-  const none = pick(st("0"), "grandlive");
-  assert.doesNotMatch(none.headline, /Energy/);
+  assert.strictEqual(after.gl.tokens[4], 75, "25 Mental, the type you set");
+  assert.deepStrictEqual(after.gl.shop, {}, "the shop shows new offers after a buy");
+  // Without one, the call doesn't buy energy.
+  assert.doesNotMatch(pick(st({}), "grandlive").headline, /Energy/);
+});
+
+test("Grand Concert technique shop: every technique this half, with uma.guide's costs", () => {
+  const gl = sc("grandlive");
+  const at = (turn) => E.techniqueList(base({ turn, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} } }), gl);
+  const y1 = at(10);
+  assert.strictEqual(y1.length, 5 + 1 + 3 + 3, "Stat +5 x5, SP +5, Energy x3, skill hints x3");
+  const id = (list, x) => list.find((t) => t.id === x);
+  assert.deepStrictEqual(id(y1, "stat:speed").cost, [10, 0, 0, 0, 0], "Speed +5: 10 Dance");
+  assert.deepStrictEqual(id(y1, "stat:guts").cost, [0, 0, 0, 10, 0], "Guts +5: 10 Visual");
+  assert.strictEqual(id(y1, "sp").any, 10);
+  assert.strictEqual(id(y1, "energy:30").any, 30);
+  const mid = at(30);
+  assert.strictEqual(mid.length, 5 + 1 + 5 + 10 + 3 + 3);
+  assert.deepStrictEqual(id(mid, "statsp:speed").cost, [10, 0, 0, 6, 0], "Speed +4 & SP +4: 10 Dance + 6 Visual");
+  assert.deepStrictEqual(id(mid, "two:speed-power").cost, [8, 0, 8, 0, 0], "Speed +4 & Power +4: 8 Dance + 8 Vocal");
+  assert.strictEqual(id(mid, "stat:wit").gain.wit, 8);
+  assert.strictEqual(id(at(65), "stat:power").gain.power, 12);
+  assert.deepStrictEqual(id(at(65), "stat:power").cost, [0, 0, 24, 0, 0]);
+  assert.deepStrictEqual(at(3), [], "none before the lessons open");
+});
+
+test("Grand Concert technique shop: ranks by your stats and token types, picks the best one on offer", () => {
+  const gl = sc("grandlive");
+  const st = (tokens, shop, o) => base(Object.assign({ turn: 12, build: "sprint", gl: { songs: {}, tokens, lessons: {}, shop: shop || {} } }, o));
+  const r = E.rankTechniques(st([60, 60, 60, 60, 60]), gl);
+  const pos = (id) => r.items.findIndex((t) => t.id === id);
+  assert.ok(pos("stat:speed") < pos("stat:stamina"), "Speed matters more than Stamina for a sprinter");
+  assert.ok(pos("stat:speed") < pos("hint:1"), "skill hints are low priority");
+  assert.strictEqual(r.offered, 0);
+  assert.ok(r.best && r.best.afford);
+  // A type near the cap is cheap to spend: Wit +5 with Mental at 190 beats it with Mental at 60.
+  const capped = E.rankTechniques(st([60, 60, 60, 60, 190]), gl).items.find((t) => t.id === "stat:wit");
+  assert.ok(capped.net > r.items.find((t) => t.id === "stat:wit").net);
+  assert.ok(capped.why.some((w) => /spends Mental \(near the cap\)/.test(w)));
+  // Only what's on offer, and only what you can afford.
+  const offer = E.rankTechniques(st([5, 60, 60, 60, 60], { "stat:speed": {}, "stat:power": {}, "hint:1": {} }), gl);
+  assert.strictEqual(offer.offered, 3);
+  assert.strictEqual(offer.best.id, "stat:power", "Speed +5 needs 10 Dance, you have 5");
+  assert.ok(!offer.items.find((t) => t.id === "stat:speed").afford);
+});
+
+test("Grand Concert technique shop: buying applies tokens, a lesson and stats; undo takes it back; the call names it", () => {
+  const gl = sc("grandlive");
+  const st = () => base({ turn: 18, energy: 80, trackStats: true, stats: { speed: 300, stamina: 150, power: 250, guts: 150, wit: 200 }, gl: { songs: {}, tokens: [60, 50, 30, 9, 100], lessons: {}, shop: { "stat:speed": {}, "sp": { type: 4 }, "hint:2": { type: 0 } } }, facilities: facs({ speed: { cards: 2 } }) });
+  const s = st();
+  E.buyTechnique(s, gl, "stat:speed");
+  assert.deepStrictEqual(s.gl.tokens, [50, 50, 30, 9, 100]);
+  assert.strictEqual(s.gl.lessons[0], 1);
+  assert.strictEqual(s.stats.speed, 305);
+  assert.deepStrictEqual(s.gl.shop, {});
+  E.undoBuy(s);
+  assert.deepStrictEqual(s.gl.tokens, [60, 50, 30, 9, 100]);
+  assert.strictEqual(s.gl.lessons[0] || 0, 0);
+  assert.strictEqual(s.stats.speed, 300);
+  assert.ok(s.gl.shop["stat:speed"], "the offers come back");
+  const sp = st();
+  E.buyTechnique(sp, gl, "sp", 4);
+  assert.strictEqual(sp.gl.tokens[4], 90, "a random-type cost comes off the type you set");
+  // The call names the technique to get and Done buys it.
+  const r = pick(st(), "grandlive");
+  assert.match(r.headline, /^Buy the Speed \+5 technique \(10 Dance, no turn used\)/, r.headline);
+  const after = E.advance(st(), gl, r.action);
+  assert.strictEqual(after.gl.lessons[0], 1);
+  const dance = E.tokenGain(st().facilities.find((f) => f.stat === "speed"), st(), gl).filter((g) => g.type === 0).reduce((a, g) => a + g.amount, 0);
+  assert.strictEqual(after.gl.tokens[0], 60 + dance - 10, "10 Dance off, the training's Dance on");
+  assert.ok(after.stats.speed >= 305, "the +5 lands with the training's gains");
 });
 
 test("Grand Concert year one: tokens count enough that a friendship Speed beats Wit at 31 energy (turn 24 run)", () => {

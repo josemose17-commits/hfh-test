@@ -220,6 +220,11 @@
             <div class="songs-body" id="songsBody"></div>
           </details>
 
+          <details class="panel techs" id="techPanel" hidden>
+            <summary><h2>Technique lessons</h2><span class="mini" id="techSummary"></span></summary>
+            <div class="techs-body" id="techBody"></div>
+          </details>
+
           <div class="fac-head">
             <h2>Trainings</h2>
             <button type="button" class="btn ghost small" id="clearFacs">Clear</button>
@@ -504,6 +509,33 @@
       state.gl.tokens[+i] = Math.max(0, +e.target.value || 0);
       commit();
       renderSongsLight();
+    });
+    $("#techBody").addEventListener("change", (e) => {
+      const offer = e.target.dataset.techOffer;
+      const type = e.target.dataset.techType;
+      if (!offer && !type) return;
+      state.gl.shop = state.gl.shop || {};
+      if (offer) { if (e.target.checked) state.gl.shop[offer] = state.gl.shop[offer] || {}; else delete state.gl.shop[offer]; }
+      if (type) state.gl.shop[type] = Object.assign({}, state.gl.shop[type], { type: e.target.value === "" ? null : +e.target.value });
+      commit(true);
+    });
+    $("#techBody").addEventListener("click", (e) => {
+      const buy = e.target.closest("[data-tech-buy]");
+      if (buy) {
+        e.preventDefault();
+        const id = buy.dataset.techBuy;
+        const offer = (state.gl.shop || {})[id];
+        E.buyTechnique(state, scenario(), id, offer ? offer.type : null);
+        commit(true);
+        flash("Bought " + state.gl.lastBuy.label + ": tick your shop's new offers");
+        return;
+      }
+      if (e.target.closest("[data-tech-undo]")) {
+        const label = state.gl.lastBuy && state.gl.lastBuy.label;
+        E.undoBuy(state);
+        commit(true);
+        flash("Undid " + (label || "the buy"));
+      }
     });
     $("#songsBody").addEventListener("change", (e) => {
       const id = e.target.dataset.song;
@@ -979,6 +1011,53 @@
     if (plan.focus.indexOf(id) !== -1) return '<span class="pill c-clear-pick">aim for this</span>';
     if (plan.avoid.indexOf(id) !== -1) return '<span class="pill c-close-call">skip in year one</span>';
     return "";
+  }
+
+  // ---- Grand Concert technique shop ----
+  // Every technique this half, best first. Tick the ones your shop offers and the coach marks
+  // the one to get (the call's own pick when it buys one with the turn, like an Energy
+  // technique before a training). Bought takes the tokens, counts the lesson and adds the stats.
+  function renderTechs() {
+    const sc = scenario();
+    const panel = $("#techPanel");
+    const r = sc.songs && state.gl ? E.rankTechniques(state, sc) : null;
+    panel.hidden = !r;
+    if (!r) return;
+    const callTech = rec && rec.action && rec.action.tech;
+    const get = callTech ? r.items.find((t) => t.id === callTech.id) : r.offered ? r.best : null;
+    const chips = (c) => c.map((n, i) => (n ? `<span class="tok t${i}">${sc.tokens[i].slice(0, 2)} ${n}</span>` : "")).join("");
+    const costText = (t) => t.cost ? t.cost.map((n, i) => (n ? n + " " + sc.tokens[i] : "")).filter(Boolean).join(" + ") : t.any + " " + (t.type != null ? sc.tokens[t.type] : "of the type shown");
+    const costHTML = (t) => t.cost ? chips(t.cost)
+      : t.offered ? `<span class="tok-any">${t.any}</span><select class="tech-type${t.type != null ? " t" + t.type : ""}" data-tech-type="${t.id}" aria-label="Token type the shop shows"><option value="">type?</option>${sc.tokens.map((n, i) => `<option value="${i}" ${t.type === i ? "selected" : ""}>${n}</option>`).join("")}</select>`
+        : `<span class="tok-any">${t.any} any</span>`;
+    const plan = E.songPlan(state, sc);
+    const need = plan && plan.step === "lessons" ? plan.techNow : 0;
+    const row = (t, i) => {
+      const cant = !t.afford ? (t.cost ? "needs " + t.short.map((n, k) => (n ? n + " more " + sc.tokens[k] : "")).filter(Boolean).join(", ") : "not enough of one type") : "";
+      return `<div class="tech-row${get && get.id === t.id ? " best" : ""}${t.offered ? " on" : ""}${t.afford ? "" : " cant"}">
+        <label class="tech-pick"><input type="checkbox" data-tech-offer="${t.id}" ${t.offered ? "checked" : ""}><span class="tech-name">${esc(t.label)}</span></label>
+        <span class="tech-cost">${costHTML(t)}</span>
+        <button type="button" class="btn ghost small" data-tech-buy="${t.id}">Bought</button>
+        <span class="mini tech-why">#${i + 1}${t.why.length ? " · " + esc(t.why.join(", ")) : ""}${cant ? " · <b>" + esc(cant) + "</b>" : ""}</span>
+      </div>`;
+    };
+    const idx = new Map(r.items.map((t, i) => [t.id, i]));
+    const main = r.items.filter((t, i) => t.offered || i < 6);
+    const rest = r.items.filter((t, i) => !(t.offered || i < 6));
+    const top3 = r.items.filter((t) => t.afford && t.kind !== "energy").slice(0, 3);
+    const lb = state.gl.lastBuy && state.gl.lastBuy.turn === state.turn ? state.gl.lastBuy : null;
+    $("#techSummary").textContent = get ? "Get: " + get.label + " (" + costText(get) + ")" : r.offered ? "Nothing on offer you can afford yet" : "Tick what your shop offers";
+    $("#techBody").innerHTML = `
+      <div class="tech-get">${get
+        ? `<b>Get: ${esc(get.label)}</b> (${esc(costText(get))})${get.why.length ? ": " + esc(get.why.join(", ")) : ""}${callTech ? ", with this turn's call" : ""}.`
+        : r.offered ? "None of your shop's offers is affordable yet: keep training for tokens."
+          : `Best if your shop has it: ${top3.map((t) => `<b>${esc(t.label)}</b> (${esc(costText(t))})`).join(", ")}.`}
+        ${need ? ` Your song plan needs <b>${need}</b> more technique lesson${need > 1 ? "s" : ""} before the next song shows.` : ""}</div>
+      ${lb ? `<div class="tech-last">Bought ${esc(lb.label)} <button type="button" class="btn ghost small" data-tech-undo>Undo</button></div>` : ""}
+      <p class="mini">Your shop shows 3 lessons and 3 new ones after each buy. Tick the ones you see (for a cost in any type, set the type it shows) and the coach marks the one to get. Tap <b>Bought</b> when you buy one: it takes the tokens, counts the technique lesson and adds the stats.</p>
+      <div class="tech-list">${main.map((t) => row(t, idx.get(t.id))).join("")}</div>
+      ${rest.length ? `<details class="tech-more"><summary>${rest.length} more technique${rest.length > 1 ? "s" : ""} this half</summary><div class="tech-list">${rest.map((t) => row(t, idx.get(t.id))).join("")}</div></details>` : ""}
+      <p class="mini">Ranked by what each gives for your stat priority (energy by what it saves you, a skill hint at about 10 SP a level, plus the 5 SP every technique pays at the next live) against what its tokens are worth: a type near the cap is cheap to spend, a type your next songs need costs more. Costs from uma.guide.</p>`;
   }
 
   // Token typing only refreshes the token aim, so the box keeps focus.
@@ -1558,7 +1637,7 @@
       stats: state.stats, targets: state.targets || {}, priority: state.priority, caps: state.caps, extras: state.extras, fans: state.fans,
       badCondition: !!state.badCondition, practicePoor: !!state.practicePoor,
       learned: { boost: Math.round(E.scenarioBoost(state, sc) * 1000) / 1000, fcal: (state.fcal || []).map((x) => Math.round(x * 100) / 100), calib: (state.calib || []).map((x) => Math.round(x * 100) / 100) },
-      gl: state.gl ? { tokens: state.gl.tokens, songs: Object.keys(state.gl.songs || {}), lessons: state.gl.lessons } : undefined,
+      gl: state.gl ? { tokens: state.gl.tokens, songs: Object.keys(state.gl.songs || {}), lessons: state.gl.lessons, shop: state.gl.shop } : undefined,
       deck: (state.deck.slots || []).map((sl) => sl && sl.id ? { card: name(state.deck.slots.indexOf(sl)), id: sl.id, lb: sl.lb, bond: Math.round(slotBond(sl)), dates: sl.dates } : null),
       trainings: state.facilities.map((f) => ({ stat: f.stat, cards: (f.members || []).map(name), hints: (f.hints || []).map(name), others: f.extra || 0, gain: f.gain, fail: f.fail, extras: f.extras })),
       pick: (rec.action.prefix || []).concat([rec.action.label]).join(" → "),
@@ -1570,6 +1649,7 @@
   function renderCall() {
     const sc = scenario();
     rec = E.recommend(state, sc);
+    renderTechs();
     const a = rec.action;
     const kind = a.kind;
     $("#call").className = "panel call k-" + kind + (a.stat ? " s-" + a.stat : "");
