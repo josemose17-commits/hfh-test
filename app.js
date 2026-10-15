@@ -996,7 +996,7 @@
         const t = gl.songs[song.id];
         const locked = song.from > state.turn && t == null;
         return `<label class="song${t != null ? " on" : ""}${locked ? " locked" : ""}"><input type="checkbox" data-song="${song.id}" ${t != null ? "checked" : ""} ${locked ? "disabled" : ""}>
-          <span class="song-name">${esc(song.name)}${t != null ? ` <span class="mini">turn ${t}</span>` : ""}${t == null && planTag(song.id) ? " " + planTag(song.id) : ""}</span>
+          <span class="song-name">${esc(song.name)}${song.jp && song.jp !== song.name ? ` <span class="mini song-jp">${esc(song.jp)}</span>` : ""}${t != null ? ` <span class="mini">turn ${t}</span>` : ""}${t == null && planTag(song.id) ? " " + planTag(song.id) : ""}</span>
           <span class="song-cost">${tok(song.cost)}</span>
           <span class="mini song-fx">${esc(effect(song))}</span></label>`;
       }).join("")}</div>`).join("")}`;
@@ -1099,7 +1099,7 @@
     const songCostText = (song) => song.cost.map((n, i) => (n ? n + " " + sc.tokens[i] : "")).filter(Boolean).join(" + ");
     $("#techSummary").textContent = getSong ? "Get: " + getSong.song.name + " (" + songCostText(getSong.song) + ")" : get ? "Get: " + get.label + " (" + costText(get) + ")" : r.offered || r.songsOffered ? "Nothing on offer you can afford yet" : "Tick what your shop offers";
     const songRow = (x) => `<div class="tech-row song-row${getSong && getSong.id === x.id ? " best" : ""}${x.offered ? " on" : ""}${x.afford ? "" : " cant"}">
-        <label class="tech-pick"><input type="checkbox" data-tech-offer="${x.id}" ${x.offered ? "checked" : ""}><span class="tech-name">${esc(x.song.name)}</span></label>
+        <label class="tech-pick"><input type="checkbox" data-tech-offer="${x.id}" ${x.offered ? "checked" : ""}><span class="tech-name">${esc(x.song.name)}${x.song.jp && x.song.jp !== x.song.name ? ` <span class="mini song-jp">${esc(x.song.jp)}</span>` : ""}</span></label>
         <span class="tech-cost">${chips(x.song.cost)}</span>
         <button type="button" class="btn ghost small" data-song-buy="${x.song.id}">Bought</button>
         <span class="mini tech-why">${esc(x.why.join(", ") || "not in your token aim")}${x.afford ? "" : " · <b>needs " + esc(x.short.map((n, k) => (n ? n + " more " + sc.tokens[k] : "")).filter(Boolean).join(", ")) + "</b>"}</span>
