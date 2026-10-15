@@ -27,6 +27,7 @@
       // Each career starts at 100; outings (Light Hello's first: +4) raise it during the run.
       maxEnergy: 100,
       meFix: 1,
+      fcalFix: 1,
       resetMode: k.resetMode || "ace",
       trackStats: k.trackStats != null ? k.trackStats : true,
       calib: k.calib || [],
@@ -86,6 +87,13 @@
         s.gl = s.gl || blankGl();
         // Older saves carried max energy from career to career (100 → 104 → 108...): once, set
         // it back to 100 plus what this career's outings added.
+        // Older saves learned the scenario multiplier against gains that weren't halved past
+        // 1200, so it sank late in a run: rebuild it once from the logged turns.
+        if (!s.fcalFix) {
+          const lsc = SCENARIOS.find((x) => x.id === s.scenario);
+          if (lsc && (s.fcal || []).length) s.fcal = E.relearnCalib(s, lsc);
+          s.fcalFix = 1;
+        }
         if (!s.meFix) {
           const me = E.careerMaxEnergy(s);
           if ((s.maxEnergy || 100) > me) { s.maxEnergy = me; s.energy = Math.min(s.energy, me); }
@@ -270,7 +278,7 @@
     $("#risk").addEventListener("input", (e) => { state.risk = +e.target.value; commit(); });
     $("#raceBonus").addEventListener("input", (e) => { state.raceBonus = Math.max(0, +e.target.value || 0); commit(); });
     $("#maxEnergy").addEventListener("input", (e) => { const v = +e.target.value; if (v >= 100 && v <= 150) { state.maxEnergy = v; state.energy = Math.min(state.energy, v); commit(); } });
-    $("#resetCalib").addEventListener("click", () => { state.calib = []; commit(); });
+    $("#resetCalib").addEventListener("click", () => { state.calib = []; state.fcal = []; commit(); flash("Learned deck strength cleared"); });
     $("#resetMode").addEventListener("change", (e) => { state.resetMode = e.target.value; commit(); });
     $("#newCareer").addEventListener("click", () => newCareer($("#newCareer")));
 
@@ -1425,9 +1433,11 @@
     $$("#mood [data-mood]").forEach((b) => b.setAttribute("aria-checked", String(+b.dataset.mood === state.mood)));
     $("#exampleNote").hidden = !state.example;
     const c = E.calibFactor(state);
-    $("#calibNote").textContent = (state.calib || []).length >= 3
+    const fc = (state.fcal || []).filter((x) => x > 0).sort((a, b) => a - b);
+    $("#calibNote").textContent = ((state.calib || []).length >= 3
       ? "Learned from your gains: your trainings run at " + Math.round(c * 100) + "% of a typical " + scenario().name + " deck."
-      : "Enter real gains on 3 or more turns and the coach learns how strong your deck is.";
+      : "Enter real gains on 3 or more turns and the coach learns how strong your deck is.") +
+      (E.deckInfo(state) && fc.length >= 2 ? " With your deck set, the gains you typed put this scenario's bonuses at " + Math.round(Math.min(2, Math.max(0.5, fc[Math.floor(fc.length / 2)])) * 100) + "% of the coach's estimate." : "");
     const tg = $("#turnExtras");
     $$("label.chk", tg).forEach((l) => { const i = $("input", l); if (i) l.classList.toggle("on", i.checked); });
   }
@@ -1535,6 +1545,7 @@
       energy: state.energy + "/" + (state.maxEnergy || 100), mood: E.MOODS[state.mood], risk: state.risk,
       stats: state.stats, targets: state.targets || {}, priority: state.priority, caps: state.caps, extras: state.extras, fans: state.fans,
       badCondition: !!state.badCondition, practicePoor: !!state.practicePoor,
+      learned: { boost: Math.round(E.scenarioBoost(state, sc) * 1000) / 1000, fcal: (state.fcal || []).map((x) => Math.round(x * 100) / 100), calib: (state.calib || []).map((x) => Math.round(x * 100) / 100) },
       gl: state.gl ? { tokens: state.gl.tokens, songs: Object.keys(state.gl.songs || {}), lessons: state.gl.lessons } : undefined,
       deck: (state.deck.slots || []).map((sl) => sl && sl.id ? { card: name(state.deck.slots.indexOf(sl)), id: sl.id, lb: sl.lb, bond: Math.round(slotBond(sl)), dates: sl.dates } : null),
       trainings: state.facilities.map((f) => ({ stat: f.stat, cards: (f.members || []).map(name), hints: (f.hints || []).map(name), others: f.extra || 0, gain: f.gain, fail: f.fail, extras: f.extras })),
