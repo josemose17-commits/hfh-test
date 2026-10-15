@@ -338,7 +338,10 @@ test("Unity Cup: Special Training, Spirit Bursts and the burst counter", () => {
 test("Trackblazer: a Vita beats resting, cupcakes fix mood, a 4th race in a row is avoided", () => {
   const strong = facs({ speed: { cards: 3, rainbows: 2, fail: 30 } });
   const low = base({ energy: 25, extras: { vita: "40" }, facilities: strong });
-  assert.match(pick(low, "trackblazer").headline, /Drink Vita 40/);
+  const vr = pick(low, "trackblazer");
+  assert.match(vr.headline, /Drink Vita 40/);
+  const raw = vr.ranked.find((o) => o.stat === vr.action.stat && !/Vita/.test(o.prefix.join(" ")));
+  assert.strictEqual(E.advance(low, sc("trackblazer"), vr.action).energy, Math.round(25 + 40 + raw.energyDelta), "the Vita's energy carries into Done");
   const sad = base({ mood: 1, extras: { cupcake: "1" }, facilities: facs({ speed: { cards: 3, rainbows: 2, fail: 0 } }) });
   assert.match(pick(sad, "trackblazer").headline, /Cupcake/);
   const tired = base({ race: "g1", extras: { consec: 3 }, facilities: facs({ speed: { cards: 2, rainbows: 1 } }) });
@@ -608,7 +611,7 @@ test("Grand Concert: trainings count the tokens they give toward the songs you s
   const st = (tokens) => base({ turn: 40, gl: { songs: {}, tokens, lessons: {} }, facilities: facs({ guts: { cards: 2 } }) });
   const guts = (s) => E.evaluate(s, gl).options.find((o) => o.stat === "guts");
   const none = guts(st([0, 0, 0, 0, 0]));
-  assert.ok(none.notes.some((n) => /\+\d+ (Visual|Dance).* toward .+ \((your next song|song \d+ in your token aim)\)/.test(n)), none.notes.join(" | "));
+  assert.ok(none.notes.some((n) => /~\d+ tokens \(.*(Visual|Dance).*\) toward .+ \((your next song|song \d+ in your token aim)\)/.test(n)), none.notes.join(" | "));
   assert.ok(none.parts.tokens > 0, "tokens are their own part of the breakdown");
   const full = guts(st([200, 200, 200, 200, 200]));
   assert.ok(none.value > full.value, "tokens you don't need add nothing");
@@ -1062,4 +1065,88 @@ test("learning deck strength: a typed gain past 1200 is compared with the halved
   const re = E.relearnCalib(logged1, gl);
   assert.strictEqual(re.length, 1);
   assert.ok(Math.abs(re[0] - 1) < 0.03);
+});
+
+test("Grand Concert tokens: uma.guide's formula, the 60/30/10 type odds, friendship adds your scarcest type", () => {
+  const gl = sc("grandlive");
+  const st = (o) => base(Object.assign({ turn: 10, gl: { songs: {}, tokens: [50, 40, 30, 5, 60], lessons: {} }, facLevels: { speed: 1, wit: 1 } }, o));
+  const f = (stat, o) => Object.assign(fac(stat), { members: [], hints: [], extra: 0 }, o);
+  // (9 + 1) x 1.15^2 = 13.2 -> 13; Wit (5 + 1) with no cards -> 6.
+  assert.strictEqual(E.tokenGain(f("speed", { cards: 2 }), st(), gl)[0].amount, 13);
+  assert.strictEqual(E.tokenGain(f("wit", { cards: 0 }), st(), gl)[0].amount, 6);
+  // A friendship training's second type is the one you have least of (Visual here), not the
+  // training's own second type.
+  const rb = E.tokenGain(f("speed", { cards: 2, rainbows: 1 }), st(), gl);
+  assert.strictEqual(rb.length, 2);
+  assert.strictEqual(rb[1].type, 3);
+  const wit = E.tokenGain(f("wit", { cards: 2, rainbows: 1 }), st(), gl);
+  assert.strictEqual(wit[1].type, 3, "scarcest type for a Wit friendship training too");
+  // Expected (what the coach values): 60% main, 30% second, 10% the rest, unless you set the type.
+  const ex = E.tokenGain(f("speed", { cards: 2 }), st(), gl, true);
+  const by = (g) => g.reduce((a, x) => { a[x.type] = (a[x.type] || 0) + x.amount; return a; }, {});
+  assert.ok(Math.abs(by(ex)[0] - 13 * 0.6) < 1e-9 && Math.abs(by(ex)[3] - 13 * 0.3) < 1e-9);
+  assert.ok(Math.abs(ex.reduce((a, x) => a + x.amount, 0) - 13) < 1e-9);
+  const typed = E.tokenGain(f("speed", { cards: 2, extras: { tokType: 3 } }), st(), gl, true);
+  assert.deepStrictEqual(typed.map((x) => [x.type, x.amount]), [[3, 13]]);
+});
+
+test("Grand Concert plan counts technique lessons: songs only show up after them, and they cost tokens", () => {
+  const gl = sc("grandlive");
+  const st = (o) => base(Object.assign({ turn: 6, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} } }, o));
+  const p = E.tokenPlan(st(), gl);
+  // Year one: 1+2+3+4+4 techniques for 5 songs and 2 more for the 6th; 5 in each half after.
+  assert.strictEqual(p.tech.left, 16 + 5 * 4);
+  assert.strictEqual(p.tech.cost, 10);
+  assert.strictEqual(p.half.techLeft, 16);
+  assert.strictEqual(p.half.techTokens, 160);
+  assert.strictEqual(p.half.songsLeft, 5);
+  assert.ok(p.half.need > 350 && p.half.need < 400, "about 375 tokens in year one: " + p.half.need);
+  const later = E.tokenPlan(st({ turn: 30 }), gl);
+  assert.strictEqual(later.tech.cost, 16, "techniques cost more after the 1st live");
+  assert.strictEqual(E.songPlan(st({ gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: { 0: 3 } } }), gl).techLeft, 13);
+});
+
+test("Grand Concert: buy the technique lessons the plan needs, keeping the next song's tokens (turn 24 run)", () => {
+  const gl = sc("grandlive");
+  const st = (tokens, lessons) => base({ turn: 18, energy: 80, gl: { songs: {}, tokens, lessons: lessons || {} }, facilities: facs({ speed: { cards: 2 } }) });
+  const r = pick(st([60, 50, 30, 9, 100]), "grandlive");
+  assert.match(r.headline, /^Buy 1 technique lesson \(no turn used\)/, r.headline);
+  assert.ok(r.action.notes.some((n) => /songs only show up after technique lessons/.test(n)));
+  // With 1 done, the 1st song is next: no more lessons until it's bought.
+  assert.doesNotMatch(pick(st([60, 50, 30, 9, 100], { 0: 1 }), "grandlive").headline, /technique lesson/);
+  // Nothing to spare: no lesson.
+  assert.doesNotMatch(pick(st([5, 0, 0, 0, 3]), "grandlive").headline, /technique lesson/);
+});
+
+test("Grand Concert: an Energy technique in the shop beats resting, counts as a lesson and takes its tokens", () => {
+  const gl = sc("grandlive");
+  const st = (etech) => base({ turn: 18, energy: 22, extras: { etech }, gl: { songs: {}, tokens: [60, 50, 30, 9, 100], lessons: {} }, facilities: facs({ speed: { cards: 3, rainbows: 1 } }) });
+  const r = pick(st("20"), "grandlive");
+  assert.match(r.headline, /Buy the Energy \+20 technique \(25 tokens, no turn used\).*Train Speed/, r.headline);
+  assert.doesNotMatch(r.headline, /Buy 1 technique lesson/, "the energy technique is the lesson the plan needs");
+  const after = E.advance(st("20"), gl, r.action);
+  const plain = r.ranked.find((o) => o.stat === "speed" && !o.etech);
+  assert.strictEqual(after.energy, Math.round(22 + 20 + plain.energyDelta), "the +20 energy carries into Done");
+  assert.strictEqual(after.gl.lessons[0], 1);
+  assert.strictEqual(after.extras.etech, "0");
+  assert.ok(after.gl.tokens[4] < 100, "its cost comes off the biggest pile");
+  // Without one, low energy notes that the shop may have one.
+  const none = pick(st("0"), "grandlive");
+  assert.doesNotMatch(none.headline, /Energy/);
+});
+
+test("Grand Concert year one: tokens count enough that a friendship Speed beats Wit at 31 energy (turn 24 run)", () => {
+  const gl = sc("grandlive");
+  const s = t17({
+    turn: 18, energy: 31, mood: 3, log: logged(17), extras: { consec: 0, lh20: true },
+    stats: { speed: 250, stamina: 130, power: 220, guts: 150, wit: 200 },
+    gl: { tokens: [60, 50, 30, 9, 100], songs: {}, lessons: { 0: 1 } },
+    deck: { trainee: null, slots: [{ id: 30101, lb: 4, bond: 85 }, { id: 30052, lb: 4, bond: 55, dates: { done: 0, unlocked: true } }, { id: 20039, lb: 4, bond: 50 }, { id: 30078, lb: 4, bond: 50 }, { id: 20018, lb: 4, bond: 60 }, { id: 30031, lb: 4, bond: 60 }] },
+    facilities: dfac({ speed: { members: [0, 2] }, stamina: { members: [5] }, guts: { members: [3] }, wit: { members: [4] } })
+  });
+  const r = E.recommend(s, gl);
+  assert.match(r.action.label, /Train Speed/, r.ranked.slice(0, 3).map((o) => o.label + " " + (o.value / r.typ).toFixed(2)).join(", "));
+  const wit = r.ranked.find((o) => o.stat === "wit");
+  const spd = r.ranked.find((o) => o.stat === "speed");
+  assert.ok(spd.parts.tokens > 3 * wit.parts.tokens, "Wit gives the fewest tokens, and only Mental you have plenty of");
 });

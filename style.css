@@ -465,6 +465,8 @@ table.skills tr.sk-inh td:first-child { box-shadow: inset 3px 0 0 var(--fin); }
 #fans { width: 110px; }
 .song-plan { border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; background: var(--surface); }
 .song-plan .plan-next { font-weight: 600; }
+.song-plan .plan-budget { font-size: .85rem; color: var(--muted); overflow-wrap: anywhere; }
+.song-plan .plan-budget.short { color: var(--fg); border-left: 3px solid var(--warn); padding-left: 6px; }
 
 /* Friend and group card outings */
 .slot-dates .dates, .slot-dates .dates-note { flex-basis: 100%; margin: 4px 0 0; }
