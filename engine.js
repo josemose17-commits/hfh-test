@@ -864,7 +864,7 @@
     const loggedTurns = new Set(log.map((l) => l.turn));
     // Summer camp facilities are all level 5 for the camp only: training there doesn't count
     // toward the facility's real level.
-    const trains = log.filter((l) => l.kind === "train" && !isCamp(l.turn, sc));
+    const trains = log.filter((l) => l.kind === "train" && !l.failed && !isCamp(l.turn, sc));
     const mine = trains.filter((l) => l.stat === stat).length;
     const forced = forcedTurns(state, sc);
     let unlogged = 0;
@@ -1823,7 +1823,22 @@
   }
 
   // Applies a chosen option and moves to the next turn. Returns the new state (does not mutate).
-  function advance(state, scenario, option) {
+  // result (trainings only): "fail" or "bad" when the training failed. umareference: a failed
+  // training still uses its energy, and gives nothing but its failure event. The usual one
+  // ("Get Well Soon!", top choice): mood -1 and -5 to the trained stat. The bad one ("Don't
+  // Overdo It!", only at 20%+ failure; top choice): mood -3, +10 energy, -10 to the trained
+  // stat and -10 to 2 random stats (type those in yourself). Either can bring Practice Poor;
+  // tick Bad condition if it did. No bond, tokens or scenario gains, and it doesn't count
+  // toward the facility's level.
+  const FAIL_RESULT = { fail: { mood: -1, stat: -5, energy: 0, label: "failed" }, bad: { mood: -3, stat: -10, energy: 10, label: "failed badly" } };
+  function advance(state, scenario, option, result) {
+    const fr = option.kind === "train" && FAIL_RESULT[result];
+    if (fr) {
+      option = Object.assign({}, option, {
+        statGains: { [option.stat]: fr.stat }, moodDelta: fr.mood, energyDelta: (option.energyDelta || 0) + fr.energy,
+        firstEvent: null, failed: result, label: option.label + " (" + fr.label + ")"
+      });
+    }
     const s = JSON.parse(JSON.stringify(state));
     // An outing that raises max energy (Light Hello's first: +4) counts before the energy it gives.
     if (option.maxEnergyDelta) s.maxEnergy = (s.maxEnergy || 100) + option.maxEnergyDelta;
@@ -1831,7 +1846,7 @@
     s.extras = s.extras || {};
     s.energy = clamp(Math.round(s.energy + (option.energyDelta || 0)), 0, maxE);
     s.mood = clamp(s.mood + (option.moodDelta || 0), 0, 4);
-    if (option.kind === "train" && scenario.akikawa) {
+    if (option.kind === "train" && scenario.akikawa && !fr) {
       const fac = s.facilities.find((x) => x.stat === option.stat);
       if (fac && fac.extras && fac.extras.aki) s.extras.akiBond = Math.min(100, (+s.extras.akiBond || 0) + AKI_PER_TRAINING);
     }
@@ -1851,9 +1866,9 @@
       else s.extras[k] = typeof v === "function" ? v(s.extras[k]) : v;
     });
     const hook = HOOKS[scenario.hook] || {};
-    if (hook.afterTurn) hook.afterTurn(s, option, scenario);
+    if (hook.afterTurn && !fr) hook.afterTurn(s, option, scenario);
     // Deck bonds: +7 for every card that trained with you this turn.
-    if (option.kind === "train" && s.deck && s.deck.slots) {
+    if (option.kind === "train" && s.deck && s.deck.slots && !fr) {
       const fac = s.facilities.find((f) => f.stat === option.stat);
       (fac && fac.members || []).forEach((i) => {
         const sl = s.deck.slots[i];
@@ -1897,6 +1912,7 @@
       label: (option.prefix && option.prefix.length ? option.prefix.join(" → ") + " → " : "") + option.label,
       kind: option.kind,
       stat: option.stat || null,
+      failed: option.failed || undefined,
       energy: state.energy,
       mood: state.mood,
       snapshot: JSON.stringify(Object.assign({}, state, { log: undefined }))

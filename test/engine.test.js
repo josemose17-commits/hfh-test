@@ -958,3 +958,27 @@ test("stat priority replaces the build's weights, most important first", () => {
   const val = (o) => { const ev = E.evaluate(t17(Object.assign({ energy: 90, facilities: f }, o)), sc("grandlive")); const v = (st) => ev.options.find((x) => x.stat === st).parts.stats; return v("stamina") / v("speed"); };
   assert.ok(val({ priority: ["stamina", "speed", "power", "wit", "guts"] }) > val({}));
 });
+
+test("a failed training: energy used, mood and the trained stat down, no bonds or tokens, no facility level", () => {
+  const gl = sc("grandlive");
+  const st = t17({ energy: 60, trackStats: true, facilities: dfac({ speed: { members: [5, 2], fail: 30 } }) });
+  const opt = E.evaluate(st, gl).options.find((o) => o.stat === "speed");
+  const ok = E.advance(st, gl, opt);
+  const bad1 = E.advance(st, gl, opt, "fail");
+  assert.strictEqual(bad1.energy, ok.energy, "the energy is used either way");
+  assert.strictEqual(bad1.mood, st.mood - 1);
+  assert.strictEqual(bad1.stats.speed, st.stats.speed - 5);
+  assert.strictEqual(bad1.stats.power, st.stats.power, "nothing else changes");
+  assert.strictEqual(bad1.deck.slots[5].bond, st.deck.slots[5].bond, "no bond");
+  assert.deepStrictEqual(bad1.gl.tokens, st.gl.tokens, "no tokens");
+  assert.ok(ok.deck.slots[5].bond > st.deck.slots[5].bond && ok.stats.speed > st.stats.speed);
+  const last = bad1.log[bad1.log.length - 1];
+  assert.ok(last.failed === "fail" && /\(failed\)/.test(last.label));
+  const bad2 = E.advance(st, gl, opt, "bad");
+  assert.strictEqual(bad2.mood, Math.max(0, st.mood - 3));
+  assert.strictEqual(bad2.stats.speed, st.stats.speed - 10);
+  assert.strictEqual(bad2.energy, Math.min(100, ok.energy + 10), "the top choice gives +10 energy");
+  // A result only applies to trainings.
+  const rest = E.evaluate(st, gl).options.find((o) => o.kind === "rest");
+  assert.strictEqual(E.advance(st, gl, rest, "fail").mood, E.advance(st, gl, rest).mood);
+});
