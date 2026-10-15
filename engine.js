@@ -1394,31 +1394,26 @@
     return r;
   }
 
-  // ---- Opening focus ----
-  // From the start, pick one Wit card and one Speed card (each the one with the highest
-  // specialty priority, so it shows up on its own training most) and get them to friendship
-  // (bond 80, orange) first. Once both are there, the usual rule (train where the most cards
-  // still building bond are) takes over.
-  // It's an opening push: full weight to turn 6, then it fades fast (0.6 by the debut, gone
-  // by the end of Junior year), so once cards rainbow, a friendship training beats a few more
-  // bond points on a focus card.
+  // ---- Focus cards ----
+  // Getting one card to friendship (bond 80, orange) early is a must: the stat card with the
+  // highest specialty priority (it shows up on its own training most) is the main focus, and
+  // every training it's on gets a big push until it's orange (full to the debut on turn 12,
+  // fading out by the end of Junior year). The card with the second-highest specialty priority
+  // gets a small push, which never outweighs extra song tokens another training gives (see
+  // evaluate). Friend and Group cards aren't focus cards.
   const FOCUS_K = 2.0;
-  function focusWeight(turn) {
-    if (turn <= 6) return FOCUS_K;
-    if (turn <= 12) return FOCUS_K - (FOCUS_K - 0.6) * (turn - 6) / 6;
-    return turn >= 24 ? 0 : 0.6 * (24 - turn) / 12;
+  const SECOND_K = 0.3;
+  function focusWeight(turn, rank) {
+    if (rank === 2) return turn <= 24 ? SECOND_K : turn >= 36 ? 0 : SECOND_K * (36 - turn) / 12;
+    return turn <= 12 ? FOCUS_K : turn >= 24 ? 0 : FOCUS_K * (24 - turn) / 12;
   }
   function focusCards(deck) {
     if (!deck || !Deck) return [];
-    const out = [];
-    ["wit", "speed"].forEach((ty) => {
-      const best = deck.used.filter((s) => s.card.ty === ty).map((s) => {
-        const fx = Deck.baseEffects(s.card, s.level);
-        return { s, spec: fx[19] || 0, fb: fx[1] || 0 };
-      }).sort((a, b) => b.spec - a.spec || b.fb - a.fb || b.s.level - a.s.level)[0];
-      if (best) out.push({ idx: best.s.idx, card: best.s.card, bond: best.s.bond, type: ty, spec: best.spec });
-    });
-    return out;
+    return deck.used.filter((s) => s.card.ty !== "friend" && s.card.ty !== "group").map((s) => {
+      const fx = Deck.baseEffects(s.card, s.level);
+      return { s, spec: fx[19] || 0, fb: fx[1] || 0 };
+    }).sort((a, b) => b.spec - a.spec || b.fb - a.fb || b.s.level - a.s.level).slice(0, 2)
+      .map((x, i) => ({ idx: x.s.idx, card: x.s.card, bond: x.s.bond, type: x.s.card.ty, spec: x.spec, rank: i + 1 }));
   }
 
   // The game counts down the turns to your debut (turn 12): 12 on turn 1, 9 on turn 4.
@@ -1477,9 +1472,9 @@
         const deckMode = Array.isArray(fac.members) && fac.members.length && ctx.deck;
         const bonding = deckMode ? fac.members.filter((i) => ctx.deck.slots[i] && ctx.deck.slots[i].bond < 80).length : fac.unbonded || 0;
         const hints = deckMode ? (fac.hints || []).length : fac.hint ? 1 : 0;
-        // Your Wit/Speed focus cards come first, so a training with one always counts as strong.
-        const focus = deckMode ? ctx.focus.filter((fc) => fc.bond < 80 && fac.members.indexOf(fc.idx) !== -1).length : 0;
-        return bonding + hints + (o.stat === "wit" ? 1 : 0) + (x.flames > 0 ? 1 : 0) + 2 * (x.burst || 0) + 3 * focus;
+        // Your main focus card comes first, so a training with it always counts as strong.
+        const focus = deckMode ? ctx.focus.filter((fc) => fc.bond < 80 && fac.members.indexOf(fc.idx) !== -1).reduce((a, fc) => a + (fc.rank === 1 ? 3 : 1), 0) : 0;
+        return bonding + hints + (o.stat === "wit" ? 1 : 0) + (x.flames > 0 ? 1 : 0) + 2 * (x.burst || 0) + focus;
       };
       const best = Math.max.apply(null, trains.map(points).concat([0]));
       const full = ctx.E >= ctx.maxE - 5;
@@ -1610,14 +1605,17 @@
     }
     const aki = akikawaValue(f, ctx);
     if (aki) { o.parts.bond += aki.add; o.notes.push(aki.note); }
-    if (dg && ctx.focus.length && focusWeight(state.turn) > 0) {
+    if (dg && ctx.focus.length) {
       // Friendship (orange, 80) is the goal: bond past it adds nothing here.
-      const here = ctx.focus.filter((fc) => fc.bond < 80 && f.members.indexOf(fc.idx) !== -1);
-      if (here.length) {
-        o.parts.bond += here.length * focusWeight(state.turn) * typ;
-        o.focus = here.length;
-        o.notes.push("focus card" + (here.length > 1 ? "s" : "") + " here: " + here.map((fc) => fc.card.n + " (bond " + Math.round(fc.bond) + ")").join(", ") + ". Get your Wit and Speed focus cards to friendship (80) first");
-      }
+      ctx.focus.filter((fc) => fc.bond < 80 && f.members.indexOf(fc.idx) !== -1 && focusWeight(state.turn, fc.rank) > 0).forEach((fc) => {
+        const add = focusWeight(state.turn, fc.rank) * typ;
+        o.parts.bond += add;
+        o.focus = (o.focus || 0) + 1;
+        if (fc.rank === 2) o.secondFocus = add;
+        o.notes.push(fc.rank === 1
+          ? "main focus card here: " + fc.card.n + " (bond " + Math.round(fc.bond) + "). Getting your highest-specialty card to orange (80) is a must"
+          : "second focus card here: " + fc.card.n + " (bond " + Math.round(fc.bond) + "), a small push toward orange");
+      });
     }
     o.raw = o.parts.stats + o.parts.sp + o.parts.bond + o.parts.hint + o.parts.scenario + (o.parts.tokens || 0);
     scoreRisk(o, ctx);
@@ -1680,6 +1678,18 @@
     const hook = HOOKS[sc.hook] || {};
     const { typ, E } = ctx;
     const options = state.facilities.map((f) => trainingOption(f, ctx));
+    // The second focus card's push never outweighs extra song tokens another training gives.
+    const maxTok = Math.max(0, ...options.map((o) => o.parts.tokens || 0));
+    options.forEach((o) => {
+      if (!o.secondFocus) return;
+      const cut = Math.min(o.secondFocus, Math.max(0, maxTok - (o.parts.tokens || 0)));
+      if (cut <= 0) return;
+      o.parts.bond -= cut;
+      o.raw -= cut;
+      o.secondFocusCut = cut;
+      o.notes.push("the second focus push " + (cut >= o.secondFocus ? "is off" : "is smaller") + " here: another training gives more song tokens");
+      scoreRisk(o, ctx);
+    });
     const facOpts = options.slice();
 
     const forced = forcedTurns(state, sc).has(state.turn) || state.goalRace;

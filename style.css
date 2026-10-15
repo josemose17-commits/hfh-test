@@ -248,6 +248,7 @@ tr.phase-row b { color: var(--fg); font-family: var(--font-display); font-size: 
 .chip { display: inline-block; font-size: .72rem; border-radius: 999px; padding: 1px 9px; border: 1px solid var(--line); white-space: nowrap; }
 .chip.camp { border-color: var(--camp); }
 .chip.focus { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.chip.focus.focus2 { font-weight: 500; border-style: dashed; }
 .stat-table input.sparks { width: 72px; text-align: left; }
 .st-global { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .st-global-soon { border-color: var(--accent); color: var(--accent); }
