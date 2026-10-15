@@ -695,6 +695,29 @@
     return STATS.slice().sort((a, b) => w[b] - w[a]);
   }
 
+  // How much a typical training is still worth for your stats: 1 while they're below 1200 and
+  // their targets, less once they're past them (a point past 1200 trains half and counts half;
+  // past the target it counts 0.4; at the cap nothing). Each stat counts by its weight, since
+  // that's how often you train it. The value of energy and mood comes from the trainings it
+  // buys later, so it shrinks by the same factor; never above 1.
+  function statSaturation(stats, target, caps, w, need) {
+    let num = 0, den = 0;
+    STATS.forEach((k) => {
+      const x = +stats[k];
+      const ww = w[k] * w[k];
+      den += ww;
+      if (!(x > 0)) { num += ww; return; }
+      let m = need ? need[k] : 1;
+      if (x >= caps[k]) m = 0;
+      else {
+        if (x >= 1200) m *= 0.25;
+        if (x >= target[k]) m *= 0.4;
+      }
+      num += ww * m;
+    });
+    return den > 0 ? clamp(num / den, 0.3, 1) : 1;
+  }
+
   function makeCtx(state, sc) {
     const build = BUILDS[state.build] || BUILDS.medium;
     const sw = statWeights(state);
@@ -715,17 +738,19 @@
       turnsLeft: sc.totalTurns - state.turn,
       typ: typAt(state.turn, sc, calib)
     };
+    ctx.sat = statSaturation(ctx.stats, target, caps, sw, ctx.need);
+    ctx.typ *= ctx.sat;
     ctx.deck = deckInfo(state);
     ctx.focus = focusCards(ctx.deck);
     ctx.songs = songBonuses(state, sc);
     ctx.boost = sc.train ? scenarioBoost(state, sc) : 1;
-    ctx.V = continuation(state, sc, calib);
+    ctx.V = continuation(state, sc, calib).map((v) => v * ctx.sat);
     ctx.gainValue = (stat, g) => gainValue(stat, g, ctx);
     // Fixed events at the end of this turn (URA's summer snack) land whatever you do.
     const evNow = (sc.energyEvents && sc.energyEvents[state.turn]) || 0;
     ctx.evNow = evNow;
     ctx.energyValue = (delta) => ctx.V[clamp(Math.round(ctx.E + delta + evNow), 0, ctx.maxE)] - ctx.V[clamp(ctx.E + evNow, 0, ctx.maxE)];
-    ctx.moodStep = (from) => moodStepValue(from, state, sc, calib);
+    ctx.moodStep = (from) => moodStepValue(from, state, sc, calib) * ctx.sat;
     ctx.avgW = STATS.reduce((a, s) => a + sw[s], 0) / STATS.length;
     return ctx;
   }
@@ -883,6 +908,17 @@
     return clamp((sc.gainScale || 1) * 15.6 / avg, 1, 2.2);
   }
 
+  // A typed gain should be the total (every green number added up), but it's easy to type only
+  // the training's own stat. Whichever estimate the number is closer to (as a ratio) is the
+  // one it's compared with. est: the formula's gains by stat (halved past 1200).
+  function typedGainBasis(typed, est, stat) {
+    const total = est.reduce((a, b) => a + b, 0);
+    const main = est[STATS.indexOf(stat)] || 0;
+    if (!(total > 0)) return { base: 0, main: false };
+    if (main > 0 && main < total * 0.9 && Math.abs(Math.log(typed / main)) < Math.abs(Math.log(typed / total))) return { base: main, main: true };
+    return { base: total, main: false };
+  }
+
   // Learning samples for the scenario multiplier: for each training whose gain you typed, what
   // the game showed over what the formula predicts at the default multiplier. The game shows
   // gains past 1200 already halved, so the prediction is halved the same way.
@@ -895,8 +931,9 @@
       if (!(f.gain > 0)) return;
       const dg = deckGain(f, ctx);
       if (!dg || !(dg.rawTotal > 0)) return;
-      const pred = dg.gains.reduce((a, g, i) => a + trainedGain(STATS[i], (g / dg.boost) * db, ctx.stats), 0);
-      if (pred > 0) out.push(f.gain / pred);
+      const est = dg.gains.map((g, i) => trainedGain(STATS[i], (g / dg.boost) * db, ctx.stats));
+      const b = typedGainBasis(+f.gain, est, f.stat);
+      if (b.base > 0) out.push(f.gain / b.base);
     });
     return out;
   }
@@ -915,7 +952,9 @@
   function scenarioBoost(state, sc) {
     let b = defaultBoost(sc);
     const c = (state.fcal || []).slice(-12).filter((x) => x > 0).sort((x, y) => x - y);
-    if (c.length >= 2) b *= clamp(c[Math.floor(c.length / 2)], 0.5, 2);
+    // The formula uses your cards' real effects, so a deck far weaker than that is more likely
+    // a typing slip than real: the learned multiplier stays within 0.7x-1.6x.
+    if (c.length >= 2) b *= clamp(c[Math.floor(c.length / 2)], 0.7, 1.6);
     return b;
   }
 
@@ -1568,9 +1607,11 @@
       // formula's split across stats.
       const adj = dg.gains.map((g, i) => trainedGain(STATS[i], g, ctx.stats));
       const adjTotal = adj.reduce((a, b) => a + b, 0);
-      const scale = !est && adjTotal > 0 ? +f.gain / adjTotal : 1;
+      // A typed number that's only the training's own stat rescales by that stat instead.
+      const basis = !est ? typedGainBasis(+f.gain, adj, f.stat) : null;
+      const scale = basis && basis.base > 0 ? +f.gain / basis.base : 1;
       STATS.forEach((st, i) => { if (adj[i] > 0) statGains[st] = adj[i] * scale; });
-      gain = est ? adjTotal : +f.gain;
+      gain = est ? adjTotal : basis && basis.main ? adjTotal * scale : +f.gain;
       if (!est && !(adjTotal > 0)) { const sp = splitFor(f.stat, sc); Object.keys(sp).forEach((st) => { statGains[st] = gain * sp[st]; }); }
       cards = dg.cards;
       rainbows = dg.rainbows;

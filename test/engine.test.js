@@ -1046,9 +1046,17 @@ test("learning deck strength: a typed gain past 1200 is compared with the halved
   const typed = Object.assign({}, st, { facilities: st.facilities.map((f) => (f.stat === "speed" ? Object.assign({}, f, { gain: Math.round(shown) }) : f)) });
   const [x] = E.calibSamples(typed, gl);
   assert.ok(Math.abs(x - 1) < 0.03, "a gain that matches the estimate learns ~1, not ~0.5: " + x);
-  // With the old, too-low multiplier the coach rested at camp; with the right one it trains.
-  assert.strictEqual(E.recommend(Object.assign({}, st, { fcal: Array(12).fill(0.5) }), gl).action.kind, "rest");
+  // The camp rainbow wins, even with a learned multiplier at its floor (0.7x), now that energy
+  // is worth less once Speed is past 1200.
+  assert.strictEqual(E.recommend(Object.assign({}, st, { fcal: Array(12).fill(0.5) }), gl).action.stat, "speed");
   assert.strictEqual(E.recommend(Object.assign({}, st, { fcal: [] }), gl).action.stat, "speed");
+  assert.ok(E.evaluate(st, gl).ctx.sat < 0.8, "late in the run energy is worth less");
+  assert.strictEqual(E.evaluate(t17({ stats: { speed: 300, stamina: 200, power: 250, guts: 200, wit: 200 } }), gl).ctx.sat, 1, "early, full value");
+  // A number that's only the training's own stat is read as that, not as a weak deck.
+  const optS = E.evaluate(st, gl).options.find((o) => o.stat === "speed");
+  const mainOnly = Object.assign({}, st, { facilities: st.facilities.map((f) => (f.stat === "speed" ? Object.assign({}, f, { gain: Math.round(optS.statGains.speed) }) : f)) });
+  const [m] = E.calibSamples(mainOnly, gl);
+  assert.ok(Math.abs(m - 1) < 0.05, "main stat only: " + m);
   // Old saves: the multiplier is rebuilt from the logged turns' typed gains.
   const logged1 = Object.assign({}, st, { fcal: [0.5, 0.5], log: [{ turn: 61, kind: "train", label: "x", snapshot: JSON.stringify(typed) }] });
   const re = E.relearnCalib(logged1, gl);

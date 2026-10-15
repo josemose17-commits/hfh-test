@@ -827,7 +827,7 @@
       <fieldset class="fac s-${f.stat}" data-idx="${idx}">
         <legend>${E.STAT_LABELS[f.stat]}</legend>
         <div class="nums">
-          <label class="nf"><span>Gain</span><input type="number" inputmode="numeric" data-k="gain" min="0" max="400" value="${f.gain != null ? f.gain : ""}" placeholder="auto"></label>
+          <label class="nf" title="Every green number on this training added up, e.g. Speed +20 and Power +10 = 30. Leave blank to use the coach's estimate."><span>Gain (total)</span><input type="number" inputmode="numeric" data-k="gain" min="0" max="400" value="${f.gain != null ? f.gain : ""}" placeholder="auto"></label>
           <label class="nf"><span>Fail %</span><input type="number" inputmode="numeric" data-k="fail" min="0" max="99" value="${f.fail != null ? f.fail : ""}" placeholder="auto"></label>
         </div>
         ${deckOn() ? memberChips(f) : `${pipsHTML("cards", f.cards, "Cards", "c")}
@@ -1437,7 +1437,7 @@
     $("#calibNote").textContent = ((state.calib || []).length >= 3
       ? "Learned from your gains: your trainings run at " + Math.round(c * 100) + "% of a typical " + scenario().name + " deck."
       : "Enter real gains on 3 or more turns and the coach learns how strong your deck is.") +
-      (E.deckInfo(state) && fc.length >= 2 ? " With your deck set, the gains you typed put this scenario's bonuses at " + Math.round(Math.min(2, Math.max(0.5, fc[Math.floor(fc.length / 2)])) * 100) + "% of the coach's estimate." : "");
+      (E.deckInfo(state) && fc.length >= 2 ? " With your deck set, the gains you typed put this scenario's bonuses at " + Math.round(Math.min(1.6, Math.max(0.7, fc[Math.floor(fc.length / 2)])) * 100) + "% of the coach's estimate. If that looks off, press Forget learned deck strength." : "");
     const tg = $("#turnExtras");
     $$("label.chk", tg).forEach((l) => { const i = $("input", l); if (i) l.classList.toggle("on", i.checked); });
   }
