@@ -541,3 +541,8 @@ table.pred .over { color: var(--accent); }
 .token-aim { display: grid; gap: 4px; font-size: .9rem; }
 .token-aim ol { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
 .token-aim li.ready b { color: var(--accent); }
+
+/* Training result (success or failed) for the next Done. */
+.fail-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fail-row [aria-checked="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.fail-row [data-fail="fail"][aria-checked="true"], .fail-row [data-fail="bad"][aria-checked="true"] { background: var(--bad); border-color: var(--bad); color: var(--surface); }

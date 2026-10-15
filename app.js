@@ -522,6 +522,8 @@
       if (e.target.closest("#doneBtn")) done(rec && rec.action);
       if (e.target.closest("#undoBtn")) undoTurn();
       if (e.target.closest("#rcNew")) newCareer($("#rcNew"));
+      const fb = e.target.closest("[data-fail]");
+      if (fb) { failPick = fb.dataset.fail; $$("#call [data-fail]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.fail === failPick))); return; }
       const ans = e.target.closest("[data-rc-ans]");
       if (ans) { const [key, qid, v] = ans.dataset.rcAns.split("|"); const cur = (((state.runChecks || {})[key] || {}).a || {})[qid]; rcAnswer(key, qid, cur === v ? null : v); return; }
       const cont = e.target.closest("[data-rc-continue]");
@@ -707,13 +709,20 @@
     commit(true);
   }
 
+  // The training's result for the next Done: "" (success), "fail" or "bad". It applies to
+  // whichever training you log, then goes back to success.
+  let failPick = "";
   function done(option) {
     if (!option) return;
     state.example = false;
-    state = E.advance(state, scenario(), option);
+    const failed = option.kind === "train" ? failPick : "";
+    state = E.advance(state, scenario(), option, failed || undefined);
+    failPick = "";
     openRow = null;
     commit(true);
-    flash("Logged turn " + (state.turn - 1) + ": " + (option.prefix.length ? option.prefix.join(" → ") + " → " : "") + option.label);
+    const last = state.log[state.log.length - 1];
+    flash("Logged turn " + (state.turn - 1) + ": " + (last ? last.label : option.label) +
+      (failed ? (failed === "bad" ? ". Mood -3, " + E.STAT_LABELS[option.stat] + " -10: fix the 2 random stats it took in Stats, and tick Bad condition if you got Practice Poor." : ". Mood -1, " + E.STAT_LABELS[option.stat] + " -5. Got Practice Poor? Tick Bad condition.") : ""));
   }
 
   function undoTurn() {
@@ -1540,6 +1549,7 @@
       ${vs}${after}
       ${rec.events.length ? `<div class="events">${rec.events.map((e) => `<div class="ev"><b>${esc(e.label)}</b> ${esc(e.tip || "")}</div>`).join("")}</div>` : ""}
       <div class="phase"><b>${esc(rec.phase.name)}:</b> ${esc(rec.phase.tip)}</div>
+      <div class="fail-row" role="radiogroup" aria-label="Training result"><span class="mini">Training result:</span>${[["", "Success", ""], ["fail", "Failed", "Get Well Soon!: mood -1, -5 to that stat"], ["bad", "Failed badly", "Don't Overdo It! (20%+ failure only): mood -3, -10 to that stat and 2 random stats"]].map(([v, l, t]) => `<button type="button" class="btn ghost small" role="radio" data-fail="${v}" aria-checked="${failPick === v}"${t ? ` title="${esc(t)}"` : ""}>${l}</button>`).join("")}</div>
       <div class="actions">
         <button type="button" class="btn" id="doneBtn">Done, next turn ▶</button>
         <button type="button" class="btn ghost" id="undoBtn" ${(state.log || []).length ? "" : "disabled"}>Undo last</button>
