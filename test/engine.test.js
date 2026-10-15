@@ -252,6 +252,16 @@ test("Grand Concert songs add extra stat gains and a delayed friendship bonus", 
   assert.strictEqual(h.need, 2);
 });
 
+test("Grand Concert songs use the Global English names, with the Japanese one kept", () => {
+  const gl = sc("grandlive");
+  const by = (id) => gl.songs.find((x) => x.id === id);
+  assert.strictEqual(by("kiseki").name, "Believe in Miracles!");
+  assert.strictEqual(by("kiseki").jp, "Kiseki wo Shinjite!");
+  assert.strictEqual(by("yumewo").name, "Run for Our Dream!");
+  assert.strictEqual(by("daisuki").name, "Precious Treasure Box");
+  assert.ok(gl.songs.every((x) => x.name && x.jp), "every song has both names");
+});
+
 test("Grand Concert follows the song plan: lessons first, then an affordable song (not the +Guts one in year one)", () => {
   const gl = sc("grandlive");
   const s = base({ turn: 10, gl: { songs: {}, tokens: [40, 0, 0, 30, 0], lessons: {} } });
@@ -262,7 +272,7 @@ test("Grand Concert follows the song plan: lessons first, then an affordable son
   s.gl.lessons = { 0: 1 };
   const r = pick(s, "grandlive");
   assert.match(r.headline, /Learn .* \(no turn used\)/);
-  assert.doesNotMatch(r.headline, /Nigekiri/, "the +Guts song (also affordable) is skipped in year one");
+  assert.doesNotMatch(r.headline, /Getaway/, "the +Guts song (also affordable) is skipped in year one");
   const adv = E.songAdvice(s, gl);
   assert.ok(adv.find((a) => a.song.id === "nigekiri").avoid);
 });

@@ -584,3 +584,4 @@ table.pred .over { color: var(--accent); }
 .songs-have .mini { flex-basis: 100%; }
 .tech-head { font-size: .9rem; margin-top: 2px; }
 .shop-songs summary { overflow-wrap: anywhere; }
+.song-jp { display: block; font-weight: 400; color: var(--muted); }
