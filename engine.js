@@ -1399,10 +1399,14 @@
   // specialty priority, so it shows up on its own training most) and get them to friendship
   // (bond 80, orange) first. Once both are there, the usual rule (train where the most cards
   // still building bond are) takes over.
-  // Full weight through Junior year, fading out by Classic summer.
+  // It's an opening push: full weight to turn 6, then it fades fast (0.6 by the debut, gone
+  // by the end of Junior year), so once cards rainbow, a friendship training beats a few more
+  // bond points on a focus card.
   const FOCUS_K = 2.0;
   function focusWeight(turn) {
-    return turn <= 24 ? FOCUS_K : turn >= 36 ? 0 : FOCUS_K * (36 - turn) / 12;
+    if (turn <= 6) return FOCUS_K;
+    if (turn <= 12) return FOCUS_K - (FOCUS_K - 0.6) * (turn - 6) / 6;
+    return turn >= 24 ? 0 : 0.6 * (24 - turn) / 12;
   }
   function focusCards(deck) {
     if (!deck || !Deck) return [];
@@ -2487,7 +2491,7 @@
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
-    capsFor, sparkUncap, trainedGain, needFactors, focusCards, turnsToDebut, applyOpening, NEW_YEAR,
+    capsFor, sparkUncap, trainedGain, needFactors, focusCards, focusWeight, turnsToDebut, applyOpening, NEW_YEAR,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
