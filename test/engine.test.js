@@ -1034,3 +1034,24 @@ test("once the main focus card is orange, a rainbow beats the second one's bond 
   assert.strictEqual(E.recommend(st(13), gl).action.stat, "speed");
   assert.ok(E.focusWeight(13, 2) < 0.5 && E.focusWeight(24, 1) === 0 && E.focusWeight(12, 1) === 2);
 });
+
+test("learning deck strength: a typed gain past 1200 is compared with the halved estimate (turn 62 report)", () => {
+  const gl = sc("grandlive");
+  const st = t17({ turn: 62, energy: 62, maxEnergy: 104, stats: { speed: 1382, stamina: 106, power: 944, guts: 254, wit: 1031 },
+    deck: { trainee: null, slots: [30101, 30052, 30015, 30078, 30111, 30146].map((id) => ({ id, lb: id === 30015 || id === 30111 ? 2 : 4, bond: 100 })) },
+    facilities: dfac({ speed: { members: [2, 1, 5], extra: 2 }, wit: { members: [3], extra: 2 } }) });
+  // Type exactly what the game would show at the default multiplier (Speed halved past 1200).
+  const opt = E.evaluate(st, gl).options.find((o) => o.stat === "speed");
+  const shown = Object.values(opt.statGains).reduce((a, b) => a + b, 0);
+  const typed = Object.assign({}, st, { facilities: st.facilities.map((f) => (f.stat === "speed" ? Object.assign({}, f, { gain: Math.round(shown) }) : f)) });
+  const [x] = E.calibSamples(typed, gl);
+  assert.ok(Math.abs(x - 1) < 0.03, "a gain that matches the estimate learns ~1, not ~0.5: " + x);
+  // With the old, too-low multiplier the coach rested at camp; with the right one it trains.
+  assert.strictEqual(E.recommend(Object.assign({}, st, { fcal: Array(12).fill(0.5) }), gl).action.kind, "rest");
+  assert.strictEqual(E.recommend(Object.assign({}, st, { fcal: [] }), gl).action.stat, "speed");
+  // Old saves: the multiplier is rebuilt from the logged turns' typed gains.
+  const logged1 = Object.assign({}, st, { fcal: [0.5, 0.5], log: [{ turn: 61, kind: "train", label: "x", snapshot: JSON.stringify(typed) }] });
+  const re = E.relearnCalib(logged1, gl);
+  assert.strictEqual(re.length, 1);
+  assert.ok(Math.abs(re[0] - 1) < 0.03);
+});

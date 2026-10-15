@@ -883,6 +883,35 @@
     return clamp((sc.gainScale || 1) * 15.6 / avg, 1, 2.2);
   }
 
+  // Learning samples for the scenario multiplier: for each training whose gain you typed, what
+  // the game showed over what the formula predicts at the default multiplier. The game shows
+  // gains past 1200 already halved, so the prediction is halved the same way.
+  function calibSamples(state, sc) {
+    if (!sc.train || !deckInfo(state)) return [];
+    const ctx = makeCtx(state, sc);
+    const db = defaultBoost(sc);
+    const out = [];
+    (state.facilities || []).forEach((f) => {
+      if (!(f.gain > 0)) return;
+      const dg = deckGain(f, ctx);
+      if (!dg || !(dg.rawTotal > 0)) return;
+      const pred = dg.gains.reduce((a, g, i) => a + trainedGain(STATS[i], (g / dg.boost) * db, ctx.stats), 0);
+      if (pred > 0) out.push(f.gain / pred);
+    });
+    return out;
+  }
+
+  // Rebuilds the learned multiplier from your logged turns (each keeps the state it was played
+  // from), for saves that learned it the old way.
+  function relearnCalib(state, sc) {
+    const out = [];
+    (state.log || []).forEach((l) => {
+      if (!l.snapshot) return;
+      try { calibSamples(JSON.parse(l.snapshot), sc).forEach((x) => out.push(x)); } catch (e) { /* skip a broken snapshot */ }
+    });
+    return out.slice(-12);
+  }
+
   function scenarioBoost(state, sc) {
     let b = defaultBoost(sc);
     const c = (state.fcal || []).slice(-12).filter((x) => x > 0).sort((x, y) => x - y);
@@ -1925,11 +1954,11 @@
     let bestGain = entered.length ? Math.max.apply(null, entered.map((f) => f.gain)) : 0;
     const ctx = deckInfo(state) && scenario.train ? makeCtx(state, scenario) : null;
     if (ctx) {
+      const samples = calibSamples(state, scenario);
+      if (samples.length) s.fcal = (s.fcal || []).concat(samples).slice(-12);
       state.facilities.forEach((f) => {
         const dg = deckGain(f, ctx);
-        if (!dg) return;
-        if (f.gain > 0 && dg.rawTotal > 0) s.fcal = (s.fcal || []).concat([f.gain / (dg.rawTotal * defaultBoost(scenario))]).slice(-12);
-        if (!bestGain) bestGain = Math.max(bestGain, dg.total);
+        if (dg && !bestGain) bestGain = Math.max(bestGain, dg.total);
       });
     }
     if (bestGain > 0) {
@@ -2499,7 +2528,7 @@
 
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
-    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
+    turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, calibSamples, relearnCalib, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, focusWeight, turnsToDebut, applyOpening, NEW_YEAR,
     songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
