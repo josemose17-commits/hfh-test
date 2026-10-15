@@ -217,14 +217,14 @@
             <div id="turnExtras" class="extras"></div>
           </div>
 
-          <details class="panel songs" id="songsPanel" hidden>
-            <summary><h2>Grand Concert songs</h2><span class="mini" id="songSummary"></span></summary>
-            <div class="songs-body" id="songsBody"></div>
-          </details>
-
           <details class="panel techs" id="techPanel" hidden>
             <summary><h2>Technique lessons</h2><span class="mini" id="techSummary"></span></summary>
             <div class="techs-body" id="techBody"></div>
+          </details>
+
+          <details class="panel songs" id="songsPanel" hidden>
+            <summary><h2>Grand Concert songs</h2><span class="mini" id="songSummary"></span></summary>
+            <div class="songs-body" id="songsBody"></div>
           </details>
 
           <div class="fac-head">
@@ -497,6 +497,12 @@
     }
 
     $("#songsBody").addEventListener("click", (e) => {
+      if (e.target.closest("[data-open-tech]")) {
+        const tp = $("#techPanel");
+        tp.open = true;
+        tp.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
       const b = e.target.closest("[data-gllesson]");
       if (!b) return;
       const plan = E.songPlan(state, scenario());
@@ -923,7 +929,7 @@
     const items = p.queue.slice(0, 6).map((x) => `<li${x.ready ? ' class="ready"' : ""}><b>${esc(x.song.name)}</b> ${x.now
       ? (x.ready ? '<span class="pill c-clear-pick">affordable</span>' : `<span class="mini">needs ${esc(needs(x.short))} more</span>`)
       : `<span class="mini">unlocks turn ${x.song.from}${x.short.some(Boolean) ? ", needs " + esc(needs(x.short)) + " more" : ""}</span>`}</li>`).join("");
-    return `<div class="token-aim"><b>Token aim</b>, most important first<ol>${items}</ol>
+    return `<div class="token-aim"><div><b>Token aim</b>, most important first</div><ol>${items}</ol>
       ${p.queue.length > 6 ? `<p class="mini">${p.queue.length - 6} more after these.</p>` : ""}
       <p class="mini">Order: what each song is worth for your stat priority over the rest of the run, with the song plan's picks first and its skips last; songs you can buy now come before ones that unlock later. Each "needs" counts the tokens the songs above it use first, and trainings get credit for filling the top song's gap first.</p></div>`;
   }
@@ -967,7 +973,7 @@
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
       <p class="mini">Tokens go up by themselves when you press <b>Done</b> on a training (set the token type and amount each training shows on its card; blank uses the estimate), capped at ${E.tokenCap(state, sc)} for now (+50 after each live). Ticking a song takes its cost off. You can still correct the numbers here.</p>
       <div class="song-status">
-        ${hype && hype.next != null ? `<div><b>${hype.since}/3</b> songs since the last live. Next live: turn ${hype.next} (${esc(E.turnInfo(hype.next, sc).text)})${hype.need ? `, ${hype.need} more for a guaranteed Great Success.` : ", Hype gauge full."}</div>` : ""}
+        ${hype && hype.next != null ? `<div><b>${hype.since}/3</b> ${state.turn < 5 ? "songs for the 1st live (Make Debut!, the free song on turn 5, counts as one)" : "songs since the last live"}. Next live: turn ${hype.next} (${esc(E.turnInfo(hype.next, sc).text)})${hype.need ? `, ${hype.need} more for a guaranteed Great Success.` : ", Hype gauge full."}</div>` : ""}
         <div>Active now: ${extras || "no extra stat gains yet"}${bon.fb ? ` · Friendship +${bon.fb}%` : ""}${bon.pendingFb ? ` · +${bon.pendingFb}% Friendship waiting for the next live` : ""}</div>
         <div>${learnedN >= 18 ? "18+ songs: special Girls' Legend U unlocked." : (18 - learnedN) + " more song(s) by Senior Late Dec for the special Girls' Legend U (16 by Senior Early Nov for the lyrics event)."}${state.turn >= 5 ? " Make Debut! counts." : ""}</div>
       </div>
@@ -1010,7 +1016,7 @@
       <div><b>Song plan to the ${plan.last ? "Grand Live" : "live on turn " + plan.live}:</b> buy ${plan.target} song${plan.target > 1 ? "s" : ""}${plan.last ? "" : ", then carry 1 over"} · done: <b>${plan.bought}</b> song${plan.bought === 1 ? "" : "s"}, <b>${lessons}</b> technique lesson${lessons === 1 ? "" : "s"}
         <button type="button" class="btn ghost small square" data-gllesson="-1" aria-label="One fewer technique lesson">−</button>
         <button type="button" class="btn ghost small" data-gllesson="1">+ technique lesson</button></div>
-      <div class="plan-next">Next: ${esc(plan.text)}</div>
+      <div class="plan-next">Next: ${esc(plan.text)}${plan.step === "lessons" ? ' <button type="button" class="btn ghost small" data-open-tech>Pick a technique</button>' : ""}</div>
       ${budgetHTML(sc)}
     </div>`;
   }
@@ -1040,6 +1046,14 @@
   function renderTechs() {
     const sc = scenario();
     const panel = $("#techPanel");
+    // Before the shop opens (turn 5) the panel still shows, so you know where it is.
+    if (sc.songs && sc.tokenOf && state.turn < (sc.tokensFrom || 5)) {
+      panel.hidden = false;
+      $("#techSummary").textContent = "Opens on turn " + (sc.tokensFrom || 5);
+      $("#techBody").innerHTML = `<div class="tech-get">Your lesson shop opens on turn ${sc.tokensFrom || 5}, with the free song Make Debut! (+10 of every token). From then on, every time you open the shop, tick the 3 lessons it offers here and the coach says which to get; tap <b>Bought</b> when you buy one.</div>
+        <p class="mini">Before the 1st live the shop has: Stat +5 (10 of that stat's token: Speed Dance, Stamina Passion, Power Vocal, Guts Visual, Wit Mental), Skill Points +5 (10 of the type shown), Energy +20/30/40 (25/30/35) and skill hints Lv +1/2/3 (15/25/35). Songs only show up after technique lessons.</p>`;
+      return;
+    }
     const r = sc.songs && state.gl ? E.rankTechniques(state, sc) : null;
     panel.hidden = !r;
     if (!r) return;

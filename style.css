@@ -352,10 +352,12 @@ tr.phase-row b { color: var(--fg); font-family: var(--font-display); font-size: 
 .mchip .bang { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; margin-right: 3px; border-radius: 50%; background: var(--bad); color: #fff; font-size: .62rem; font-weight: 800; vertical-align: middle; }
 
 /* Grand Concert songs */
-.songs summary { cursor: pointer; display: grid; gap: 2px; list-style: none; }
-.songs summary::-webkit-details-marker { display: none; }
-.songs summary h2::before { content: "▸ "; color: var(--muted); }
-.songs[open] summary h2::before { content: "▾ "; }
+/* Only the panel's own title row; the lists inside keep normal summaries. */
+.songs > summary, .techs > summary { cursor: pointer; display: grid; gap: 2px; list-style: none; }
+.songs > summary::-webkit-details-marker, .techs > summary::-webkit-details-marker { display: none; }
+.songs > summary h2::before, .techs > summary h2::before { content: "▸ "; color: var(--muted); }
+.songs[open] > summary h2::before, .techs[open] > summary h2::before { content: "▾ "; }
+.techs-body { margin-top: 8px; }
 .songs-body { display: grid; gap: 10px; margin-top: 8px; }
 .tokens { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
 .tokens input { text-align: right; }
