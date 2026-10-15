@@ -1065,6 +1065,15 @@
   // techniques too, so they count toward the next song.
   const GL_TECH = [{ cost: 10, n: 5 }, { cost: 16, n: 8 }, { cost: 16, n: 8 }, { cost: 16, n: 8 }, { cost: 24, n: 12 }];
   const GL_ENERGY_TECH = { 20: 25, 30: 30, 40: 35 };
+  const GL_HINT_TECH = { 1: 15, 2: 25, 3: 35 };
+  // The shop's Stat, SP and combined techniques by tier (uma.guide): tier 0 before the 1st live,
+  // 1 up to the 4th, 2 before the Grand Live. statSp: [stat and SP, main-type cost, second-type
+  // cost]; two: [each stat, cost of each stat's main type].
+  const GL_TECH_TIERS = [
+    { stat: 5, statCost: 10, sp: 5, spCost: 10 },
+    { stat: 8, statCost: 16, sp: 8, spCost: 16, statSp: [4, 10, 6], two: [4, 8] },
+    { stat: 12, statCost: 24, sp: 12, spCost: 24, statSp: [6, 14, 10], two: [6, 12] }
+  ];
   // Technique lessons the song plan takes each half year: year one 1+2+3+4+4 for 5 songs and 2
   // more so the 6th shows; then 1+2 after the carried song and 2 more for the next carry; the
   // last half 1+2+2.
@@ -1275,6 +1284,117 @@
     const h = plan.half;
     if (!h || h.need <= 0) return 1;
     return 1 + clamp(h.gap / h.need, 0, 0.6);
+  }
+
+  // ---- Technique shop ----
+  // Every technique on offer this half year. cost: tokens by type; any: a cost in whatever type
+  // the shop shows (SP, Energy and skill hint techniques).
+  function techniqueList(state, sc) {
+    if (!sc.songs || !sc.tokenOf || state.turn < (sc.tokensFrom || 5) || state.turn > 78) return [];
+    const p = glPeriod(sc, state.turn);
+    const T = GL_TECH_TIERS[p === 0 ? 0 : p < sc.lives.length - 1 ? 1 : 2];
+    const tok = sc.tokenOf;
+    const cost = (pairs) => { const c = [0, 0, 0, 0, 0]; pairs.forEach(([i, n]) => { c[i] += n; }); return c; };
+    const L = STAT_LABELS;
+    const out = [];
+    STATS.forEach((k) => out.push({ id: "stat:" + k, kind: "stat", label: L[k] + " +" + T.stat, gain: { [k]: T.stat }, cost: cost([[tok[k][0], T.statCost]]) }));
+    out.push({ id: "sp", kind: "sp", label: "Skill Points +" + T.sp, sp: T.sp, any: T.spCost });
+    if (T.statSp) STATS.forEach((k) => out.push({ id: "statsp:" + k, kind: "statsp", label: L[k] + " +" + T.statSp[0] + " & SP +" + T.statSp[0], gain: { [k]: T.statSp[0] }, sp: T.statSp[0], cost: cost([[tok[k][0], T.statSp[1]], [tok[k][1], T.statSp[2]]]) }));
+    if (T.two) STATS.forEach((a, i) => STATS.slice(i + 1).forEach((b) => out.push({ id: "two:" + a + "-" + b, kind: "two", label: L[a] + " +" + T.two[0] + " & " + L[b] + " +" + T.two[0], gain: { [a]: T.two[0], [b]: T.two[0] }, cost: cost([[tok[a][0], T.two[1]], [tok[b][0], T.two[1]]]) })));
+    Object.keys(GL_ENERGY_TECH).forEach((e) => out.push({ id: "energy:" + e, kind: "energy", label: "Energy +" + e, energy: +e, any: GL_ENERGY_TECH[e] }));
+    Object.keys(GL_HINT_TECH).forEach((h) => out.push({ id: "hint:" + h, kind: "hint", label: "Skill hint Lv +" + h, hint: +h, any: GL_HINT_TECH[h] }));
+    return out;
+  }
+  // What a token of each type costs you (weighted points): what techniques make of a token,
+  // half for a type near the cap (it would go to waste), and half more for a type the next two
+  // songs in your token aim need and you don't have plenty of.
+  function tokenPrices(plan, ctx) {
+    const u = techTokenUnit(plan, ctx) * tokenUrgency(plan);
+    const need = [0, 0, 0, 0, 0];
+    plan.queue.filter((x) => x.now).slice(0, 2).forEach((x) => x.song.cost.forEach((c, i) => { need[i] += c; }));
+    return plan.have.map((h, i) => ({
+      price: u * ((h || 0) >= plan.cap - 30 ? 0.5 : need[i] > 0 && (h || 0) - need[i] < 10 ? 1.5 : 1),
+      why: (h || 0) >= plan.cap - 30 ? "cap" : need[i] > 0 && (h || 0) - need[i] < 10 ? "song" : ""
+    }));
+  }
+  function techCostOf(t, type) {
+    if (t.cost) return t.cost.slice();
+    const c = [0, 0, 0, 0, 0];
+    if (type != null && type !== "") c[+type] = t.any;
+    return c;
+  }
+  // Each technique's worth: its stats, SP, energy (what it saves you later) or hint (about 10 SP a
+  // level), plus the 5 SP it pays at the next live, less what its tokens are worth. A random-type
+  // cost counts the type you set (else an average type). shop: { id: { type } } for the ones on
+  // offer. best: the one to get among those on offer you can afford (else among all).
+  function rankTechniques(state, sc, ctxIn) {
+    const list = techniqueList(state, sc);
+    const plan = list.length ? tokenPlan(state, sc) : null;
+    if (!plan) return null;
+    const ctx = ctxIn || makeCtx(state, sc);
+    const prices = tokenPrices(plan, ctx);
+    const avgPrice = prices.reduce((a, x) => a + x.price, 0) / 5;
+    const shop = (state.gl && state.gl.shop) || {};
+    const have = plan.have;
+    const rank = STATS.slice().sort((a, b) => ctx.w[b] * (ctx.need ? ctx.need[b] : 1) - ctx.w[a] * (ctx.need ? ctx.need[a] : 1));
+    const items = list.map((t) => {
+      const offer = shop[t.id];
+      const type = offer && offer.type != null && offer.type !== "" ? +offer.type : null;
+      let value = 5 * SP_VALUE;
+      const why = [];
+      Object.entries(t.gain || {}).forEach(([k, n]) => { value += ctx.gainValue(k, n); });
+      if (t.gain) why.push(Object.keys(t.gain).map((k) => L_RANK(rank.indexOf(k)) + " stat").join(" and "));
+      if (t.sp) value += t.sp * SP_VALUE;
+      if (t.energy) {
+        const e2 = clamp(ctx.E + t.energy, 0, ctx.maxE);
+        value += ctx.V[e2] - ctx.V[ctx.E];
+        why.push(e2 > ctx.E ? "energy " + ctx.E + " → " + e2 : "energy is already full");
+      }
+      if (t.hint) { value += t.hint * 10 * SP_VALUE; why.push("a random skill for your A aptitudes"); }
+      const c = techCostOf(t, type);
+      let costV = c.reduce((a, n, i) => a + n * prices[i].price, 0);
+      if (t.any && type == null) costV = t.any * avgPrice;
+      c.forEach((n, i) => { if (n && prices[i].why) why.push(prices[i].why === "cap" ? "spends " + sc.tokens[i] + " (near the cap)" : "uses " + sc.tokens[i] + " your next songs need"); });
+      const short = c.map((n, i) => Math.max(0, n - (have[i] || 0)));
+      const afford = t.any && type == null ? Math.max.apply(null, have) >= t.any : short.every((n) => !n);
+      return Object.assign({}, t, { value, costV, net: value - costV, afford, short, offered: !!offer, type, why: why.filter(Boolean) });
+    }).sort((a, b) => b.net - a.net);
+    const offered = items.filter((x) => x.offered);
+    const pool = (offered.length ? offered : items).filter((x) => x.afford);
+    return { items, offered: offered.length, best: pool[0] || null, plan, ctx };
+  }
+  const L_RANK = (i) => ["your top", "your 2nd", "your 3rd", "your 4th", "your 5th"][i] || "a";
+  // Buying a technique: its tokens (a random-type cost comes off the type you set, else your
+  // biggest pile), a lesson toward the next song, its stats (when the coach tracks them) and
+  // energy. The shop shows 3 new offers after a buy, so the ticks clear. lastBuy undoes it.
+  function buyTechnique(state, sc, id, type) {
+    const t = techniqueList(state, sc).find((x) => x.id === id);
+    if (!t) return state;
+    state.gl = state.gl || { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} };
+    const gl = state.gl;
+    const before = { tokens: gl.tokens.slice(), lessons: Object.assign({}, gl.lessons), stats: Object.assign({}, state.stats), energy: state.energy, shop: Object.assign({}, gl.shop) };
+    const big = gl.tokens.indexOf(Math.max.apply(null, gl.tokens));
+    const c = techCostOf(t, type != null && type !== "" ? type : t.any ? big : null);
+    gl.tokens = gl.tokens.map((n, i) => Math.max(0, n - c[i]));
+    const p = glPeriod(sc, state.turn);
+    gl.lessons = gl.lessons || {};
+    gl.lessons[p] = (gl.lessons[p] || 0) + 1;
+    if (state.trackStats && state.stats) Object.entries(t.gain || {}).forEach(([k, n]) => { if (state.stats[k] > 0) state.stats[k] = Math.round(state.stats[k] + n); });
+    if (t.energy) state.energy = clamp(Math.round(state.energy + t.energy), 0, state.maxEnergy || 100);
+    gl.shop = {};
+    gl.lastBuy = { id, label: t.label, turn: state.turn, before };
+    return state;
+  }
+  function undoBuy(state) {
+    const b = state.gl && state.gl.lastBuy;
+    if (!b) return state;
+    state.gl.tokens = b.before.tokens;
+    state.gl.lessons = b.before.lessons;
+    state.gl.shop = b.before.shop || {};
+    if (b.before.stats) state.stats = b.before.stats;
+    if (b.before.energy != null) state.energy = b.before.energy;
+    delete state.gl.lastBuy;
+    return state;
   }
 
   // Tokens a training gives: every token buys technique lessons (stats, SP at the live, and the
@@ -2348,13 +2468,13 @@
       // Energy technique counts as a technique lesson and takes its cost off your biggest pile
       // (fix the type in Songs if the shop asked for another).
       afterTurn(s, option, sc) {
-        if (option.etech && sc && s.gl) {
-          const p = glPeriod(sc, s.turn);
-          s.gl.lessons = s.gl.lessons || {};
-          s.gl.lessons[p] = (s.gl.lessons[p] || 0) + 1;
-          const t = s.gl.tokens;
-          const big = t.indexOf(Math.max.apply(null, t));
-          t[big] = Math.max(0, t[big] - option.etech.cost);
+        // A technique in front of the call: Done buys it (an Energy technique's energy is
+        // already in the turn's result, so it isn't added twice).
+        if (option.tech && sc && s.gl) {
+          const e = s.energy;
+          buyTechnique(s, sc, option.tech.id, option.tech.type);
+          s.energy = e;
+          delete s.gl.lastBuy;
         }
         if (option.kind !== "train") return;
         const f = s.facilities.find((x) => x.stat === option.stat);
@@ -2365,22 +2485,21 @@
       },
       items(ctx, options) {
         if (ctx.state.turn < 5) return;
-        const x = ctx.state.extras || {};
         const aim = tokenPlan(ctx.state, ctx.sc);
-        // An Energy technique in the shop: train with the energy instead of resting. It's a
-        // technique lesson too, so it only costs the tokens over a usual technique and that
-        // technique's stat gain.
-        const et = +x.etech || 0;
-        const etCost = GL_ENERGY_TECH[et];
-        if (et && etCost && aim && ctx.E < ctx.maxE - 10 && Math.max.apply(null, aim.have) >= etCost) {
+        const shop = rankTechniques(ctx.state, ctx.sc, ctx);
+        const costText = (t) => t.cost ? t.cost.map((n, i) => (n ? n + " " + ctx.sc.tokens[i] : "")).filter(Boolean).join(" + ") : t.any + " " + (t.type != null ? ctx.sc.tokens[t.type] : "tokens");
+        // An Energy technique in your shop: buy it and train instead of resting. Its energy is
+        // scored on the training; the rest of its worth (the live's SP) less its tokens is the
+        // item's.
+        const energyOffer = shop && shop.items.filter((t) => t.offered && t.kind === "energy" && t.afford).sort((a, b) => b.energy - a.energy)[0];
+        if (energyOffer && ctx.E < ctx.maxE - 10) {
           const top = options.filter((o) => o.kind === "train").sort((a, b) => b.raw - a.raw)[0];
           if (top) {
-            const e2 = Math.min(ctx.maxE, ctx.E + et);
+            const e2 = Math.min(ctx.maxE, ctx.E + energyOffer.energy);
             const v = withEnergy(top, ctx, e2);
-            const unit = techTokenUnit(aim, ctx) * tokenUrgency(aim);
-            useOn(v, ctx, "Buy the Energy +" + et + " technique (" + etCost + " tokens, no turn used)", -((etCost - aim.tech.cost) * unit + techStatValue(aim, ctx)),
-              "energy " + ctx.E + " → " + e2 + " before training; it counts as a technique lesson toward your next song", { etech: "0" });
-            v.etech = { amount: et, cost: etCost };
+            useOn(v, ctx, "Buy the " + energyOffer.label + " technique (" + costText(energyOffer) + ", no turn used)", 5 * SP_VALUE - energyOffer.costV,
+              "energy " + ctx.E + " → " + e2 + " before training; it counts as a technique lesson toward your next song");
+            v.tech = { id: energyOffer.id, type: energyOffer.type };
             options.push(v);
             options.sort((a, b) => b.value - a.value);
           }
@@ -2398,13 +2517,21 @@
           best.notes.push("you can afford a song now; lessons don't use a turn");
         }
         // Songs only show up after technique lessons: buy the ones the plan needs now, keeping
-        // the next song's tokens.
-        if (aim && plan && plan.step === "lessons") {
-          // An Energy technique bought this turn is one of them.
-          const n = Math.min(techAffordable(aim), plan.techNow) - (best.etech ? 1 : 0);
-          if (n > 0) {
-            best.prefix.unshift("Buy " + n + " technique lesson" + (n > 1 ? "s" : "") + " (no turn used)");
-            best.notes.push("songs only show up after technique lessons: Stat +" + aim.tech.n + " on a top stat is the best one (~" + aim.tech.cost + " tokens of that stat's type); tap + technique lesson in Songs for each");
+        // the next song's tokens. With your shop's offers set, name the one to get (the shop
+        // shows 3 new ones after each buy, so one at a time); a pile near the cap is spent even
+        // when the plan doesn't need a lesson.
+        if (aim && shop && !best.tech) {
+          const needNow = plan && plan.step === "lessons" ? Math.min(techAffordable(aim), plan.techNow) : 0;
+          const nearCap = aim.have.some((h) => h >= aim.cap - 15);
+          const pick = shop.best;
+          if (shop.offered && pick && pick.kind !== "energy" && (needNow > 0 || nearCap || pick.net > 0)) {
+            best.prefix.unshift("Buy the " + pick.label + " technique (" + costText(pick) + ", no turn used)");
+            best.notes.push("best of the techniques in your shop" + (pick.why.length ? ": " + pick.why.join(", ") : "") + (needNow > 1 ? "; " + (needNow - 1) + " more after it for your next song (set the new offers)" : ""));
+            best.tech = { id: pick.id, type: pick.type };
+          } else if (!shop.offered && needNow > 0) {
+            best.prefix.unshift("Buy " + needNow + " technique lesson" + (needNow > 1 ? "s" : "") + " (no turn used)");
+            const top3 = shop.items.filter((t) => t.afford && t.kind !== "energy").slice(0, 3).map((t) => t.label + " (" + costText(t) + ")");
+            best.notes.push("songs only show up after technique lessons. Tick what your shop offers under Technique lessons and the coach picks one; best if offered: " + top3.join(", "));
           }
         }
         if (aim && aim.half && aim.half.gap > 0 && ctx.state.turn < aim.half.live) {
@@ -2416,8 +2543,8 @@
           const full = aim.have.map((h, i) => [h, i]).filter(([h]) => h >= aim.cap - 15).map(([h, i]) => ctx.sc.tokens[i] + " " + h + "/" + aim.cap);
           if (full.length) best.notes.push(full.join(", ") + ": near the cap, spend it on technique lessons before it's wasted");
         }
-        if (!et && ctx.E < 50 && aim && Math.max.apply(null, aim.have) >= 25 && (best.kind === "rest" || best.kind === "recreation" || best.stat === "wit")) {
-          best.notes.push("if your shop offers an Energy technique, set it under Grand Concert: it's a technique lesson too and can beat resting");
+        if (!energyOffer && ctx.E < 50 && aim && Math.max.apply(null, aim.have) >= 25 && (best.kind === "rest" || best.kind === "recreation" || best.stat === "wit")) {
+          best.notes.push("if your shop offers an Energy technique, tick it under Technique lessons: it's a technique lesson too and can beat resting");
         }
         if (hype && hype.next != null && hype.need > 0 && hype.turnsToLive <= 4) {
           best.notes.push(hype.need + " more song(s) needed before the live on turn " + hype.next + " for a guaranteed Great Success");
@@ -2733,7 +2860,7 @@
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, calibSamples, relearnCalib, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, focusWeight, turnsToDebut, applyOpening, NEW_YEAR,
-    songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows
+    songBonuses, hypeStatus, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, buyTechnique, undoBuy
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;
