@@ -258,7 +258,10 @@
       summary: "Training earns performance points (Dance, Passion, Vocal, Visual, Mental; 200 each at first). You spend them on song lessons, which take no turn. Promo concerts run every six months from Late December of Junior year.",
       coreLoop: [
         "Lessons don't use a turn, so buy songs as soon as you can afford them. Extra Stat Gain songs add a permanent bonus to that training; Friendship Bonus songs boost every friendship training after the next live.",
-        "Each training gives a main and second token: Speed gives Dance/Visual, Stamina Passion/Vocal, Power Vocal/Mental, Guts Visual/Dance, Wit Mental/Passion. Friendship trainings give two token types, and scenario-link cards (Light Hello, Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon) give more.",
+        "Each training gives a main token 60% of the time and a second one 30%: Speed gives Dance/Visual, Stamina Passion/Vocal, Power Vocal/Mental, Guts Visual/Dance, Wit Mental/Passion. Friendship trainings add a second type, very likely the one you have least of.",
+        "How many tokens (uma.guide): (9 + facility level) x 1.15 per support card on it, +2 per scenario-link card (Light Hello, Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon). Wit starts from 5 instead of 9, so it gives the fewest.",
+        "Songs only show up after technique lessons, and those cost tokens too: Stat +5 or SP +5 for 10 before the 1st live, +8 for 16 after, +12 for 24 before the Grand Live (plus 5 SP each at the next live). Year one's plan (16 techniques and 5 songs) takes about 375 tokens, often more than training brings, which is why so many runs reset.",
+        "Energy techniques (+20/30/40 energy for 25/30/35 tokens) are techniques too, so they count toward the next song: buy them instead of resting when your shop offers one.",
         "Opening: train on turns 1-3 (bonds, Wit), then rest on turn 4, when the game shows 9 turns to your debut, unless your energy is already 85+. Go into turn 5 as full as you can.",
         "Light Hello shows up from turn 5. The first time she's on a training, take it, whichever training it is: her fixed event gives mood +1, Speed +13, Guts +13 (a little less at lower LB) and +10 bond, and you need it before her outings can open. After that she's a normal card (her Training Together event can add 20 points of your scarcest type).",
         "Turn 5 to the debut: favour the cards closest to friendship. Focus one or two cards so they rainbow as soon as possible instead of spreading bond around. If no card is rainbowing and Light Hello hasn't given her +20 event by the debut, reset.",
@@ -274,7 +277,8 @@
       deck: "A normal stat deck works. The scenario friend card Light Hello is a strong pick: her outings are better than normal ones, and her unique effect cuts energy cost on friendship trainings.",
       keyCards: ["Light Hello [From the Ground Up] (SSR Friend)", "Smart Falcon, Silence Suzuka, Agnes Tachyon, Mihono Bourbon (scenario links)"],
       inputs: [
-        { id: "lh20", label: "Light Hello +20 event", scope: "turn", type: "check", help: "Her Training Together event gave you 20 points of a token type. Tick it once it happens: the debut reset check counts it." }
+        { id: "lh20", label: "Light Hello +20 event", scope: "turn", type: "check", help: "Her Training Together event gave you 20 points of a token type. Tick it once it happens: the debut reset check counts it." },
+        { id: "etech", label: "Energy technique in shop", scope: "turn", type: "select", options: [["0", "None"], ["20", "Energy +20 (25 tokens)"], ["30", "Energy +30 (30 tokens)"], ["40", "Energy +40 (35 tokens)"]], help: "Set it when your lesson shop offers one. It's a technique lesson too (it counts toward your next song), so the coach weighs buying it and training against resting." }
       ],
       resetChecks: [{ id: "debut", from: 10, at: 12, to: 14 }, { id: "songs1", from: 20, at: 23, to: 25 }],
       events: [

@@ -904,6 +904,7 @@
     const worst = sc.tokens.map((n, i) => [n, p.short[i] - p.supply[i]]).filter(([, g]) => g > 0).sort((a, b) => b[1] - a[1]).map(([n]) => n);
     return `<details class="token-plan"><summary><b>Token plan</b>: ${p.songs.length} songs left to buy${worst.length ? ` · short on ${worst.join(", ")}` : " · tokens look fine"}</summary>
       <div class="table-wrap"><table class="tp"><thead><tr><th>Token</th><th>Songs left cost</th><th>You have</th><th>Training brings</th><th></th></tr></thead><tbody>${row}</tbody></table></div>
+      <p class="mini">Technique lessons the song plan still needs: <b>${p.tech.left}</b> (~${Math.round(p.tech.tokens)} tokens of whatever types the shop asks for), on top of the songs above.</p>
       <p class="mini">Songs left: the ${p.queue.length} that matter most for your stat priority (18 in all with the ones you've learned), including ones that unlock later. "Training brings" is a rough estimate to the Grand Live. Trainings that give the token types you're short of count for more, so the coach steers you toward buying them all.</p>
     </details>`;
   }
@@ -958,7 +959,18 @@
         <button type="button" class="btn ghost small square" data-gllesson="-1" aria-label="One fewer technique lesson">−</button>
         <button type="button" class="btn ghost small" data-gllesson="1">+ technique lesson</button></div>
       <div class="plan-next">Next: ${esc(plan.text)}</div>
+      ${budgetHTML(sc)}
     </div>`;
+  }
+
+  // This half's token budget: the technique lessons and songs the plan still wants before the
+  // next live, against what you hold and what training should bring by then.
+  function budgetHTML(sc) {
+    const p = E.tokenPlan(state, sc);
+    const h = p && p.half;
+    if (!h || h.need <= 0) return "";
+    const short = h.gap > 0;
+    return `<div class="plan-budget${short ? " short" : ""}">Tokens this half: <b>~${Math.round(h.need)}</b> (${h.techLeft} technique lesson${h.techLeft === 1 ? "" : "s"} at ~${h.techCost}, ${h.songsLeft} song${h.songsLeft === 1 ? "" : "s"} at ~${Math.round(h.songTokens / Math.max(1, h.songsLeft))}) · you have ${Math.round(h.have)} · training should bring ~${Math.round(h.supply)} by turn ${h.live}${short ? ` · <b>short by ~${Math.round(h.gap)}</b>: the coach favours trainings with more cards, link cards and friendship (two token types); Wit gives the fewest` : " · on track"}</div>`;
   }
 
   function planTag(id) {
