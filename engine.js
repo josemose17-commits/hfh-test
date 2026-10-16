@@ -751,7 +751,7 @@
     ctx.sat = statSaturation(ctx.stats, target, caps, sw, ctx.need);
     ctx.typ *= ctx.sat;
     ctx.deck = deckInfo(state);
-    ctx.focus = focusCards(ctx.deck);
+    ctx.focus = focusCards(ctx.deck, state);
     ctx.songs = songBonuses(state, sc);
     ctx.boost = sc.train ? scenarioBoost(state, sc) : 1;
     ctx.V = continuation(state, sc, calib).map((v) => v * ctx.sat);
@@ -1849,25 +1849,51 @@
   }
 
   // ---- Focus cards ----
-  // Getting one card to friendship (bond 80, orange) early is a must: the stat card with the
-  // highest specialty priority (it shows up on its own training most) is the main focus, and
-  // every training it's on gets a big push until it's orange (full to the debut on turn 12,
-  // fading out by the end of Junior year). The card with the second-highest specialty priority
-  // gets a small push, which never outweighs extra song tokens another training gives (see
-  // evaluate). Friend and Group cards aren't focus cards.
+  // Getting one card to friendship (bond 80, orange) early is a must, and a second one is nice
+  // to have. Which cards: the ones that should give the most rainbows in Junior year if you
+  // focus them from now, from their current bond and their specialty priority:
+  //   score = P(own training) × 0.92^T × (1 + Friendship bonus) × (0.75 + 0.25 × stat weight)
+  //   P(own training) = (100 + SP) / (550 + SP): each training weighs 100, the card's own one
+  //     100 + its Specialty Priority, not showing up 50 (fan guides). A card only rainbows there,
+  //     so this is how often it rainbows once it's orange.
+  //   T = turns to orange = trainings still needed (80 − bond) / 7, rounded up, ÷ (the chance
+  //     it's on some training, (500 + SP) / (550 + SP), × 0.6, about how often you can follow it)
+  //   0.92^T: early rainbows count most, so each turn of waiting costs about 8%.
+  // So a card close to orange wins until a higher-specialty card is only a little behind, and
+  // training with your focus card keeps it on top. With no card orange yet, the best one is the
+  // main focus (a big push on every training it's on, full to the debut on turn 12, fading out
+  // by the end of Junior year) and the next one gets a small push (never over extra song tokens,
+  // see evaluate). Once one is orange, the best of the rest gets the small push. Friend and
+  // Group cards aren't focus cards.
   const FOCUS_K = 2.0;
   const SECOND_K = 0.3;
   function focusWeight(turn, rank) {
     if (rank === 2) return turn <= 24 ? SECOND_K : turn >= 36 ? 0 : SECOND_K * (36 - turn) / 12;
     return turn <= 12 ? FOCUS_K : turn >= 24 ? 0 : FOCUS_K * (24 - turn) / 12;
   }
-  function focusCards(deck) {
+  const FOCUS_FOLLOW = 0.6;
+  const FOCUS_DECAY = 0.92;
+  function focusScore(x, w) {
+    const sp = x.spec;
+    const pSpec = (100 + sp) / (550 + sp);
+    const pHere = (500 + sp) / (550 + sp);
+    const trainings = Math.ceil(Math.max(0, 80 - x.bond) / BOND_PER_TRAINING_E);
+    const T = trainings / (pHere * FOCUS_FOLLOW);
+    const sw = w && w[x.type] != null ? w[x.type] : 1;
+    return { pSpec, trainings, T, score: pSpec * Math.pow(FOCUS_DECAY, T) * (1 + x.fb / 100) * (0.75 + 0.25 * sw) };
+  }
+  function focusCards(deck, state) {
     if (!deck || !Deck) return [];
-    return deck.used.filter((s) => s.card.ty !== "friend" && s.card.ty !== "group").map((s) => {
+    const w = state ? statWeights(state) : null;
+    const all = deck.used.filter((s) => s.card.ty !== "friend" && s.card.ty !== "group").map((s) => {
       const fx = Deck.baseEffects(s.card, s.level);
-      return { s, spec: fx[19] || 0, fb: fx[1] || 0 };
-    }).sort((a, b) => b.spec - a.spec || b.fb - a.fb || b.s.level - a.s.level).slice(0, 2)
-      .map((x, i) => ({ idx: x.s.idx, card: x.s.card, bond: x.s.bond, type: x.s.card.ty, spec: x.spec, rank: i + 1 }));
+      const x = { idx: s.idx, card: s.card, bond: s.bond, type: s.card.ty, spec: fx[19] || 0, fb: fx[1] || 0, level: s.level };
+      return Object.assign(x, focusScore(x, w));
+    });
+    const tie = (a, b) => b.spec - a.spec || b.fb - a.fb || b.level - a.level;
+    const orange = all.filter((x) => x.bond >= 80).sort((a, b) => b.pSpec - a.pSpec || tie(a, b));
+    const building = all.filter((x) => x.bond < 80).sort((a, b) => b.score - a.score || tie(a, b));
+    return orange.concat(building).slice(0, 2).map((x, i) => Object.assign(x, { rank: i + 1 }));
   }
 
   // The game counts down the turns to your debut (turn 12): 12 on turn 1, 9 on turn 4.
@@ -2068,9 +2094,10 @@
         o.parts.bond += add;
         o.focus = (o.focus || 0) + 1;
         if (fc.rank === 2) o.secondFocus = add;
+        const eta = "bond " + Math.round(fc.bond) + ", " + fc.trainings + " training" + (fc.trainings === 1 ? "" : "s") + " to orange, on its own training " + Math.round(fc.pSpec * 100) + "% of turns";
         o.notes.push(fc.rank === 1
-          ? "main focus card here: " + fc.card.n + " (bond " + Math.round(fc.bond) + "). Getting your highest-specialty card to orange (80) is a must"
-          : "second focus card here: " + fc.card.n + " (bond " + Math.round(fc.bond) + "), a small push toward orange");
+          ? "main focus card here: " + fc.card.n + " (" + eta + "). Getting one card to orange (80) early is a must"
+          : "second focus card here: " + fc.card.n + " (" + eta + "), a small push toward orange");
       });
     }
     o.raw = o.parts.stats + o.parts.sp + o.parts.bond + o.parts.hint + o.parts.scenario + (o.parts.tokens || 0);
