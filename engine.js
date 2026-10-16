@@ -372,7 +372,7 @@
         guess: deck && !bondsStale(state) ? (rb.length ? "yes" : "no") : null,
         guessWhy: rb.length ? rb.map((sl) => sl.card.n).join(", ") + " at 80+" : "no stat card at 80+ in the coach's count"
       }];
-      if (lh) questions.push({ id: "lh20", type: "yesno", text: "Has Light Hello given her +20 event (Another Day's Hard Work!)?", answer: aL });
+      if (lh && !isYes(a.rainbow)) questions.push({ id: "lh20", type: "yesno", text: "Has Light Hello given her +20 event (Another Day's Hard Work!)?", answer: a.lh20, guess: x.lh20 ? "yes" : null, guessWhy: "you ticked Light Hello +20 event" });
       const result = isYes(a.rainbow) || isYes(aL) ? "pass" : isNo(a.rainbow) && (!lh || isNo(aL)) ? "fail" : null;
       return {
         label: "Debut check", kind: "reset", questions, result,
@@ -389,9 +389,10 @@
       const marked = Object.values((state.gl && state.gl.songs) || {}).filter((t) => t >= 5 && glPeriod(sc, t) === 0).length;
       const n = numAns(a.songs);
       const questions = [
-        { id: "songs", type: "number", text: "How many songs have you bought so far?", answer: n, guess: marked, guessWhy: marked ? "marked in the Songs panel" : "none marked in the Songs panel" },
-        { id: "sixth", type: "yesno", text: "Is a 6th song showing in your lessons, held to buy right after the live?", answer: a.sixth }
-      ];
+        { id: "songs", type: "number", text: "How many songs have you bought so far?", answer: n, guess: marked, sure: marked > 0, guessWhy: marked ? "your songs" : "none marked yet" },
+        { id: "sixth", type: "yesno", text: "Is a 6th song showing in your lessons, held to buy right after the live?", answer: a.sixth,
+          guess: Object.keys((state.gl && state.gl.shop) || {}).some((k) => k.indexOf("song:") === 0) ? "yes" : null, guessWhy: "a song is ticked in your shop" }
+      ].filter((q) => q.id !== "sixth" || n == null || n >= 5);
       const result = n != null && n < 5 ? "fail" : isNo(a.sixth) ? "fail" : n != null && isYes(a.sixth) ? "pass" : null;
       return {
         label: "Year one songs", kind: "reset", questions, result,
@@ -464,7 +465,16 @@
     const t = state.turn;
     if (t < c.from) return null;
     const e = (state.runChecks && state.runChecks[key]) || {};
-    const r = check(state, sc, c, e.a || {});
+    const a0 = e.a || {};
+    let r = check(state, sc, c, a0);
+    // What the coach already knows (bonds from your deck, songs you've marked, Light Hello's
+    // +20 tick) answers itself; you're only asked the rest. An answer you give still wins.
+    const auto = {};
+    (r.questions || []).forEach((q) => { if (a0[q.id] == null && q.guess != null && q.sure !== false) auto[q.id] = q.guess; });
+    if (Object.keys(auto).length && t >= c.at) {
+      r = check(state, sc, c, Object.assign({}, auto, a0));
+      (r.questions || []).forEach((q) => { if (auto[q.id] != null && a0[q.id] == null) q.auto = true; });
+    }
     const item = { key, label: r.label, kind: r.kind, questions: r.questions };
     if (r.result === "fail") {
       const status = e.decision === "continue" ? "continued" : r.kind === "warn" ? "warn" : "reset";
@@ -1070,7 +1080,7 @@
     const lessons = gl.lessons || {};
     const status = (turn) => (turn < t ? "done" : turn === t ? "now" : "next");
     const out = [];
-    out.push({ turn: GL_DEBUT_SONG, label: "Make Debut! (a free song)", gain: "+10 of every token; Specialty Rate +5 after the 1st live. It counts as a song for the Hype gauge and toward the 18.", tokens: 10, status: status(GL_DEBUT_SONG) });
+    out.push({ turn: GL_DEBUT_SONG, label: "Make Debut! (a free song)", gain: "+10 of every token; Specialty Rate +5 after the 1st live. It counts as a song for the Hype gauge and toward the 18.", short: "+10 of every token, and it counts as a song", tokens: 10, status: status(GL_DEBUT_SONG) });
     const ch = sc.opening && sc.opening.chase;
     if (ch && ch.event) {
       const ev = ch.event;
@@ -1079,7 +1089,8 @@
     }
     Object.keys(NEW_YEAR).forEach((k) => {
       const ny = NEW_YEAR[k];
-      out.push({ turn: +k, label: "New Year", gain: "+" + ny.e + " energy, or " + (ny.stats >= 25 ? "all stats +" + ny.stats / 5 : "a stat +" + ny.stats) + ", or " + ny.sp + " skill points (you pick).", status: status(+k) });
+      const g = "+" + ny.e + " energy, or " + (ny.stats >= 25 ? "all stats +" + ny.stats / 5 : "a stat +" + ny.stats) + ", or " + ny.sp + " skill points";
+      out.push({ turn: +k, label: "New Year", gain: g + " (you pick).", short: g, status: status(+k) });
     });
     sc.lives.forEach((L, i) => {
       const last = i === sc.lives.length - 1;
@@ -1099,7 +1110,8 @@
           gain: (i === 0 ? "Great Success (3+ songs so far, Make Debut! counts): all stats +10; fewer songs: +3. Skill points: 5 per technique and 25 per song so far."
             : "Great Success (3+ songs since the last live): all stats +10; fewer songs: +3. Skill points: 5 per technique and 25 per song since the last live.") + " Token cap +50 (to " + cap + ").",
           sofar: !started ? null : sofar + songs + " song" + (songs === 1 ? "" : "s") + (i === 0 ? " (with Make Debut!)" : "") + " and " + tech + " technique" + (tech === 1 ? "" : "s") + ": " + (great ? "Great Success, all stats +10" : st === "done" ? "all stats +3" : "all stats +3 (" + (3 - songs) + " more song" + (3 - songs === 1 ? "" : "s") + " for +10)") + ", +" + sp + " SP.",
-          stats: great ? 10 : 3, sp
+          stats: great ? 10 : 3, sp,
+          short: (great ? "all stats +10" : "all stats +3 (" + (3 - songs) + " more song" + (3 - songs === 1 ? "" : "s") + " for +10)") + ", +" + sp + " SP so far, token cap to " + cap
         });
       } else {
         const n = songsLearned(Object.assign({}, state, { turn: Math.max(t, GL_DEBUT_SONG) }));
@@ -1107,12 +1119,13 @@
           turn: L, label: "Grand Live: GIRLS' LEGEND U", status: st,
           gain: "All stats +10 and Friendship +10% (both versions). With 18+ songs before it (Make Debut! counts) you get the special version and the scenario's gold skill, I Wanna Win with You; otherwise the white Halfway to a Dream. Like the Promo Lives it should pay SP per lesson.",
           sofar: sofar + n + " of 18 songs" + (n >= 18 ? ": special version unlocked." : "."),
+          short: "all stats +10, Friendship +10%; " + n + " of 18 songs for the special version and the gold skill",
           stats: 10
         });
       }
     });
     const nL = songsLearned(Object.assign({}, state, { turn: Math.max(t, GL_DEBUT_SONG) }));
-    out.push({ turn: 69, label: "Lyrics event", gain: "With 16+ songs: pick a lyrics line for a skill hint (gold if it's a scenario-link character you're using).", sofar: "So far: " + nL + " of 16 songs.", status: status(69) });
+    out.push({ turn: 69, label: "Lyrics event", gain: "With 16+ songs: pick a lyrics line for a skill hint (gold if it's a scenario-link character you're using).", sofar: "So far: " + nL + " of 16 songs.", short: "a skill hint with 16+ songs (you have " + nL + ")", status: status(69) });
     return out.sort((a, b) => a.turn - b.turn);
   }
 
@@ -1165,24 +1178,20 @@
     const plan = { period: p, target: steps.length, bought, lessons, live, last, focus: GL_FOCUS[p] || [], avoid: GL_AVOID[p] || [], techCost: tech.cost };
     // Techniques still to buy this half: to the last song, plus the carry-over's.
     plan.techLeft = Math.max(0, cum[cum.length - 1] + (carry || 0) - lessons);
-    const n = (x) => x + " technique lesson" + (x === 1 ? "" : "s") + " (~" + tech.cost + " tokens each)";
+    // The step comes from the songs you've bought (the game's technique count is easy to lose
+    // track of): songs to buy this half, then hold the next one for after the live.
+    plan.techNow = bought < steps.length ? Math.max(0, cum[bought] - lessons) : carry != null ? Math.max(0, cum[cum.length - 1] + carry - lessons) : 0;
     if (bought < steps.length) {
-      const need = cum[bought] - lessons;
-      plan.techNow = Math.max(0, need);
-      plan.step = need > 0 ? "lessons" : "song";
-      plan.text = p > 0 && bought === 0 && need <= 0
-        ? "Buy the song you carried over first (it saves a lesson)."
-        : need > 0 ? "Do " + n(need) + ", then buy song " + (bought + 1) + " of " + steps.length + " this half."
-          : "Buy song " + (bought + 1) + " of " + steps.length + " when it shows in your lessons.";
+      plan.step = "song";
+      plan.text = p > 0 && bought === 0
+        ? "Buy the song you carried over first (it saves a lesson), then " + (steps.length - 1) + " more this half."
+        : "Buy song " + (bought + 1) + " of " + steps.length + " this half: buy techniques until songs show in your shop, then the most important one.";
     } else if (carry != null) {
-      const need = cum[cum.length - 1] + carry - lessons;
-      plan.techNow = Math.max(0, need);
-      plan.step = need > 0 ? "lessons" : "hold";
-      plan.text = need > 0 ? "Plan's songs are done. Do " + n(need) + " until the next song shows, then hold it."
-        : "Hold the next song: buy it right after the live on turn " + live + ", so it counts for the next live and saves a lesson.";
+      plan.step = "hold";
+      plan.text = "This half's " + steps.length + " songs are bought. Buy techniques until the next song shows, then hold it: buy it right after the live on turn " + live + " (it counts for the next live and saves a lesson). Spare tokens go to stat techniques.";
     } else {
       plan.step = "done";
-      plan.text = "Plan done: that's 18 songs for the special GIRLS' LEGEND U. Extra songs still help.";
+      plan.text = "Plan done: 18 songs for the special GIRLS' LEGEND U. Spare tokens go to stat techniques; extra songs still help.";
     }
     return plan;
   }
@@ -1431,6 +1440,54 @@
     const songOffers = songs.filter((x) => x.offered);
     return { items, offered: offered.length, best: pool[0] || null, plan, ctx, songs, songsOffered: songOffers.length, bestSong: songOffers.find((x) => x.afford) || null };
   }
+  // The lesson shop, songs first: buy the most important song your shop shows (or hold it when
+  // the song plan carries it over to after the live). Otherwise a technique: while this half
+  // still wants songs, the one that keeps the tokens your next song needs (techniques are what
+  // make songs show up), cheapest first; once its songs are bought, the best stat technique you
+  // can pay from spare tokens. ifOffered: the top picks when you haven't ticked anything.
+  function lessonShop(state, sc, ctxIn) {
+    const r = rankTechniques(state, sc, ctxIn);
+    if (!r) return null;
+    const plan = songPlan(state, sc);
+    const phase = !plan || plan.step === "song" ? "songs" : plan.step === "hold" ? "hold" : "stats";
+    const have = r.plan.have;
+    const nextSong = r.songs.find((x) => x.offered) || r.songs.find((x) => x.aim < Infinity);
+    const reserve = nextSong ? nextSong.song.cost.slice() : [0, 0, 0, 0, 0];
+    const total = (t) => techCostOf(t, t.type).reduce((a, b) => a + b, 0) || t.any || 0;
+    r.items.forEach((t) => {
+      const c = techCostOf(t, t.type);
+      if (t.any && t.type == null) {
+        // Paid from whatever type the shop shows: count it against your biggest spare pile.
+        const spare = have.map((h, i) => (h || 0) - reserve[i]);
+        t.conflict = Math.max(0, t.any - Math.max.apply(null, spare));
+      } else {
+        t.conflict = c.reduce((a, n, i) => a + Math.max(0, n - Math.max(0, (have[i] || 0) - reserve[i])), 0);
+      }
+      t.keeps = t.conflict === 0;
+      t.total = total(t);
+    });
+    const order = phase === "songs"
+      ? (a, b) => (b.afford - a.afford) || (a.conflict - b.conflict) || (a.total - b.total) || (b.net - a.net)
+      : (a, b) => (b.afford - a.afford) || (a.conflict - b.conflict) || (b.net - a.net);
+    const techs = r.items.slice().sort(order);
+    const offeredTechs = techs.filter((t) => t.offered && t.afford);
+    // A technique that eats into the next song's tokens only while no song is showing (you need
+    // techniques to see songs); once songs are bought, only from spare tokens.
+    const okTech = (t) => t.keeps || (phase === "songs" && !r.songsOffered);
+    let pick = null;
+    const song = r.songs.find((x) => x.offered && x.afford);
+    const shownSong = r.songs.find((x) => x.offered);
+    if (shownSong && phase === "hold") pick = { kind: "hold", item: shownSong };
+    else if (song) pick = { kind: "song", item: song };
+    if (!pick || pick.kind === "hold") {
+      const t = offeredTechs.find((x) => x.kind !== "energy" && okTech(x));
+      if (t && (!pick || t.keeps)) pick = pick ? Object.assign(pick, { tech: t }) : { kind: "tech", item: t };
+    }
+    const ifOffered = techs.filter((t) => t.afford && t.kind !== "energy" && okTech(t)).slice(0, 3);
+    const songsWanted = plan ? Math.max(0, plan.target - plan.bought) : 0;
+    return Object.assign(r, { phase, techs, pick, ifOffered, nextSong, reserve, songsWanted, songPlan: plan });
+  }
+
   // Songs your shop could show now (unlocked, not learned), in token aim order (most important
   // first), with the ones you've ticked as on offer. Song ids in the shop are "song:<id>".
   function shopSongs(state, sc, plan) {
@@ -2625,49 +2682,34 @@
         }
         const best = options[0];
         if (!best) return;
-        const plan = songPlan(ctx.state, ctx.sc);
-        // The first song in the token aim you can buy without taking tokens a more important
-        // song above it needs.
-        const buy = aim && aim.queue.find((x) => x.ready);
         const hype = hypeStatus(ctx.state, ctx.sc);
-        if (plan) best.notes.push("song plan: " + plan.text);
-        // Songs your shop shows: learn the most important one you can afford (or hold it for
-        // after the live when the plan says so). Without ticks, the token aim's first song.
-        const offerSong = shop && shop.bestSong;
+        // Songs first: the most important song your shop shows that you can afford (or hold it
+        // for after the live), else a technique: one that keeps your next song's tokens while
+        // songs are still wanted, stat techniques from spare tokens after.
+        const ls = lessonShop(ctx.state, ctx.sc, ctx);
+        const pk = ls && ls.pick;
         const songCost = (song) => song.cost.map((n, i) => (n ? n + " " + ctx.sc.tokens[i] : "")).filter(Boolean).join(" + ");
-        if (offerSong && plan && plan.step === "hold") {
-          best.notes.push("hold " + offerSong.song.name + ": buy it right after the live on turn " + plan.live + ", so it counts for the next live and saves a lesson");
-        } else if (offerSong && !best.tech) {
-          best.prefix.unshift("Learn " + offerSong.song.name + " (" + songCost(offerSong.song) + ", no turn used)");
-          best.notes.push("best of the songs in your shop: " + (offerSong.why.join(", ") || "the most important one you can afford"));
-          best.song = { id: offerSong.song.id };
-        } else if (shop && shop.songsOffered) {
-          best.notes.push("you can't afford any of the songs your shop shows yet: keep training for tokens");
-        } else if (buy && plan && plan.step === "song") {
-          best.prefix.unshift("Learn " + buy.song.name + " (no turn used)");
-          best.notes.push("you can afford a song now; lessons don't use a turn. Tick the songs your shop shows in the Lesson shop and the coach picks the best one");
+        const nearCap = aim && aim.have.some((h) => h >= aim.cap - 15);
+        if (pk && pk.kind === "song" && !best.tech) {
+          best.prefix.unshift("Learn " + pk.item.song.name + " (" + songCost(pk.item.song) + ", no turn used)");
+          best.notes.push("songs first: the most important song in your shop you can afford" + (pk.item.why.length ? " (" + pk.item.why.join(", ") + ")" : ""));
+          best.song = { id: pk.item.song.id };
+        } else if (pk && pk.kind === "hold") {
+          best.notes.push("hold " + pk.item.song.name + ": buy it right after the live on turn " + ls.songPlan.live + ", so it counts for the next live");
         }
-        // Songs only show up after technique lessons: buy the ones the plan needs now, keeping
-        // the next song's tokens. With your shop's offers set, name the one to get (the shop
-        // shows 3 new ones after each buy, so one at a time); a pile near the cap is spent even
-        // when the plan doesn't need a lesson.
-        if (aim && shop && !best.tech && !best.song) {
-          const needNow = plan && plan.step === "lessons" ? Math.min(techAffordable(aim), plan.techNow) : 0;
-          const nearCap = aim.have.some((h) => h >= aim.cap - 15);
-          const pick = shop.best;
-          if (shop.offered && pick && pick.kind !== "energy" && (needNow > 0 || nearCap || pick.net > 0)) {
-            best.prefix.unshift("Buy the " + pick.label + " technique (" + costText(pick) + ", no turn used)");
-            best.notes.push("best of the techniques in your shop" + (pick.why.length ? ": " + pick.why.join(", ") : "") + (needNow > 1 ? "; " + (needNow - 1) + " more after it for your next song (set the new offers)" : ""));
-            best.tech = { id: pick.id, type: pick.type };
-          } else if (!shop.offered && needNow > 0) {
-            best.prefix.unshift("Buy " + needNow + " technique lesson" + (needNow > 1 ? "s" : "") + " (no turn used)");
-            const top3 = shop.items.filter((t) => t.afford && t.kind !== "energy").slice(0, 3).map((t) => t.label + " (" + costText(t) + ")");
-            best.notes.push("songs only show up after technique lessons. Tick what your shop offers in the Lesson shop and the coach picks one; best if offered: " + top3.join(", "));
-          }
+        const tPick = pk && (pk.kind === "tech" ? pk.item : pk.tech);
+        if (tPick && !best.tech && !best.song) {
+          best.prefix.unshift("Buy the " + tPick.label + " technique (" + costText(tPick) + ", no turn used)");
+          best.notes.push(ls.phase === "songs" ? "techniques make songs show up; this one keeps your next song's tokens" : "spare tokens for stats" + (tPick.why.length ? ": " + tPick.why.join(", ") : ""));
+          best.tech = { id: tPick.id, type: tPick.type };
+        } else if (ls && !pk && ls.songsOffered) {
+          best.notes.push("you can't afford the songs your shop shows yet: keep training for tokens");
+        } else if (ls && !best.tech && !best.song && !ls.offered && !ls.songsOffered && ls.ifOffered.length && (ls.phase === "songs" || nearCap || ls.ifOffered.length)) {
+          best.prefix.unshift(ls.phase === "songs" ? "Buy a technique lesson (no turn used)" : "Spend spare tokens on a stat technique (no turn used)");
+          best.notes.push((ls.phase === "songs" ? "songs only show up after technique lessons. " : "") + "Tick what your shop shows under Grand Concert and the coach picks; best if offered: " + ls.ifOffered.map((t) => t.label + " (" + costText(t) + ")").join(", "));
         }
         if (aim && aim.half && aim.half.gap > 0 && ctx.state.turn < aim.half.live) {
-          const h = aim.half;
-          best.notes.push("tokens are short: this half's song plan needs ~" + Math.round(h.need) + " (" + h.techLeft + " technique lessons, " + h.songsLeft + " songs), you have " + Math.round(h.have) + " and training should bring ~" + Math.round(h.supply) + " by turn " + h.live + ", so trainings with more cards, link cards and friendship (two token types) count for more");
+          best.notes.push("tokens are short for this half's songs: trainings with more cards, link cards and friendship count for more");
         }
         // A pile near the cap: spend it before training wastes it.
         if (aim) {
@@ -2993,7 +3035,7 @@
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, calibSamples, relearnCalib, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, focusWeight, turnsToDebut, applyOpening, NEW_YEAR,
-    songBonuses, hypeStatus, songsLearned, glRewards, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, buyTechnique, buySong, shopSongs, undoBuy
+    songBonuses, hypeStatus, songsLearned, glRewards, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, lessonShop, buyTechnique, buySong, shopSongs, undoBuy
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;
