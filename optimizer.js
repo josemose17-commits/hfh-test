@@ -132,10 +132,8 @@
 
   // Simulates `runs` careers with these cards. cards: [{ card, lb }].
   function simulate(ctx, cards) {
-    // Deck slots do not change outcomes: use the same draw assignment for every permutation.
-    cards = cards.slice().sort((a, b) =>
-      Number(a.card.id) - Number(b.card.id) || Number(a.lb) - Number(b.lb)
-    );
+    const inputCards = cards.slice();
+    cards = cards.slice().sort((a,b) => Number(a.card.id) - Number(b.card.id) || Number(a.lb) - Number(b.lb));
     const fx = makeEffects();
     const deck = cards.map((c) => {
       const level = D.levelFor(c.card, c.lb);
@@ -248,8 +246,8 @@
       sp: Math.round(spTotal / R),
       rainbows: rainbowTotal / R,
       raceBonus,
-      hints: hints.map((h) => h / R),
-      bondByJuniorEnd: bondAt.map((b) => Math.round(b / R)),
+      hints: inputCards.map(c => hints[cards.indexOf(c)] / R),
+      bondByJuniorEnd: inputCards.map(c => Math.round(bondAt[cards.indexOf(c)] / R)),
       trainMix: train.map((n) => n / R),
       rests: rests / R,
       races: races / R,
@@ -448,6 +446,7 @@
     const giveUp = opts.parent ? Math.min(0.4, 0.4 * (opts.parent.statsWeight || 0)) : null;
     let floor = -Infinity;
     const cache = new Map();
+    const testedDecks = new Map();
     const evaluate = (deck, c) => {
       const s = simulate(c, deck.map((x) => ({ card: D.card(x.id), lb: x.lb })));
       const fit = targetFit(c, s.stats, s.sp);
@@ -457,7 +456,10 @@
     };
     const score = (deck) => {
       const k = deck.map((x) => x.id + ":" + x.lb).sort().join(",");
-      if (!cache.has(k)) cache.set(k, evaluate(deck, ctx));
+      if (!cache.has(k)) {
+        cache.set(k, evaluate(deck, ctx));
+        testedDecks.set(k, deck.map(x => Object.assign({}, x)));
+      }
       return cache.get(k);
     };
     let deck = start.map((x) => ({ id: x.id, lb: x.lb, borrowed: !!x.borrowed }));
@@ -496,8 +498,26 @@
     // The start and final decks, rescored with more careers for the readout.
     function result() {
       const full = buildCtx(Object.assign({}, sim, { runs: 16 }));
-      floor = -Infinity;
-      return { cards: deck, swaps, before: evaluate(start, full), after: evaluate(deck, full), target: ctx.target, caps: ctx.caps };
+      // Validate every candidate actually evaluated by the cheap search, not just its winner.
+      const finalists = new Map(testedDecks);
+      const put = d => finalists.set(d.map(x => x.id + ":" + x.lb).sort().join(","), d);
+      put(start); put(deck);
+      const before = evaluate(start, full);
+      let winner = start.map(x => Object.assign({}, x));
+      let after = before;
+      finalists.forEach(candidate => {
+        const r = evaluate(candidate, full);
+        if (r.value > after.value + 1e-6) {
+          winner = candidate.map(x => Object.assign({}, x));
+          after = r;
+        }
+      });
+      const finalSwaps = [];
+      const removed = start.filter(x => !winner.some(y => x.id === y.id && x.lb === y.lb && !!x.borrowed === !!y.borrowed));
+      const added = winner.filter(x => !start.some(y => x.id === y.id && x.lb === y.lb && !!x.borrowed === !!y.borrowed));
+      removed.forEach((x, i) => { if (added[i]) finalSwaps.push({out:x.id, in:added[i].id, inLb:added[i].lb}); });
+      return { cards: winner, swaps: finalSwaps, before, after, target: ctx.target, caps: ctx.caps,
+        validation: { runs:16, candidates:finalists.size, method:"rescore-all-tested" } };
     }
     return { next, result, progress: () => (slots.length ? Math.min(1, step / (slots.length * 2)) : 1) };
   }
