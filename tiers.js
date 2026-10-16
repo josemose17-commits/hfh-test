@@ -107,7 +107,9 @@
       };
       hs.forEach((id) => add(id, 1 - Math.exp(-hints / Math.max(1, hs.length)), lv));
       const late = ctx.it ? lateChainSkills(card) : null;
-      (card.es || []).forEach((id) => add(id, (EVENT_SKILL_CHANCE[card.r] || 0.5) * (late && late.has(String(id)) ? IT_LATE_CHAIN : 1), 1));
+      // Maverick requires declining Light Hello's outings. It cannot be credited
+      // together with the outings and her fifth-outing skill in an ace deck.
+      (card.es || []).filter((id) => !(card.n === "Light Hello" && +id === 200272)).forEach((id) => add(id, (EVENT_SKILL_CHANCE[card.r] || 0.5) * (late && late.has(String(id)) ? IT_LATE_CHAIN : 1), 1));
     });
     const list = [];
     p.forEach(([miss, lv, src], id) => {

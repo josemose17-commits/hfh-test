@@ -10,6 +10,7 @@
   const Deck = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
   const Dates = root.UmaDates || (typeof require !== "undefined" ? require("./data/dates.js") : null);
   const CardEvents = root.UmaCardEvents || (typeof require !== "undefined" ? require("./data/card-events.js") : null);
+  const Hello = root.UmaLightHello || (typeof require !== "undefined" ? require("./light-hello.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const STAT_LABELS = { speed: "Speed", stamina: "Stamina", power: "Power", guts: "Guts", wit: "Wit" };
   const MOODS = ["Awful", "Bad", "Normal", "Good", "Great"];
@@ -994,7 +995,7 @@
   // A training gives its main type 60% of the time, its second type 30% and another 10%; a
   // friendship training adds a second type, very likely the one you have least of.
   // expected: what to expect when you haven't set the type: the 60/30/10 split, plus Light
-  // Hello's Training Together event (45% chance of 20 points of your scarcest type). Done adds
+  // Hello's repeat event (an explicit 40% modelling estimate; R uses a +10 floor). Done adds
   // the main type (or what you set) instead.
   function tokenGain(f, state, sc, expected) {
     if (!sc.tokenOf || !sc.tokenOf[f.stat]) return [];
@@ -1020,18 +1021,63 @@
       [0, 1, 2, 3, 4].filter((i) => i !== pri && i !== sec).forEach((i) => out.push({ type: i, amount: amount * 0.1 / 3, est: true, minor: true }));
     }
     const order = [0, 1, 2, 3, 4].sort((a, b) => (have[a] || 0) - (have[b] || 0));
-    if (expected && Array.isArray(f.members) && state.deck && f.members.some((i) => { const sl = state.deck.slots[i]; const c = sl && Deck.card(sl.id); return c && c.n === "Light Hello"; })) {
-      out.push({ type: order[0], amount: 9, est: true, lh: true });
-    }
     const rb = facilityRainbows(f, state) > 0;
     if (rb || set(ex.tok2)) {
       const t2 = set(ex.tokType2) ? +ex.tokType2 : order.find((i) => i !== main);
       out.push({ type: t2, amount: set(ex.tok2) ? +ex.tok2 : amount, est: !set(ex.tok2), second: true });
     }
+    if (expected && Array.isArray(f.members) && state.deck) {
+      const sl = f.members.map((i) => state.deck.slots[i]).find((s) => s && Hello.isHello(Deck.card(s.id)));
+      // The first training has a different fixed event. Bond from unrelated events
+      // is not proof that this first training already happened.
+      if (sl && Hello.hasMet(sl)) {
+        const p = Hello.profile(Deck.card(sl.id), sl.lb);
+        const balances = have.slice();
+        out.forEach((g) => { balances[g.type] += g.amount; });
+        const min = Math.min(...balances);
+        const lows = balances.map((n, i) => n === min ? i : -1).filter((i) => i >= 0);
+        lows.forEach((type) => out.push({ type, amount: p.procRate * p.tokenAmount / lows.length, est: true, lh: true }));
+      }
+    }
     return out;
   }
 
   // ---- Grand Concert songs ----
+  // Record an observed event only. Expected Performance is never added to a run.
+  // Mutable like buySong/buyTechnique; callers can snapshot this for Undo.
+  function recordHelloEvent(state, sc, event) {
+    if (sc.id !== "grandlive" || state.turn < (sc.tokensFrom || 5)) return null;
+    const slots = (state.deck && state.deck.slots) || [];
+    const idx = event.slot != null ? +event.slot : slots.findIndex((s) => s && Hello.isHello(Deck.card(s.id)));
+    const slot = slots[idx], card = slot && Deck.card(slot.id);
+    if (!Hello.isHello(card)) return null;
+    const amount = +event.amount;
+    if (amount !== 20 && !(amount === 10 && card.r === 1)) return null;
+    const tokens = (state.gl && state.gl.tokens) || [0, 0, 0, 0, 0];
+    const lows = tokens.map((n, i) => n === Math.min(...tokens) ? i : -1).filter((i) => i >= 0);
+    const type = event.type != null && event.type !== "" ? +event.type : lows.length === 1 ? lows[0] : -1;
+    if (!Number.isInteger(type) || type < 0 || type > 4) return null;
+    const turn = event.turn != null ? +event.turn : state.turn;
+    if (!Number.isInteger(turn) || turn < 5 || turn > state.turn) return null;
+    const key = turn + ":" + idx;
+    state.gl = state.gl || {};
+    if ((state.gl.helloEvents || []).some((e) => e.key === key)) return null;
+    const p = Hello.profile(card, slot.lb);
+    const cap = tokenCap(Object.assign({}, state, { turn }), sc);
+    const credited = Math.max(0, Math.min(amount, cap - tokens[type]));
+    state.gl.tokens = tokens.slice();
+    state.gl.tokens[type] = tokens[type] + credited;
+    slot.bond = Math.min(100, (slot.bond != null ? slot.bond : Deck.initialBond(card, p.level)) + p.repeat.b);
+    slot.met = true;
+    if (event.mood) state.mood = Math.min(4, state.mood + 1);
+    if (state.trackStats && state.stats && state.stats.guts > 0) state.stats.guts += p.repeat.s[3];
+    state.extras = state.extras || {};
+    if (amount === 20) state.extras.lh20 = true;
+    const entry = { key, turn, card: card.id, amount, credited, type, guts: p.repeat.s[3], sp: p.repeat.sp, mood: event.mood ? 1 : 0, bond: p.repeat.b };
+    state.gl.helloEvents = (state.gl.helloEvents || []).concat([entry]);
+    return entry;
+  }
+
   // Extra Stat Gain songs add a permanent flat bonus right away; Friendship Bonus songs start
   // working after the next live (lessons bought on a live turn count for that live).
   function songBonuses(state, sc) {
@@ -1085,7 +1131,7 @@
     if (ch && ch.event) {
       const ev = ch.event;
       const bits = (ev.mood ? ["mood +" + ev.mood] : []).concat(Object.entries(ev.stats || {}).map(([k, n]) => STAT_LABELS[k] + " +" + n), ev.bond ? ["+" + ev.bond + " bond"] : []);
-      out.push({ turn: ch.from, label: ch.name + "'s first training", gain: bits.join(", ") + " (a little less at lower LB). After that her Training Together event can add 20 of your scarcest token (45% chance).", status: "once" });
+      out.push({ turn: ch.from, label: ch.name + "'s first training", gain: bits.join(", ") + " at SSR LB4 (less at lower LB/R). Later repeat events can add Performance of a scarce type: the coach uses a 40% estimate, with SSR +20 and a conservative R +10 floor; actual results are recorded separately.", status: "once" });
     }
     Object.keys(NEW_YEAR).forEach((k) => {
       const ny = NEW_YEAR[k];
@@ -1601,11 +1647,25 @@
   // ---- Support card events (Umamusume Wiki) ----
   // Each card's chain and other events, with every choice's results. Values listed as a range
   // ("Energy +10-16") go from LB0 to LB4; success/failure results are counted half each.
-  function cardEvents(cardId) {
+  function cardEvents(cardId, lb, scenario) {
     const c = CardEvents && CardEvents.cards && CardEvents.cards[cardId];
     if (!c) return null;
     const list = (ids) => (ids || []).map((id) => Object.assign({ id }, CardEvents.events[id] || { n: "Event " + id }));
-    return { chain: list(c.chain), other: list(c.other) };
+    const out = { chain: list(c.chain), other: list(c.other) };
+    const hp = Hello.profile(Deck.card(cardId), lb == null ? 4 : lb);
+    if (hp) {
+      out.chain = out.chain.map((ev, i) => Object.assign({}, ev, { c: i < 4 ? hp.dates[i].opts : [{ ok: hp.dates[4].opts[0], ng: hp.dates[4].opts[1] }] }));
+      out.other = out.other.map((ev) => {
+        if (ev.id === 809008002) return Object.assign({}, ev, { c: [hp.first] });
+        if (ev.id === 809008001) return Object.assign({}, ev, { c: hp.random.map((o, i) => Object.assign({ t: i ? "A large platter of desserts!" : "Maybe something to boost my energy." }, o)) });
+        if (ev.id === 809008011) return Object.assign({}, ev, { c: hp.newYear(scenario && scenario.id === "grandlive").map((o, i) => Object.assign({ t: i ? "Time to kick back and chow down!" : "...Just one song." }, o)) });
+        if (ev.id === 809008004) return Object.assign({}, ev, { c: [Object.assign({ t: "I'd be glad to!", unlock: true }, hp.unlock), Hello.scale({ t: "Sorry, I'm a little strapped for time...", s: [0, 0, 0, 0, 30], sp: 30, b: -5, h: [[200272, 5]] }, hp.effects)] });
+        if (ev.id === 809008009 || ev.id === 809008010) return Object.assign({}, ev, { c: [hp.ending(ev.id === 809008009)] });
+        if (ev.id === 809008003) return Object.assign({}, ev, { c: [{ ok: Object.assign({ mo: 1, x: "Grand Concert only: observed +20 tokens (R may also grant +10)" }, hp.repeat), ng: Object.assign({ x: "Grand Concert only: observed +20 tokens (R may also grant +10)" }, hp.repeat) }] });
+        return ev;
+      });
+    }
+    return out;
   }
 
   function atLB(v, lb) {
@@ -1664,7 +1724,11 @@
   // Cards in data/dates.js use game8's values for each outing: the coach values every choice
   // (energy, max energy, mood, stats, skill points, hints, curing a bad condition) and picks
   // the best for this turn. Other cards fall back to typical values.
-  const dateCard = (id) => (Dates && Dates.cards && Dates.cards[id]) || null;
+  const dateCard = (id) => {
+    const p = Hello.profile(Deck && Deck.card(id), 4);
+    if (p) return { unscaled: true, page: 473490, dates: p.rawDates, unlock: { name: "Embrace Those Emotions!", keep: p.rawUnlock, lose: { s: [0, 0, 0, 0, 30], sp: 30, b: -5, h: [[200272, 5]] } } };
+    return (Dates && Dates.cards && Dates.cards[id]) || null;
+  };
   const DATE_STATS = ["speed", "stamina", "power", "guts", "wit"];
 
   // Max energy for this career: 100 plus what the outings done so far added (Light Hello's
@@ -1757,6 +1821,7 @@
     if (!Deck || !Deck.baseEffects) return { e: 1, s: 1 };
     const at = (lv) => Deck.baseEffects(sl.card, lv) || {};
     const now = at(sl.level);
+    if (info.unscaled) return { e: 1 + (now[25] || 0) / 100, s: 1 + (now[26] || 0) / 100, floor: true };
     const ref = at(info.lv || 50);
     return {
       e: (1 + (now[25] || 0) / 100) / (1 + (ref[25] || 0) / 100),
@@ -1768,10 +1833,11 @@
     if (!o) return o;
     const out = Object.assign({}, o);
     if (o.opts) out.opts = o.opts.map((x) => scaleDate(x, k));
-    if (o.e > 0 && o.e < 100) out.e = Math.round(o.e * k.e);
-    if (o.s) out.s = o.s.map((g) => (g > 0 ? Math.round(g * k.s) : g));
-    if (o.sp > 0) out.sp = Math.round(o.sp * k.s);
-    if (o.r) out.r = Math.round(o.r * k.s);
+    const round = k.floor ? (n) => Math.floor(n + 1e-9) : Math.round;
+    if (o.e > 0 && o.e < 100) out.e = round(o.e * k.e);
+    if (o.s) out.s = o.s.map((g) => (g > 0 ? round(g * k.s) : g));
+    if (o.sp > 0) out.sp = round(o.sp * k.s);
+    if (o.r) out.r = round(o.r * k.s);
     return out;
   }
 
@@ -1794,7 +1860,7 @@
         const tries = known.opts.map((c) => ({ c, parts: known.roll ? choiceParts(known, ctx) : choiceParts(c, ctx) }))
           .map((x) => Object.assign(x, { value: sumParts(x.parts) })).sort((a, b) => b.value - a.value);
         const pick = known.roll ? { c: known, parts: tries[0].parts, value: tries[0].value } : tries[0];
-        const out = pick.c.roll ? pick.c.opts[0] : pick.c;
+        const out = pick.c.roll ? pick.c.opts[1] : pick.c;
         const notes = ["outing " + n + " of " + info.dates.length + " with " + sl.card.n + ": " + dateText(pick.c)];
         if (!known.roll && tries.length > 1) notes.push("pick the choice that gives that; the other " + (tries.length > 2 ? "choices give " : "one gives ") + tries.slice(1).map((x) => dateText(x.c)).join("; or "));
         if (out.me) notes.push("max energy goes up to " + (ctx.maxE + out.me));
@@ -1805,6 +1871,8 @@
           label: "Outing with " + sl.card.n + " (" + n + "/" + info.dates.length + ")",
           energyDelta: out.e || 0, moodDelta: Math.max(-state.mood, Math.min(4 - state.mood, out.mo || 0)),
           maxEnergyDelta: out.me || 0, statGains,
+          outingRoll: pick.c.roll ? pick.c.opts : null,
+          outingHints: out.h || [],
           notes, parts: pick.parts, value: pick.value
         });
       }
@@ -1918,6 +1986,7 @@
   // Has this deck card trained with you yet? Logged by Done; older saves fall back to its bond.
   function metCard(ctx, slot) {
     const st = (ctx.state.deck && ctx.state.deck.slots[slot.idx]) || {};
+    if (Hello.isHello(slot.card)) return Hello.hasMet(st);
     return !!st.met || slot.bond >= Deck.initialBond(slot.card, slot.level) + BOND_PER_TRAINING_E;
   }
   function chaseSlot(ctx, name) {
@@ -1971,7 +2040,8 @@
       const hers = trains.filter((o) => onTraining(ctx, o, slot.idx)).sort((a, b) => b.value - a.value)[0];
       if (hers) {
         // Her fixed first-training event.
-        const ev = ch.event || {};
+        const hp = Hello.profile(slot.card, (ctx.state.deck.slots[slot.idx] || {}).lb);
+        const ev = hp ? { mood: hp.first.mo, bond: hp.first.b, stats: { speed: hp.first.s[0], guts: hp.first.s[3] } } : ch.event || {};
         let add = 0;
         Object.keys(ev.stats || {}).forEach((k) => { add += ctx.gainValue(k, ev.stats[k]); });
         if (ev.mood && ctx.state.mood < 4) add += ctx.moodStep(ctx.state.mood);
@@ -1982,7 +2052,7 @@
         if (hers.fail <= ctx.state.risk) {
           const top = Math.max.apply(null, options.filter((o) => o !== hers).map((o) => o.value));
           if (hers.value <= top) bump(hers, top - hers.value + 0.1 * typ);
-          hers.notes.unshift(ch.name + " is here for the first time: " + (ch.note || "train with her now, whichever training she's on"));
+          hers.notes.unshift(ch.name + " is here for the first time: " + (hp ? "mood +1, Speed +" + ev.stats.speed + ", Guts +" + ev.stats.guts + ", +10 event bond; this enables her later outing-unlock event" : ch.note || "train with her now, whichever training she's on"));
         } else {
           hers.notes.unshift(ch.name + " is here for the first time, but failure (" + hers.fail + "%) is above your limit");
         }
@@ -2312,7 +2382,7 @@
       else if (rel < 0.25) confidence = "good pick";
     }
     const after = {
-      energy: clamp(Math.round(ctx.E + (best.energyDelta || 0)), 0, ctx.maxE),
+      energy: clamp(Math.round(ctx.E + (best.energyDelta || 0)), 0, ctx.maxE + (best.maxEnergyDelta || 0)),
       mood: clamp(state.mood + (best.moodDelta || 0), 0, 4)
     };
     return {
@@ -2342,7 +2412,14 @@
   // tick Bad condition if it did. No bond, tokens or scenario gains, and it doesn't count
   // toward the facility's level.
   const FAIL_RESULT = { fail: { mood: -1, stat: -5, energy: 0, label: "failed" }, bad: { mood: -3, stat: -10, energy: 10, label: "failed badly" } };
-  function advance(state, scenario, option, result) {
+  function advance(state, scenario, option, result, observed) {
+    if (option.outingRoll) {
+      const index = observed && observed.outing === "great" ? 0 : 1;
+      const outcome = option.outingRoll[index];
+      const gains = {};
+      STATS.forEach((k, i) => { if ((outcome.s || [])[i]) gains[k] = outcome.s[i]; });
+      option = Object.assign({}, option, { energyDelta: outcome.e || 0, moodDelta: outcome.mo || 0, statGains: gains, outingHints: outcome.h || [] });
+    }
     const fr = option.kind === "train" && FAIL_RESULT[result];
     if (fr) {
       option = Object.assign({}, option, {
@@ -2403,6 +2480,11 @@
       sl.bond = Math.min(100, start + (Deck ? Deck.BOND_PER_DATE : 5));
       sl.dates = Object.assign({ unlocked: true, done: 0 }, sl.dates);
       sl.dates.done += 1;
+      if (option.outingHints && option.outingHints.length) {
+        s.gl = s.gl || {};
+        s.gl.hints = s.gl.hints || {};
+        option.outingHints.forEach(([id, lv]) => { s.gl.hints[id] = Math.min(5, (s.gl.hints[id] || 0) + lv); });
+      }
     }
     // Learn deck strength (and the formula's scenario multiplier) from real or formula gains.
     const entered = s.facilities.filter((f) => f.gain > 0);
@@ -3062,7 +3144,7 @@
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, calibSamples, relearnCalib, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, focusWeight, turnsToDebut, applyOpening, NEW_YEAR,
-    songBonuses, hypeStatus, songsLearned, glRewards, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, lessonShop, buyTechnique, buySong, shopSongs, undoBuy
+    songBonuses, hypeStatus, songsLearned, glRewards, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, lessonShop, buyTechnique, buySong, shopSongs, undoBuy, recordHelloEvent
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;

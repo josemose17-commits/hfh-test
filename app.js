@@ -6,6 +6,7 @@
   const PIP_MAX = 5;
 
   const D = window.UmaDeck;
+  const H = window.UmaLightHello;
   const HAS_DATA = !!(D && D.DATA);
   const TODAY = new Date().toISOString().slice(0, 10);
   const APT = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
@@ -502,6 +503,11 @@
     }
 
     $("#songsBody").addEventListener("input", (e) => {
+      if (e.target.dataset.helloMet != null) {
+        const sl = state.deck.slots[+e.target.dataset.helloMet];
+        if (sl) { sl.met = e.target.checked; commit(true); }
+        return;
+      }
       const i = e.target.dataset.tok;
       if (i == null) return;
       state.gl.tokens[+i] = Math.max(0, +e.target.value || 0);
@@ -535,11 +541,19 @@
         if (selected === "" && tied.length !== 1) { flash("Choose the actual awarded type: lowest balances are tied."); return; }
         const type = selected === "" ? tied[0] : +selected;
         delete state.gl.lh20Undo;
-        const before = JSON.stringify(state), prior = tokens[type];
-        tokens[type] = Math.min(E.tokenCap(state, sc), prior + 20);
-        state.extras = state.extras || {}; state.extras.lh20 = true;
-        const after = JSON.stringify(state); state.gl.lh20Undo = {before, after};
-        commit(true); flash("Light Hello: +" + (tokens[type]-prior) + " " + sc.tokens[type]); return;
+        const before = JSON.stringify(state);
+        const amount = +$("#lhAmount").value;
+        const last = (state.log || []).slice(-1)[0];
+        const turn = last && last.kind === "train" && last.turn === state.turn - 1 ? last.turn : state.turn;
+        const recorded = E.recordHelloEvent(state, sc, { amount, type, mood: $("#lhMood").checked, turn });
+        if (!recorded) { flash("No eligible Light Hello event, or it was already recorded for that turn."); return; }
+        const entry = { before, after: "" }; state.gl.lh20Undo = entry;
+        commit(true);
+        // Rendering normalizes a few saved fields. Compare Undo against the
+        // resulting state, rather than the pre-render object.
+        const current = Object.assign({}, state, { gl: Object.assign({}, state.gl) }); delete current.gl.lh20Undo;
+        entry.after = JSON.stringify(current); save();
+        flash("Light Hello: +" + recorded.credited + " " + sc.tokens[type] + ", Guts +" + recorded.guts + ", +7 bond; " + recorded.sp + " SP in game"); return;
       }
       if (e.target.closest("#lh20Undo")) {
         const entry = state.gl.lh20Undo; if (!entry) return;
@@ -603,6 +617,8 @@
       if (e.target.closest("#rcNew")) newCareer($("#rcNew"));
       const fb = e.target.closest("[data-fail]");
       if (fb) { failPick = fb.dataset.fail; if (!failPick) poorPick = false; renderCall(); return; }
+      const ob = e.target.closest("[data-outing-result]");
+      if (ob) { outingPick = ob.dataset.outingResult; renderCall(); return; }
       const ans = e.target.closest("[data-rc-ans]");
       if (ans) { const [key, qid, v] = ans.dataset.rcAns.split("|"); const cur = (((state.runChecks || {})[key] || {}).a || {})[qid]; rcAnswer(key, qid, cur === v ? null : v); return; }
       const cont = e.target.closest("[data-rc-continue]");
@@ -792,15 +808,17 @@
   // whichever training you log, then goes back to success.
   let failPick = "";
   let poorPick = false;
+  let outingPick = "success";
   function done(option) {
     if (!option) return;
     state.example = false;
     const failed = option.kind === "train" ? failPick : "";
     const poor = !!failed && poorPick;
-    state = E.advance(state, scenario(), option, failed || undefined);
+    state = E.advance(state, scenario(), option, failed || undefined, { outing: outingPick });
     if (poor) state.practicePoor = true;
     failPick = "";
     poorPick = false;
+    outingPick = "success";
     openRow = null;
     commit(true);
     const last = state.log[state.log.length - 1];
@@ -1025,13 +1043,21 @@
     const nextR = E.glRewards(state, sc).find((x) => x.status !== "done" && x.status !== "once");
     const mine = Object.entries(gl.songs || {}).map(([id, t]) => [sc.songs.find((x) => x.id === id), t]).filter(([x]) => x).sort((x, y) => x[1] - y[1]);
     const addable = sc.songs.filter((x) => gl.songs[x.id] == null && x.from <= Math.max(state.turn, 5));
+    const helloSlot = state.deck.slots.find((s) => s && H.isHello(D.card(s.id)));
+    const hp = helloSlot && H.profile(D.card(helloSlot.id), helloSlot.lb);
     $("#songSummary").textContent = learnedN + " of 22 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
     $("#songsBody").innerHTML = `
       <div id="glShop"></div>
       <div class="gl-status">${status}</div>
       ${nextR ? `<div class="gl-next"><b>Next: ${esc(nextR.label)}</b>, turn ${nextR.turn}: ${esc(nextR.short || nextR.gain)}</div>` : ""}
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
-      ${state.turn >= (sc.tokensFrom || 5) ? `<div class="row-wrap"><button type="button" class="btn ghost small" id="lh20Add">Light Hello +20 tokens</button><select id="lh20Type" aria-label="Awarded token type"><option value="">Lowest held (auto)</option>${sc.tokens.map((n,i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select>${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo token event</button>' : ""}<span class="mini">Only after the actual event. Choose its type for ties or changed balances. Undo before other changes.</span></div>` : ""}
+      ${state.turn >= (sc.tokensFrom || 5) && hp ? `<details data-keep="hello"${open("hello", false)}><summary>Light Hello · ${D.RARITY[hp.card.r]} LB${helloSlot.lb} · events and value</summary>
+        <p class="mini">Training Effectiveness ${hp.effects[8] || 0}%; normal energy reduction ${hp.effects[28] || 0}%${hp.card.r === 3 ? "; +30 percentage points when she joins a friendship training" : "; no SSR friendship-energy unique"}. Failure Protection ${hp.effects[27]}% reduces the current risk proportionally; it does not remove that many percentage points.</p>
+        <p class="mini">First training: Speed +${hp.first.s[0]}, Guts +${hp.first.s[3]}, mood +1, +10 event bond. Outings still require their separate unlock event. Later token events are random: the coach uses a 40% estimate (published estimates 36–45%)${hp.card.r === 1 ? " and a conservative +10 for R because its +10/+20 mixture is unverified" : ", for +8 expected points"}. Expected points are never added by Done.</p>
+        <label class="chk"><input type="checkbox" data-hello-met="${state.deck.slots.indexOf(helloSlot)}" ${H.hasMet(helloSlot) ? "checked" : ""}> Already had her first-training event</label>
+        <div class="row-wrap"><button type="button" class="btn ghost small" id="lh20Add">Record actual token event</button><select id="lhAmount" aria-label="Observed Light Hello tokens"><option value="20">+20 tokens</option>${hp.card.r === 1 ? '<option value="10">+10 tokens</option>' : ""}</select><select id="lh20Type" aria-label="Awarded token type"><option value="">Lowest held (auto)</option>${sc.tokens.map((n,i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select><label class="chk"><input type="checkbox" id="lhMood">Also gave mood +1</label>${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo token event</button>' : ""}</div>
+        <p class="mini">Record after Done has added the training tokens. Adds Guts +${hp.repeat.s[3]} with stat tracking and +7 event bond; the game also gives ${hp.repeat.sp} SP. Do not add that bond twice. Select the actual token type when balances are tied or have changed. Recorded events: ${(gl.helloEvents || []).length}.</p>
+      </details>` : ""}
       <p class="mini">Done adds each training's tokens; Bought takes a lesson's cost. Cap ${E.tokenCap(state, sc)} for now (+50 after each live). Fix the numbers here if the game shows different ones.</p>
       <div id="glCurrentBudget">${currentSongBudgetHTML(sc)}</div>
       <div class="songs-have"><b>Songs you have</b> ${mine.length ? mine.map(([x, t]) => `<span class="have-chip">${esc(x.name)} <button type="button" class="linkish" data-song-rm="${x.id}" aria-label="Remove ${esc(x.name)}">×</button></span>`).join("") : '<span class="mini">none yet</span>'}
@@ -1501,7 +1527,7 @@
   // A card's training events (Umamusume Wiki): its chain, then its other events, with what each
   // choice gives at this card's LB and the best choice for this turn marked.
   function eventsHTML(c, sl) {
-    const ev = E.cardEvents(c.id);
+    const ev = E.cardEvents(c.id, sl.lb, scenario());
     if (!ev) return "";
     const friend = c.ty === "friend" || c.ty === "group";
     // Friend and group chains are their outings, listed under Outings.
@@ -1532,24 +1558,24 @@
     const info = E.dateCard(c.id);
     if (!info) return `<p class="mini dates-note">No outing data for this card yet; the coach uses typical values.</p>`;
     const u = info.unlock;
+    const k = E.dateScale({ card: c, level: D.levelFor(c, sl.lb) }, info);
     const how = u.auto ? `Outings unlock with the event “${esc(u.name)}” (no choice).`
       : u.both ? `Outings unlock with the event “${esc(u.name)}”, whichever choice you pick.`
-      : `Outings unlock with the event “${esc(u.name)}”: take the choice that gives ${esc(E.dateText(u.keep))}. The other (${esc(E.dateText(u.lose))}) locks them.`;
+      : `Outings unlock with the event “${esc(u.name)}”: take the choice that gives ${esc(E.dateText(E.scaleDate(u.keep, k)))}. The other (${esc(E.dateText(E.scaleDate(u.lose, k)))}) locks them.`;
     const done = (sl.dates && sl.dates.done) || 0;
     const card = { card: c, level: D.levelFor(c, sl.lb) };
-    const k = E.dateScale(card, info);
-    const ev = E.cardEvents(c.id);
+    const ev = E.cardEvents(c.id, sl.lb, scenario());
     const names = ev && ev.chain.length === info.dates.length ? ev.chain.map((e) => e.n) : [];
     const row = (d0, n) => {
       const d = d0 && E.scaleDate(d0, k);
       const text = d ? (d.roll ? esc(E.dateText(d)) : d.opts.map((o) => esc(E.dateText(o))).join(" <i>or</i> ")) : "not listed on game8";
       return (names[n] ? `<b>${esc(names[n])}</b>: ` : "") + text;
     };
-    const lv = "rescaled to this card's LB" + (info.lv ? "" : " (game8 doesn't state its level; taken as full limit break)");
+    const lv = info.unscaled ? "base rewards scaled once with this card's Event Recovery and Event Effectiveness, rounded down" : "rescaled to this card's LB" + (info.lv ? "" : " (game8 doesn't state its level; taken as full limit break)");
     return `<details class="dates"><summary>Outings (${info.dates.length})</summary>
       <p class="mini">${how}${u.note ? " " + esc(u.note) : ""}</p>
       <ol class="dates-list">${info.dates.map((d, n) => `<li class="${n < done ? "done" : n === done ? "next" : ""}">${row(d, n)}</li>`).join("")}</ol>
-      <p class="mini">Values from <a href="https://game8.jp/umamusume/${info.page}" target="_blank" rel="noopener">game8</a>, ${lv}${info.partial ? "; game8 lists only some of this card's outings" : ""}.</p>
+      <p class="mini">Values from <a href="${info.unscaled ? "https://gamewith.jp/uma-musume/article/show/360446" : "https://game8.jp/umamusume/" + info.page}" target="_blank" rel="noopener">${info.unscaled ? "GameWith (cross-checked with game8 and Wiki)" : "game8"}</a>, ${lv}${info.partial ? "; game8 lists only some of this card's outings" : ""}.</p>
     </details>`;
   }
 
@@ -1762,7 +1788,10 @@
     $("#call").className = "panel call k-" + kind + (a.stat ? " s-" + a.stat : "");
     const runBox = runBoxHTML(E.runCheck(state, sc));
     const vs = rec.versus ? `<div class="versus">Beats <b>${esc(rec.versus.label)}</b> by ${score(rec.versus.gap)} points, mostly on ${esc(rec.versus.because)}.</div>` : "";
-    const after = a.forced ? "" : `<div class="after">After this: energy about <b>${rec.after.energy}</b>, mood <b>${E.MOODS[rec.after.mood]}</b>.</div>`;
+    const outcome = a.outingRoll && a.outingRoll[outingPick === "great" ? 0 : 1];
+    const afterEnergy = outcome ? Math.min((state.maxEnergy || 100) + (outcome.me || 0), state.energy + (outcome.e || 0)) : rec.after.energy;
+    const afterMood = outcome ? Math.min(4, state.mood + (outcome.mo || 0)) : rec.after.mood;
+    const after = a.forced ? "" : `<div class="after">After this: energy about <b>${afterEnergy}</b>, mood <b>${E.MOODS[afterMood]}</b>.</div>`;
     $("#call").innerHTML = `
       <div class="eyebrow">${esc(rec.turn.text)} · ${esc(rec.phase.name)}</div>
       <div class="headline">${a.prefix.map((p) => `<span class="pre">${esc(p)} →</span>`).join(" ")}<span>${esc(a.label)}</span></div>
@@ -1776,6 +1805,7 @@
       ${rec.events.length ? `<div class="events">${rec.events.map((e) => `<div class="ev"><b>${esc(e.label)}</b> ${esc(e.tip || "")}</div>`).join("")}</div>` : ""}
       <div class="phase"><b>${esc(rec.phase.name)}:</b> ${esc(rec.phase.tip)}</div>
       </details>
+      ${a.outingRoll ? `<div class="fail-row" role="radiogroup" aria-label="Outing result"><span class="mini">Actual outing result:</span>${[["success", "Success"], ["great", "Great success"]].map(([v, label]) => `<button type="button" class="btn ghost small" data-outing-result="${v}" role="radio" aria-checked="${outingPick === v}">${label}</button>`).join("")}</div><p class="mini">Select the game's result before Done. The energy forecast follows your selected outcome; scoring averages both outcomes with an assumed 50/50 split.</p>` : ""}
       <div class="fail-row" role="radiogroup" aria-label="Training result"><span class="mini">Training result:</span>${[["", "Success", ""], ["fail", "Failed", "Get Well Soon!: mood -1, -5 to that stat"], ["bad", "Failed badly", "Don't Overdo It! (20%+ failure only): mood -3, -10 to that stat and 2 random stats"]].map(([v, l, t]) => `<button type="button" class="btn ghost small" role="radio" data-fail="${v}" aria-checked="${failPick === v}"${t ? ` title="${esc(t)}"` : ""}>${l}</button>`).join("")}
         ${failPick && !state.practicePoor ? `<label class="chip-toggle"><input type="checkbox" id="gotPoor" ${poorPick ? "checked" : ""}> Got Practice Poor</label>` : ""}</div>
       <div class="actions">
@@ -1867,7 +1897,7 @@
   function cm() {
     if (!state.cm) state.cm = {};
     const c = state.cm;
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, sq: "", sfilter: "all", globalSkills: true };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, sq: "", sfilter: "all", globalSkills: true, helloProcRate: "0.4", helloUnlockRate: "0.15" };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
     return c;
@@ -2012,7 +2042,7 @@
 
   function optKey() {
     const c = cm();
-    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.helloProcRate, c.helloUnlockRate, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer() {
@@ -2034,7 +2064,8 @@
       let est = fit ? fit.after : null;
       if (!est) {
         try {
-          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare, runs: 16 });
+          const sv = skillMap(p.id, c.style);
+          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare, runs: 16, skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate });
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
@@ -2057,7 +2088,7 @@
         if (!tg) { done(r, opts, null); return; }
         // Target stats: start from Euophrys' pick and swap cards toward the targets, a slot at
         // a time so the page can show progress.
-        const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: tg, caps: E.capsFor(state, scenario()), raceShare };
+        const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate };
         const search = OPT.targetSearch(opts, sim, r.cards, pool, bp);
         const tick = () => {
           try {
@@ -2210,6 +2241,7 @@
       <span class="mini"><b>Target stats</b> (optional). Blank: Euophrys' pick. Set any, and the optimizer simulates careers and swaps cards until the predicted stats come as close to your targets as it can, keeping good skills and your must-haves. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
       <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${bt[s]}"></label>`).join("")}</div>
       ${coach || cmTargets(c) || parent ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
+      ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Grand Concert simulation assumptions</summary><div class="row-wrap"><label class="field"><span>Light Hello repeat-event estimate</span><select data-cm="helloProcRate">${[["0.36", "36% (lower estimate)"], ["0.4", "40% (default estimate)"], ["0.45", "45% (upper estimate)"]].map(([v, l]) => `<option value="${v}" ${c.helloProcRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Outing unlock model, after meeting and bond 60</span><select data-cm="helloUnlockRate">${[["0.05", "5% per turn (slow sensitivity check)"], ["0.15", "15% per turn (default assumption)"], ["0.3", "30% per turn (fast sensitivity check)"]].map(([v, l]) => `<option value="${v}" ${c.helloUnlockRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">These are model assumptions, not confirmed game probabilities. Compare results across settings. The turn coach only uses outings once you mark the actual unlock; expected token events never change its saved balances.</p></details>` : ""}
     </div>`;
   }
 
@@ -2316,9 +2348,11 @@
         <li>Available training/rest turns: ${count(cal && cal.freeTurns)}.</li>
         <li>Optional races per career: ${count(est.races)}.</li>
         <li>Rest turns per career: ${count(est.rests)}.</li>
+        ${est.grandConcert ? `<li>Light Hello outings: ${count(est.outings)}; ordinary Recreation: ${count(est.recreations)}.</li>` : ""}
       </ul>
       ${ready ? `<p class="mini">These counts come from the returned simulation. Available turns can be used for training, rest or optional racing; they are not guaranteed trainings.</p>` : `<p class="mini short">Do not infer a correct calendar from the predicted stats alone. This optimizer has not supplied the calendar diagnostics; it may be an older build or a scenario without this instrumentation.</p>`}
       ${cal ? `<p class="mini">Model assumptions: ${[cal.requiredRaceResult, cal.randomGoalStats, cal.choiceAndFanGoals, cal.rewards].filter(Boolean).map(esc).join("; ")}.</p>` : ""}
+      ${est.grandConcert ? `<p class="mini"><b>Grand Concert / Light Hello:</b> ${count(est.grandConcert.songs)} songs, ${count(est.grandConcert.techniques)} techniques, ${count(est.grandConcert.greatConcerts)} Great Success concerts. Extra Hello Performance: ${count(est.grandConcert.helloTokens)}; energy saved on training: ${count(est.grandConcert.helloEnergySaved)}; outing energy actually recovered: ${count(est.grandConcert.helloEnergyRecovered)} (${count(est.grandConcert.helloEnergyWasted)} lost at the cap). Fifth outing completed in ${Math.round(est.grandConcert.helloCompletions * 100)}% of runs; 18-song deadline reached in ${Math.round(est.grandConcert.special * 100)}%.</p><p class="mini">Event rate used: ${Math.round(est.grandConcert.helloProcRate * 100)}%. Outing unlock assumption: ${Math.round(est.grandConcert.helloUnlockRate * 100)}% per eligible turn. Shop and policy estimates can change deck rankings. Guest placements, support-event-frequency song effects and random mood drops are still omitted.</p>` : ""}
     </details>`;
   }
 
@@ -2336,7 +2370,7 @@
     const parent = r.goal === "ace" || r.goal === "debuff";
     const blue = (x) => (x > 1100 ? 10 : x >= 600 ? 5 : 0);
     return `<div class="predicted">
-      <b>${f ? "Predicted stats vs your targets" : "Predicted stats"}</b> <span class="mini">(average of 16 simulated careers${f ? "; rows: predicted, target, difference" : ""})</span>
+      <b>${f ? "Predicted stats vs your targets" : "Predicted stats"}</b> <span class="mini">(average of ${r.est.runs || 16} simulated careers${f ? "; rows: predicted, target, difference" : ""})</span>
       <table class="pred"><thead><tr>${E.STATS.map((s) => `<th>${E.STAT_LABELS[s]}</th>`).join("")}</tr></thead>
         <tbody><tr>${E.STATS.map((_, i) => cell(i)).join("")}</tr>
         ${parent ? `<tr class="blue-row">${E.STATS.map((_, i) => `<td class="num"><span class="mini">3★ ${blue(r.est.stats[i])}%</span></td>`).join("")}</tr>` : ""}</tbody></table>
@@ -2344,8 +2378,8 @@
       ${f ? `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${f.swaps.length ? " Swapped for your targets: " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : " Euophrys' pick was already the closest."}</p>` : ""}
       ${simulationDiagnosticsHTML(r)}
       <details class="pred-help"><summary>What the predicted stats include</summary>
-        <p class="mini"><b>Included:</b> your trainee's starting stats and growth bonuses (100 each without a trainee); every training turn up to the finale, with your cards dealt onto trainings by their specialty priority and the best training picked for your targets each turn (rest when energy runs low, failures by energy); the game's training formula with friendship at bond 80+, training effectiveness, stat bonuses, mood effect and unique effects; facility levels (+1 per 4 trainings, level 5 at summer camp); bonds (+7 per training, +5 per hint, plus card events); each card's event stats, skill points and energy; about 120 per stat from random events; ${r.est.calendarAssumptions ? "scheduled goal and URA races with winning rewards and Race Bonus; optional races: " + (typeof r.est.races === "number" ? Math.round(r.est.races * 100) / 100 : "not reported") + " per career" : "optional races on " + (r.independent ? "about 1 turn in 4 (a G1-heavy Independent Training agenda)" : "about 1 turn in 10 after the debut (more in Trackblazer)") + " with your race bonus"}; half gains past 1200; your stat caps with sparks; a flat multiplier for the scenario's own bonuses.</p>
-        <p class="mini"><b>Not included, so add these yourself:</b> inheritance (the two inspiration events from your parents' sparks), ${r.est.calendarAssumptions ? "separate career-end and secret-event rewards" : "goal and finale race rewards"}, friend card outings, New Year events, hint events' stats, scenario mechanics beyond the flat multiplier (Grand Concert songs, items, Overdrive and so on), and mood drops (it assumes Great all career). These are simplified estimates, not guaranteed results. Missing mechanics can change both the predicted stats and how decks compare.</p>
+        <p class="mini"><b>Included:</b> your trainee's starting stats and growth bonuses (100 each without a trainee); every training turn up to the finale, with your cards dealt onto trainings by their specialty priority and the best training picked for your targets each turn (rest when energy runs low, failures by energy); the game's training formula with friendship at bond 80+, training effectiveness, stat bonuses, mood effect and unique effects; facility levels (+1 per 4 trainings, level 5 at summer camp); bonds (+7 per training, +5 per hint, plus card events); each card's event stats, skill points and energy; about 120 per stat from random events; ${r.est.calendarAssumptions ? "scheduled goal and URA races with winning rewards and Race Bonus; optional races: " + (typeof r.est.races === "number" ? Math.round(r.est.races * 100) / 100 : "not reported") + " per career" : "optional races on " + (r.independent ? "about 1 turn in 4 (a G1-heavy Independent Training agenda)" : "about 1 turn in 10 after the debut (more in Trackblazer)") + " with your race bonus"}; half gains past 1200; your stat caps with sparks; ${r.est.grandConcert ? "Grand Concert Performance, sampled lesson shops, song mastery gains, delayed friendship/specialty buffs, concerts, and Light Hello's first/repeat/unlock events, five outings, max energy and completion-dependent ending" : "a flat multiplier for the scenario's own bonuses"}.</p>
+        <p class="mini"><b>Not included, so add these yourself:</b> inheritance (the two inspiration events from your parents' sparks), ${r.est.calendarAssumptions ? "separate career-end and secret-event rewards" : "goal and finale race rewards"}, ${r.est.grandConcert ? "other Friend/Group outings, guest placements, support-event-frequency song effects, hint-event stats and random mood drops (Grand Concert starts at Normal mood and uses Recreation/Hello to raise it)" : "friend card outings, New Year events, hint-event stats, scenario mechanics beyond the flat multiplier, and mood drops (it assumes Great all career)"}. These are simplified estimates, not guaranteed results. Missing mechanics can change both the predicted stats and how decks compare.</p>
       </details>
     </div>`;
   }

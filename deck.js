@@ -50,6 +50,10 @@
   }
 
   function combine(id, a, b) {
+    // Energy reductions add; failure protection multiplies the remaining risk.
+    // A 10% normal reduction and Light Hello's 30-point unique mean 40%, not 43%.
+    if (+id === 28) return Math.min(100, a + b);
+    if (+id === 27) return a + b - a * b / 100;
     const meta = DATA && DATA.effects[id];
     if (meta && meta.c === "mult") return a * b / 100 + a + b;
     return a + b;
@@ -189,7 +193,7 @@
     let sp = 0;
     let all = 0;
     let failMult = 1;
-    let costMult = 1;
+    let costDown = 0;
     let witRecovery = 0;
     const bonus = [0, 0, 0, 0, 0];
     const rainbowCards = [];
@@ -206,7 +210,7 @@
       all += eff[41] || 0;
       for (let i = 0; i < 5; i++) bonus[i] += eff[3 + i] || 0;
       if (eff[27]) failMult *= 1 - eff[27] / 100;
-      if (eff[28]) costMult *= 1 - eff[28] / 100;
+      costDown += eff[28] || 0;
     });
     const moodCoef = MOOD_COEF[o.mood != null ? o.mood : 2];
     const moodMult = 1 + (moodCoef > 0 ? moodCoef * (1 + me / 100) : moodCoef);
@@ -223,7 +227,7 @@
     });
     const skill = Math.floor((row[5] + sp) * common) + (flat.sp || 0);
     const baseEnergy = row[6];
-    const energy = baseEnergy < 0 ? (baseEnergy - 1.5 * (L - 1)) * costMult : baseEnergy + witRecovery;
+    const energy = baseEnergy < 0 ? Math.floor((baseEnergy - 1.5 * (L - 1)) * Math.max(0, 1 - costDown / 100)) : baseEnergy + witRecovery;
     return {
       gains,
       total: gains.reduce((a, b) => a + b, 0),

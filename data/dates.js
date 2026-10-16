@@ -64,18 +64,8 @@
           ] }
         ]
       },
-      // SSR Light Hello (from the GROUND UP)
-      30052: {
-        page: 473490, lv: 50,
-        unlock: { name: "想いの力、受け止めて……！", keep: { e: 24, mo: 1, s: [9, 0, 0, 9, 0], b: 5 }, lose: { s: [0, 0, 0, 0, 40], sp: 40, b: -5, h: [[200272, 5]] } },
-        dates: [
-          { opts: [{ e: 40, me: 4, mo: 1, b: 5 }] },
-          { opts: [{ e: 40, mo: 1, s: [0, 0, 0, 13, 0], b: 5 }] },
-          { opts: [{ e: 80, mo: 1, b: 5 }, { mo: 1, s: [20, 0, 0, 20, 0], b: 5 }] },
-          { opts: [{ e: 48, mo: 1, s: [0, 0, 0, 13, 0], b: 5 }] },
-          { roll: true, p: 0.5, opts: [{ e: 30, mo: 1, s: [0, 0, 0, 10, 0], b: 5, h: [[201662, 3]] }, { e: 20, s: [5, 0, 0, 5, 0], b: 5, h: [[201662, 1]] }] }
-        ]
-      },
+      // Both Light Hello cards use the shared, unscaled events in light-hello.js.
+      // engine.dateCard supplies those here instead of an inconsistent LB4 table.
       // SR Aoi Kiryuin
       20021: {
         page: 372396, lv: null,
