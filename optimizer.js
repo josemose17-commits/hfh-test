@@ -10,6 +10,8 @@
 (function (root) {
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
   const E = root.UmaEngine || (typeof require !== "undefined" ? require("./engine.js") : null);
+  const H = root.UmaLightHello || (typeof require !== "undefined" ? require("./light-hello.js") : null);
+  const GC = root.UmaGrandConcert || (typeof require !== "undefined" ? require("./grand-concert.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const SP_VALUE = 0.35;
   // Value points per length (L) of race gain. Roughly what 1 L of speed stat costs, and in line
@@ -63,7 +65,7 @@
     const calendar = sc.id === "grandlive" ? grandConcertCalendar(opts) : null;
     if (calendar) { turns.length = 0; calendar.forEach(day => turns.push(day.turn)); }
     const camp = new Set(E.campTurns(sc));
-    const boost = E.scenarioBoost({ fcal: [] }, sc);
+    const boost = sc.id === "grandlive" ? 1 : E.scenarioBoost({ fcal: [] }, sc);
     const t = opts.trainee ? D.trainee(opts.trainee) : null;
     return {
       sc, w: b.w, target, caps, turns, camp, boost, calendar,
@@ -76,6 +78,8 @@
       known: new Set((t ? [].concat(t.us || [], t.is || [], t.as || []) : []).map(String)),
       runs: opts.runs || 10,
       seed: opts.seed || 12345,
+      helloProcRate: opts.helloProcRate != null ? Math.max(0, Math.min(1, +opts.helloProcRate)) : 0.4,
+      helloUnlockRate: opts.helloUnlockRate != null ? Math.max(0, Math.min(1, +opts.helloUnlockRate)) : 0.15,
     };
   }
 
@@ -108,8 +112,19 @@
   // Effects of a card in a situation, memoised: the same few situations repeat every turn.
   function makeEffects() {
     const memo = new Map();
+    const dependencies = new Map();
     return (m, sit) => {
-      const key = m.card.id + "|" + m.level + "|" + (m.bond >= 100 ? 2 : m.bond >= 80 ? 1 : 0) + "|" + sit.facStat + "|" + sit.members + "|" + sit.facilityLevel + "|" + (sit.rainbow ? 1 : 0);
+      const cardKey = m.card.id + "|" + m.level;
+      if (!dependencies.has(cardKey)) dependencies.set(cardKey, D.conditionalUniques(m.card, m.level));
+      const unique = dependencies.get(cardKey);
+      const dynamic = unique.map((u) => {
+        if (u.type === 101 || u.type === 102) return m.bond >= u.value ? 1 : 0;
+        if (u.type === 107 || u.type === 114) return sit.energy;
+        if (u.type === 108) return sit.maxEnergy;
+        if (u.type === 109) return Math.floor(sit.totalBond / u.value_1);
+        return "";
+      }).join(":");
+      const key = cardKey + "|" + dynamic + "|" + sit.facStat + "|" + sit.members + "|" + sit.facilityLevel + "|" + (sit.rainbow ? 1 : 0);
       let e = memo.get(key);
       if (!e) {
         e = D.effectsIn(m.card, m.level, Object.assign({ bond: m.bond }, sit));
@@ -122,22 +137,23 @@
   // Same formula as deck.js trainingGain, using memoised effects.
   function gain(ctx, fx, row, facStat, members, L, mood) {
     const n = members.length;
-    let fm = 1, te = 0, me = 0, sp = 0, all = 0, failMult = 1, costMult = 1, witRec = 0;
+    let fm = 1, te = 0, me = 0, sp = 0, all = 0, failMult = 1, costDown = 0, witRec = 0;
     const bonus = [0, 0, 0, 0, 0];
     let anyRainbow = false;
     for (let k = 0; k < n; k++) if (D.isRainbow(members[k].card, members[k].bond, facStat)) { anyRainbow = true; break; }
     let rainbows = 0;
     for (let k = 0; k < n; k++) {
       const m = members[k];
-      const eff = fx(m, { facStat, members: n, facilityLevel: L, energy: 60, maxEnergy: 100, deckTypes: ctx.deckTypes, totalBond: 300, rainbow: anyRainbow });
+      const eff = fx(m, { facStat, members: n, facilityLevel: L, energy: ctx.energy != null ? ctx.energy : 60, maxEnergy: ctx.maxEnergy || 100, deckTypes: ctx.deckTypes, totalBond: ctx.totalBond != null ? ctx.totalBond : 300, rainbow: anyRainbow });
       if (D.isRainbow(m.card, m.bond, facStat)) { fm *= 1 + (eff[1] || 0) / 100; rainbows++; if (facStat === "wit") witRec += eff[31] || 0; }
       if (eff[27]) failMult *= 1 - eff[27] / 100;
-      if (eff[28]) costMult *= 1 - eff[28] / 100;
+      costDown += eff[28] || 0;
       te += eff[8] || 0; me += eff[2] || 0; sp += eff[30] || 0; all += eff[41] || 0;
       for (let i = 0; i < 5; i++) bonus[i] += eff[3 + i] || 0;
     }
     const moodCoef = [-0.2, -0.1, 0, 0.1, 0.2][mood];
     const moodMult = 1 + (moodCoef > 0 ? moodCoef * (1 + me / 100) : moodCoef);
+    if (rainbows && ctx.live) fm *= 1 + ctx.live.friendship / 100;
     const common = fm * moodMult * (1 + te / 100) * (1 + 0.05 * n);
     const mainIdx = STATS.indexOf(facStat);
     const out = [0, 0, 0, 0, 0];
@@ -146,14 +162,16 @@
       if (!(b > 0)) continue;
       const lvAdd = i === mainIdx ? L - 1 : Math.floor((L - 1) / 2);
       // The game caps one training's gain per stat at 100; scenario bonuses come on top.
-      out[i] = Math.min(100, Math.floor((b + lvAdd + bonus[i] + all) * common * (1 + (ctx.growth[i] || 0) / 100))) * ctx.boost;
+      out[i] = Math.min(100, Math.floor((b + lvAdd + bonus[i] + all) * common * (1 + (ctx.growth[i] || 0) / 100))) * ctx.boost + (ctx.live && i === mainIdx ? ctx.live.extra[i] : 0);
     }
-    const energy = row[6] < 0 ? (row[6] - 1.5 * (L - 1)) * costMult : row[6] + witRec;
-    return { g: out, sp: (row[5] + sp) * common * ctx.boost, rainbows, energy, failMult };
+    const baseEnergy = row[6] - 1.5 * (L - 1);
+    const energy = row[6] < 0 ? Math.floor(baseEnergy * Math.max(0, 1 - costDown / 100)) : row[6] + witRec;
+    return { g: out, sp: Math.floor((row[5] + sp) * common) * ctx.boost + (ctx.live ? ctx.live.extraSp : 0), rainbows, energy, failMult };
   }
 
   // Simulates `runs` careers with these cards. cards: [{ card, lb }].
   function simulate(ctx, cards) {
+    ctx = Object.assign({}, ctx);
     const inputCards = cards.slice();
     cards = cards.slice().sort((a,b) => Number(a.card.id) - Number(b.card.id) || Number(a.lb) - Number(b.lb));
     const fx = makeEffects();
@@ -161,7 +179,8 @@
       const level = D.levelFor(c.card, c.lb);
       const base = D.baseEffects(c.card, level);
       const spec = c.card.ty === "friend" || c.card.ty === "group" ? 0 : (base[19] || 0);
-      return { card: c.card, level, base, spec, init: D.initialBond(c.card, level), ev: D.eventRewards(c.card), hintRate: HINT_CHANCE * (1 + (base[18] || 0) / 100), hintLv: 1 + (base[17] || 0) };
+      const hello = ctx.sc.id === "grandlive" ? H.profile(c.card, c.lb) : null;
+      return { card: c.card, level, base, spec, hello, init: D.initialBond(c.card, level), ev: hello ? { stats: [0, 0, 0, 0, 0], sp: 0, energy: 0, bond: 0 } : D.eventRewards(c.card), hintRate: HINT_CHANCE * (1 + (base[18] || 0) / 100), hintLv: 1 + (base[17] || 0) };
     });
     ctx.deckTypes = new Set(deck.map((d) => d.card.ty)).size;
     // Cards' starting bonuses: Initial Speed..Wit (effects 9-13) and Initial Skill Points (32).
@@ -175,16 +194,44 @@
     const hints = deck.map(() => 0);
     const bondAt = deck.map(() => 0);
     const train = [0, 0, 0, 0, 0];
-    let rests = 0, races = 0, fails = 0, requiredRaces = 0;
+    let rests = 0, races = 0, fails = 0, requiredRaces = 0, outings = 0, recreations = 0;
+    const liveTotals = { songs: 0, techniques: 0, greatConcerts: 0, lessonEnergy: 0, helloTokens: 0, helloEvents: 0, helloTrainings: 0, helloOutings: 0, helloEnergyRecovered: 0, helloEnergyWasted: 0, helloEnergySaved: 0, helloCompletions: 0, helloUnlocks: 0, lyrics: 0, special: 0 };
+    const earnedTokens = [0, 0, 0, 0, 0], spentTokens = [0, 0, 0, 0, 0], finalTokens = [0, 0, 0, 0, 0];
+    const helloSkillEvents = new Map();
     const scheduled = new Map((ctx.calendar || []).map(day => [day.turn, day]));
     for (let run = 0; run < R; run++) {
       const rand = rng(ctx.seed + run * 7919);
       const x = ctx.start.map((v, i) => Math.min(ctx.caps[STATS[i]], v + initial[i]));
       let sp = 120 + initialSp;
       let energy = 100;
+      let maxEnergy = 100;
+      let mood = ctx.sc.id === "grandlive" ? 2 : 4;
       let typ = 0;
       const bond = deck.map((d) => d.init);
       const count = [0, 0, 0, 0, 0];
+      const eventRand = rng((ctx.seed + run * 7919) ^ 0x537f82);
+      const live = ctx.sc.id === "grandlive" ? GC.create(ctx, rng((ctx.seed + run * 7919) ^ 0x68e31d)) : null;
+      const hello = deck.map((d) => d.hello ? { p: d.hello, met: false, metTurn: 0, unlocked: false, done: 0, hints: {} } : null);
+      ctx.live = live && live.state;
+      const applyEvent = (event) => {
+        if (event.me) maxEnergy += event.me;
+        for (let i = 0; i < 5; i++) if ((event.s || [])[i]) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + event.s[i]);
+        sp += event.sp || 0;
+        const before = energy;
+        energy = Math.max(0, Math.min(maxEnergy, energy + (event.e || 0)));
+        mood = Math.max(0, Math.min(4, mood + (event.mo || 0)));
+        return energy - before;
+      };
+      const finishTurn = (turn) => {
+        if (!live) return;
+        hello.forEach((h, k) => {
+          if (!h || !h.met || h.unlocked || h.metTurn >= turn || bond[k] < 60) return;
+          if (eventRand() < ctx.helloUnlockRate) { h.unlocked = true; applyEvent(h.p.unlock); bond[k] = Math.min(100, bond[k] + h.p.unlock.b); liveTotals.helloUnlocks++; }
+        });
+        live.shop(turn, energy, maxEnergy, applyEvent);
+        live.end(turn, applyEvent);
+        if (turn === 24) deck.forEach((d, k) => { bondAt[k] += bond[k]; });
+      };
       // Card events: bond arrives over the first ~60% of the career; stats, SP and energy
       // are spread over the whole run. Effect size up (effect 26) scales event stats.
       const eventBond = deck.map((d) => d.ev.bond / Math.max(1, ctx.turns.length * 0.6));
@@ -201,7 +248,19 @@
         deck.forEach((d, k) => { bond[k] = Math.min(100, bond[k] + eventBond[k]); });
         for (let i = 0; i < 5; i++) x[i] += (EVENT_STATS + evStats[i]) / ctx.turns.length;
         sp += evSp / ctx.turns.length;
-        energy = Math.min(100, energy + evEnergy / ctx.turns.length);
+        energy = Math.min(maxEnergy, energy + evEnergy / ctx.turns.length);
+        if (live) {
+          live.start(turn, applyEvent);
+          if (turn === 25 || turn === 49) applyEvent({ e: E.NEW_YEAR[turn] ? E.NEW_YEAR[turn].e : 20 });
+          if (turn === 25) hello.forEach((h, k) => {
+            if (!h || !h.unlocked) return;
+            const options = h.p.newYear(true);
+            const chosen = energy < maxEnergy - 15 ? options[1] : options[0];
+            applyEvent(chosen); bond[k] = Math.min(100, bond[k] + chosen.b);
+            (chosen.h || []).forEach(([id, lv]) => { h.hints[id] = lv; });
+          });
+          live.shop(turn, energy, maxEnergy, applyEvent);
+        }
         const day = scheduled.get(turn);
         if (day && day.kind === "race") {
           // Conditional on winning: random rewarded stats are represented by their expectation.
@@ -211,6 +270,7 @@
           sp += Math.floor(day.sp * multiplier + 1e-9);
           energy = Math.max(0, energy - day.energy);
           requiredRaces++;
+          finishTurn(turn);
           continue;
         }
         // Optional races: stats and SP, raised by the deck's race bonus, for some energy.
@@ -219,13 +279,15 @@
           sp += RACE_REWARD.sp * (1 + raceBonus / 100);
           energy = Math.max(0, energy - 15);
           races++;
+          finishTurn(turn);
           continue;
         }
         // Deal the cards onto trainings.
         const at = [[], [], [], [], []];
         deck.forEach((d, k) => {
+          if (d.hello && turn < 5) return;
           const own = STATS.indexOf(d.card.ty);
-          const wOwn = own >= 0 ? 100 + d.spec : 100;
+          const wOwn = own >= 0 ? 100 + d.spec + (live ? live.state.specialty : 0) : 100;
           const sum = wOwn + 400 + ABSENT_WEIGHT;
           let r = rand() * sum;
           for (let f = 0; f < 5; f++) {
@@ -236,41 +298,127 @@
         const camp = ctx.camp.has(turn);
         // Energy is worth what it saves: a rest turn (no training) buys about 52 of it.
         const lambda = (typ || 20) / 52;
-        let best = -1, bestV = lambda * (Math.min(100, energy + 52) - energy), bestG = null, bestFail = 0;
+        let best = -1, bestV = lambda * (Math.min(maxEnergy, energy + 52) - energy), bestG = null, bestFail = 0;
         let bestRaw = 0;
+        let bestTokens = [], bestOuting = null, doRecreation = false, bestHelloSaving = 0;
+        const moodValue = (delta) => live ? Math.min(4 - mood, delta) * 0.1 * (typ || 25) * Math.min(10, ctx.turns.length - ti) : 0;
+        if (live && mood < 4) {
+          const v = lambda * Math.min(10, maxEnergy - energy) + moodValue(1);
+          if (v > bestV) { bestV = v; doRecreation = true; }
+        }
+        if (live && !camp) hello.forEach((h, k) => {
+          if (!h || !h.unlocked || h.done >= 5) return;
+          const d = h.p.dates[h.done];
+          const value = (o) => Math.min(maxEnergy + (o.me || 0) - energy, o.e || 0) * lambda + moodValue(o.mo || 0) + (o.s || []).reduce((a, n, i) => a + n * pointValue(ctx, STATS[i], x[i]), 0) + (o.sp || 0) * SP_VALUE;
+          const options = d.roll ? [{ o: d.opts[1], value: d.p * value(d.opts[0]) + (1 - d.p) * value(d.opts[1]) }] : d.opts.map((o) => ({ o, value: value(o) }));
+          const pick = options.sort((a, b) => b.value - a.value)[0];
+          // Finishing enables her fifth-outing skill; give earlier outings a
+          // modest planning value as the number of remaining free turns shrinks.
+          const L = ctx.skills[h.p.skill];
+          const hintSurplus = L != null ? Math.max(0, L * L_VALUE - (ctx.costs[h.p.skill] || D.skillCost(h.p.skill) || 160) * 0.8 * SP_VALUE) : 0;
+          const complete = h.p.ending(true), incomplete = h.p.ending(false);
+          const endingValue = complete.s.reduce((a, n, i) => a + (n - incomplete.s[i]) * pointValue(ctx, STATS[i], x[i]), 0) + (complete.sp - incomplete.sp) * SP_VALUE;
+          const completion = (hintSurplus + endingValue) / (5 - h.done) * Math.min(2, 1 + 10 / Math.max(1, 78 - turn)) + (h.done === 0 ? 3 : 0);
+          if (pick.value + completion > bestV) { bestV = pick.value + completion; bestOuting = { h, k, d, outcome: pick.o }; doRecreation = false; }
+        });
+        ctx.energy = energy; ctx.maxEnergy = maxEnergy; ctx.totalBond = bond.reduce((a, n) => a + n, 0);
         for (let f = 0; f < 5; f++) {
           const L = camp ? 5 : Math.min(5, 1 + Math.floor(count[f] / 4));
           const members = at[f].map((k) => ({ card: deck[k].card, level: deck[k].level, bond: bond[k] }));
-          const g = gain(ctx, fx, ctx.sc.train[STATS[f]], STATS[f], members, L, 4);
+          const g = gain(ctx, fx, ctx.sc.train[STATS[f]], STATS[f], members, L, mood);
           let v = g.sp * SP_VALUE;
           for (let i = 0; i < 5; i++) v += trained(x[i], g.g[i]) * pointValue(ctx, STATS[i], x[i]);
           const raw = v;
+          const tok = live ? live.training(turn, STATS[f], L, members, g.rainbows) : [];
+          if (live) v += live.tokenValue(tok);
+          at[f].forEach((k) => {
+            const h = hello[k];
+            if (!h) return;
+            if (!h.met) v += h.p.first.s.reduce((a, n, i) => a + n * pointValue(ctx, STATS[i], x[i]), 0) + moodValue(1) + 10;
+            else if (turn <= 72) v += ctx.helloProcRate * live.tokenValue([{ type: live.low(), amount: h.p.tokenAmount }]);
+          });
           // Early on, raising bonds pays off later.
           const early = Math.max(0, 1 - turn / 40);
           at[f].forEach((k) => { if (bond[k] < 80 && deck[k].card.ty !== "friend") v += early * 6; });
           const fail = E.estimateFail(STATS[f], energy) * g.failMult / 100;
-          v = v * (1 - fail) - fail * raw * 0.5 + lambda * (Math.max(0, Math.min(100, energy + g.energy)) - energy);
-          if (v > bestV) { bestV = v; best = f; bestG = g; bestFail = fail; bestRaw = raw; }
+          v = v * (1 - fail) - fail * raw * 0.5 + lambda * (Math.max(0, Math.min(maxEnergy, energy + g.energy)) - energy);
+          if (v > bestV) {
+            bestV = v; best = f; bestG = g; bestFail = fail; bestRaw = raw; bestTokens = tok; bestOuting = null; doRecreation = false;
+            bestHelloSaving = 0;
+            if (live && members.some((m) => H.isHello(m.card)) && g.energy < 0) {
+              const without = gain(ctx, fx, ctx.sc.train[STATS[f]], STATS[f], members.filter((m) => !H.isHello(m.card)), L, mood);
+              bestHelloSaving = Math.max(0, g.energy - without.energy);
+            }
+          }
         }
-        if (best < 0) { energy = Math.min(100, energy + 52); rests++; continue; }
+        if (bestOuting) {
+          const { h, k, d } = bestOuting;
+          const outcome = d.roll ? d.opts[eventRand() < d.p ? 0 : 1] : bestOuting.outcome;
+          const recovered = applyEvent(outcome);
+          liveTotals.helloEnergyRecovered += recovered;
+          liveTotals.helloEnergyWasted += Math.max(0, (outcome.e || 0) - recovered);
+          bond[k] = Math.min(100, bond[k] + (outcome.b || 0));
+          (outcome.h || []).forEach(([id, lv]) => { h.hints[id] = lv; });
+          h.done++; outings++; liveTotals.helloOutings++;
+          finishTurn(turn); continue;
+        }
+        if (doRecreation) { applyEvent({ e: 10, mo: 1 }); recreations++; finishTurn(turn); continue; }
+        if (best < 0) { energy = Math.min(maxEnergy, energy + 52); rests++; finishTurn(turn); continue; }
         typ = typ ? typ * 0.9 + bestRaw * 0.1 : bestRaw;
-        energy = Math.max(0, Math.min(100, energy + bestG.energy));
-        if (!camp) count[best]++; // camp trainings don't level facilities
+        energy = Math.max(0, Math.min(maxEnergy, energy + bestG.energy));
         train[best]++;
-        if (rand() < bestFail) { fails++; continue; }
+        if (rand() < bestFail) { fails++; finishTurn(turn); continue; }
+        if (!camp) count[best]++; // failed and camp trainings don't level facilities
         for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + trained(x[i], bestG.g[i]));
         sp += bestG.sp;
         rainbowTotal += bestG.rainbows;
         at[best].forEach((k) => {
           bond[k] = Math.min(100, bond[k] + D.BOND_PER_TRAINING);
-          if (rand() < deck[k].hintRate) { hints[k]++; bond[k] = Math.min(100, bond[k] + D.BOND_PER_HINT); }
+          if ((deck[k].card.hs || []).length && rand() < deck[k].hintRate) { hints[k]++; bond[k] = Math.min(100, bond[k] + D.BOND_PER_HINT); }
         });
-        if (ti === Math.floor(ctx.turns.length / 3)) deck.forEach((d, k) => { bondAt[k] += bond[k]; });
+        if (live) {
+          bestTokens.forEach((t) => live.add(t.type, t.amount));
+          at[best].forEach((k) => {
+            const h = hello[k];
+            if (!h) return;
+            if (h.met) {
+              liveTotals.helloTrainings++;
+              if (eventRand() < ctx.helloProcRate) {
+                liveTotals.helloTokens += live.add(live.low(), h.p.tokenAmount);
+                liveTotals.helloEvents++;
+                applyEvent(h.p.repeat); bond[k] = Math.min(100, bond[k] + h.p.repeat.b);
+              }
+            } else { applyEvent(h.p.first); bond[k] = Math.min(100, bond[k] + h.p.first.b); h.met = true; h.metTurn = turn; }
+            liveTotals.helloEnergySaved += bestHelloSaving;
+          });
+        }
+        finishTurn(turn);
+        if (!live && ti === Math.floor(ctx.turns.length / 3)) deck.forEach((d, k) => { bondAt[k] += bond[k]; });
+      }
+      if (live) {
+        hello.forEach((h) => {
+          if (!h || !h.met) return;
+          applyEvent(h.p.ending(h.done === 5));
+          if (h.done === 5) liveTotals.helloCompletions++;
+          Object.entries(h.hints).forEach(([id, lv]) => {
+            const key = h.p.card.id + ":" + id;
+            const old = helloSkillEvents.get(key) || { count: 0, levels: 0 };
+            old.count++; old.levels += lv; helloSkillEvents.set(key, old);
+          });
+        });
+        live.shop(78, energy, maxEnergy, applyEvent, true);
+        const ls = live.state;
+        liveTotals.songs += Object.keys(ls.songs).length + 1;
+        liveTotals.techniques += ls.techniques; liveTotals.greatConcerts += ls.greatConcerts; liveTotals.lessonEnergy += ls.lessonEnergy;
+        if (ls.songCountAtLyrics >= 16) liveTotals.lyrics++;
+        if (ls.songCountAtFinalDeadline >= 18) liveTotals.special++;
+        for (let i = 0; i < 5; i++) { earnedTokens[i] += ls.earned[i]; spentTokens[i] += ls.spent[i]; finalTokens[i] += ls.tokens[i]; }
       }
       total += statsValue(ctx, x) + sp * SP_VALUE;
       spTotal += sp;
       for (let i = 0; i < 5; i++) statSum[i] += x[i];
     }
+    ctx.helloSkillEvents = helloSkillEvents;
     const skill = skillValue(ctx, deck, hints.map((h) => h / R));
     return {
       value: total / R + skill.value * ctx.skillWeight,
@@ -286,11 +434,20 @@
       rests: rests / R,
       races: races / R,
       requiredRaces: requiredRaces / R,
+      runs: R,
+      outings: outings / R,
+      recreations: recreations / R,
+      grandConcert: ctx.sc.id === "grandlive" ? Object.assign(
+        Object.fromEntries(Object.entries(liveTotals).map(([k, n]) => [k, n / R])), {
+          earnedTokens: earnedTokens.map((n) => n / R), spentTokens: spentTokens.map((n) => n / R), finalTokens: finalTokens.map((n) => n / R),
+          model: "discrete-lessons-v1", helloProcRate: ctx.helloProcRate, helloUnlockRate: ctx.helloUnlockRate,
+          assumptions: "repeat event and outing-unlock rates are configurable assumptions; defaults 40% (repeat) and 15% (unlock after meeting and bond 60); fifth outing: assumed 50/50; R +10 token floor; sampled shop approximates published category weights; guest placements, event-chain-rate songs and random mood drops omitted; no flat scenario multiplier"
+        }) : null,
       calendarAssumptions: ctx.calendar ? {
         requiredRaceResult:"wins assumed; race failure and aptitude feasibility not simulated",
         randomGoalStats:"expected distribution across five stats",
         choiceAndFanGoals:"only automatically fixed race objectives scheduled",
-        rewards:"standard goal/URA base rewards; no separate career-end, secret-event or concert rewards added here",
+        rewards:"standard goal/URA winning rewards; discrete concerts and Light Hello events/ending; other career-end/secret rewards omitted",
         scheduledRaces:ctx.calendar.filter(d => d.kind === "race").map(d => d.turn),
         freeTurns:ctx.calendar.filter(d => d.kind === "free").length
       } : null,
@@ -315,7 +472,12 @@
     deck.forEach((d, k) => {
       const hs = d.card.hs || [];
       hs.forEach((id) => add(id, 1 - Math.exp(-hintEvents[k] / Math.max(1, hs.length)), d.hintLv, d.card.id));
-      (d.card.es || []).forEach((id) => add(id, EVENT_SKILL_CHANCE[d.card.r] || 0.5, 1, d.card.id));
+      (d.card.es || []).forEach((id) => {
+        if (d.hello) {
+          const observed = ctx.helloSkillEvents.get(d.card.id + ":" + id);
+          if (observed) add(id, observed.count / ctx.runs, Math.round(observed.levels / observed.count), d.card.id);
+        } else add(id, EVENT_SKILL_CHANCE[d.card.r] || 0.5, 1, d.card.id);
+      });
     });
     const list = [];
     p.forEach(([miss, lv, src], id) => {
@@ -479,7 +641,7 @@
   const FIT_TYPES = ["speed", "stamina", "power", "guts", "wit", "friend", "group"];
   function targetSearch(opts, sim, start, pool, borrowPool) {
     const Tr = root.UmaTiers || (typeof require !== "undefined" ? require("./tiers.js") : null);
-    const ctx = buildCtx(Object.assign({}, sim, { runs: FIT_RUNS }));
+    const ctx = buildCtx(Object.assign({}, sim, { runs: FIT_RUNS, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight }));
     const comp = opts.comp || {};
     const locked = new Set(opts.locked || []);
     // Parent decks: the skills are the point, so a swap may cost at most a share of the start
@@ -495,7 +657,7 @@
       const fit = targetFit(c, s.stats, s.sp);
       const sk = Tr.deckSkills(opts, deck);
       const over = sk.value < floor - 1e-9 ? 1e9 : 0;
-      return { value: fit.value + sw * sk.value + sk.mustValue - over, short: fit.short, stats: s.stats, sp: s.sp, skill: sk.value };
+      return Object.assign({}, s, { value: fit.value + sw * sk.value + sk.mustValue - over, short: fit.short, skill: sk.value });
     };
     const score = (deck) => {
       const k = deck.map((x) => x.id + ":" + x.lb).sort().join(",");
@@ -540,7 +702,7 @@
     }
     // The start and final decks, rescored with more careers for the readout.
     function result() {
-      const full = buildCtx(Object.assign({}, sim, { runs: 16 }));
+      const full = buildCtx(Object.assign({}, sim, { runs: 16, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight }));
       // Validate every candidate actually evaluated by the cheap search, not just its winner.
       const finalists = new Map(testedDecks);
       const put = d => finalists.set(d.map(x => x.id + ":" + x.lb).sort().join(","), d);
