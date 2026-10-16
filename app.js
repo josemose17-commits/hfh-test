@@ -903,6 +903,13 @@
     D.DATA.trainees.forEach((t) => traineeByLabel.set(traineeLabel(t), t));
   }
 
+  // Why a card is a focus card: the parts of its early-rainbow score.
+  function focusWhy(fc, head) {
+    return head + " Specialty Priority " + fc.spec + ": on its own training (where it rainbows) " + Math.round(fc.pSpec * 100) + "% of turns. " +
+      (fc.bond >= 80 ? "Already orange." : fc.trainings + " training" + (fc.trainings === 1 ? "" : "s") + " with it to orange (about " + Math.round(fc.T) + " turns).") +
+      " Score: own-training chance × 0.92 per turn to orange × (1 + Friendship " + fc.fb + "%) × a little for your stat priority.";
+  }
+
   function traineeLabel(t) { return t.n + " [" + t.t + "]"; }
   function deckOn() { return HAS_DATA && state.deck && state.deck.slots.some(Boolean); }
   function shortName(c) { return c.n.length > 11 ? c.n.split(/[\s.]/)[0] : c.n; }
@@ -1225,7 +1232,7 @@
     } else {
       $("#traineeInfo").innerHTML = `<span class="mini">Pick your trainee to apply her growth bonuses and get a build suggestion.</span>`;
     }
-    const focus = new Map(E.focusCards(E.deckInfo(state)).map((fc) => [fc.idx, fc]));
+    const focus = new Map(E.focusCards(E.deckInfo(state), state).map((fc) => [fc.idx, fc]));
     $("#slots").innerHTML = dk.slots.map((sl, i) => {
       const c = sl && D.card(sl.id);
       if (!c) return `<div class="slot empty"><input class="slot-name" data-slot-name="${i}" list="cardList" placeholder="Card ${i + 1}: type a name" autocomplete="off" aria-label="Support card ${i + 1}"></div>`;
@@ -1237,8 +1244,8 @@
           <input class="slot-name" data-slot-name="${i}" list="cardList" value="${esc(D.label(c))}" autocomplete="off" aria-label="Support card ${i + 1}">
           <select data-slot-lb="${i}" aria-label="Limit break">${[0, 1, 2, 3, 4].map((lb) => `<option value="${lb}" ${lb === sl.lb ? "selected" : ""}>LB${lb} · Lv${D.levelFor(c, lb)}</option>`).join("")}</select>
           ${focus.has(i) ? (focus.get(i).rank === 1
-            ? `<span class="chip focus" title="Main focus: your card with the highest specialty priority (${focus.get(i).spec}). Getting it to friendship (80, orange) is a must, so the coach pushes hard for every training it's on.">${bond >= 80 ? "Focus 1 ✓" : "Focus 1 (must)"}</span>`
-            : `<span class="chip focus focus2" title="Second focus: your card with the second-highest specialty priority (${focus.get(i).spec}). A small push toward orange, never over extra song tokens.">${bond >= 80 ? "Focus 2 ✓" : "Focus 2"}</span>`) : ""}
+            ? `<span class="chip focus" title="${esc(focusWhy(focus.get(i), "Main focus: the best early-rainbow card. Getting one card to friendship (80, orange) is a must, so the coach pushes hard for every training it's on."))}">${bond >= 80 ? "Focus 1 ✓" : "Focus 1 (must)"}</span>`
+            : `<span class="chip focus focus2" title="${esc(focusWhy(focus.get(i), "Second focus: the next best. A small push toward orange, never over extra song tokens."))}">${bond >= 80 ? "Focus 2 ✓" : "Focus 2"}</span>`) : ""}
           <label class="bond${bond >= 80 ? " full" : ""}"><span>Bond</span><input type="number" inputmode="numeric" data-slot-bond="${i}" min="0" max="100" value="${Math.round(bond)}"></label>
           <button type="button" class="btn ghost small square" data-slot-clear="${i}" aria-label="Remove card">✕</button>
         </div>

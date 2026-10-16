@@ -1325,3 +1325,23 @@ test("reset checks answer what the coach knows and ask only the rest", () => {
   // Before the check's turn it waits, even when it could answer.
   assert.strictEqual(item(base({ turn: 11, deck, log: log(10) }), "debut").status, "wait");
 });
+
+test("focus cards come from an early-rainbow score: current bond and specialty priority", () => {
+  // Fresh bonds: Kitasan Black (specialty 100) is the main focus.
+  const fresh = E.focusCards(E.deckInfo({ deck: openDeck() }), { turn: 3, build: "medium" });
+  assert.strictEqual(fresh[0].card.n, "Kitasan Black");
+  assert.ok(Math.abs(fresh[0].pSpec - 200 / 650) < 1e-9, "(100 + SP) / (550 + SP)");
+  // Curren Chan (specialty 65) one training from orange beats Kitasan Black still at 35.
+  const close = E.focusCards(E.deckInfo({ deck: openDeck([35, 25, 74, 30, 40, 30]) }), { turn: 9, build: "medium" });
+  assert.strictEqual(close[0].card.n, "Curren Chan");
+  assert.strictEqual(close[0].trainings, 1);
+  assert.strictEqual(close[1].card.n, "Kitasan Black");
+  // Only a little ahead isn't enough: Kitasan at 60 beats Nishino Flower (specialty 50) at 66.
+  const near = E.focusCards(E.deckInfo({ deck: openDeck([60, 25, 30, 66, 40, 30]) }), { turn: 9, build: "medium" });
+  assert.strictEqual(near[0].card.n, "Kitasan Black");
+  // One orange: it's Focus 1 (done), and the best of the rest is Focus 2.
+  const one = E.focusCards(E.deckInfo({ deck: openDeck([35, 25, 74, 30, 40, 30].map((b, i) => (i === 2 ? 85 : b))) }), { turn: 12, build: "medium" });
+  assert.deepStrictEqual(one.map((f) => [f.card.n, f.rank, f.bond >= 80]), [["Curren Chan", 1, true], ["Kitasan Black", 2, false]]);
+  // Friend and Group cards are never focus cards.
+  assert.ok(!fresh.some((f) => f.card.ty === "friend" || f.card.ty === "group"));
+});
