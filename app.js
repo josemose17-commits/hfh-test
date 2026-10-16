@@ -202,7 +202,7 @@
                   <button type="button" class="btn ghost square" data-energy="-10" aria-label="Energy minus 10">−</button>
                   <input id="energy" type="range" min="0" max="100" step="1" aria-label="Energy">
                   <button type="button" class="btn ghost square" data-energy="10" aria-label="Energy plus 10">+</button>
-                  <input id="energyNum" type="number" inputmode="numeric" min="0" max="150" aria-label="Energy value">
+                  <button type="button" class="btn ghost small" data-energy="5">+5 energy</button><button type="button" class="btn ghost small" id="maxEnergyPlus4">+4 max energy</button><input id="energyNum" type="number" inputmode="numeric" min="0" max="150" aria-label="Energy value">
                 </div>
               </div>
               <div class="field"><span>Mood</span><div class="seg" id="mood" role="radiogroup" aria-label="Mood"></div></div>
@@ -284,6 +284,10 @@
     $("#resetMode").addEventListener("change", (e) => { state.resetMode = e.target.value; commit(); });
     $("#newCareer").addEventListener("click", () => newCareer($("#newCareer")));
 
+    $("#maxEnergyPlus4").addEventListener("click", () => {
+      state.maxEnergy = Math.min(150, (state.maxEnergy || 100) + 4);
+      commit(true); flash("Max energy: " + state.maxEnergy + ". Current energy unchanged.");
+    });
     $("#energy").addEventListener("input", (e) => { state.energy = +e.target.value; $("#energyNum").value = state.energy; commit(); });
     $("#energyNum").addEventListener("input", (e) => { const v = numOrNull(e.target.value); if (v != null) { state.energy = Math.max(0, Math.min(state.maxEnergy, v)); $("#energy").value = state.energy; commit(); } });
     $$("[data-energy]").forEach((b) => b.addEventListener("click", () => {
@@ -323,6 +327,12 @@
 
     // Training cards: pips, toggles and number boxes.
     $("#facilities").addEventListener("click", (e) => {
+      const bondButton = e.target.closest("[data-training-bond]");
+      if (bondButton) {
+        const sl = state.deck.slots[+bondButton.dataset.trainingBond]; if (!sl) return;
+        sl.bond = Math.min(100, slotBond(sl) + +bondButton.dataset.add);
+        commit(true); flash(D.card(sl.id).n + " bond: " + sl.bond); return;
+      }
       const mc = e.target.closest("[data-member]");
       if (mc) {
         // A card shows up on one training per turn, so tapping it here removes it elsewhere.
@@ -519,6 +529,24 @@
       }
     });
     $("#songsBody").addEventListener("click", (e) => {
+      if (e.target.closest("#lh20Add")) {
+        const sc = scenario(), tokens = state.gl.tokens, selected = $("#lh20Type").value;
+        const low = Math.min(...tokens), tied = tokens.map((n,i) => n === low ? i : -1).filter(i => i >= 0);
+        if (selected === "" && tied.length !== 1) { flash("Choose the actual awarded type: lowest balances are tied."); return; }
+        const type = selected === "" ? tied[0] : +selected;
+        delete state.gl.lh20Undo;
+        const before = JSON.stringify(state), prior = tokens[type];
+        tokens[type] = Math.min(E.tokenCap(state, sc), prior + 20);
+        state.extras = state.extras || {}; state.extras.lh20 = true;
+        const after = JSON.stringify(state); state.gl.lh20Undo = {before, after};
+        commit(true); flash("Light Hello: +" + (tokens[type]-prior) + " " + sc.tokens[type]); return;
+      }
+      if (e.target.closest("#lh20Undo")) {
+        const entry = state.gl.lh20Undo; if (!entry) return;
+        const current = Object.assign({}, state, {gl: Object.assign({}, state.gl)}); delete current.gl.lh20Undo;
+        if (JSON.stringify(current) !== entry.after) { flash("Run changed since event: undo later actions first or correct balances manually."); return; }
+        state = JSON.parse(entry.before); commit(true); flash("Undid Light Hello event"); return;
+      }
       const buy = e.target.closest("[data-tech-buy]");
       if (buy) {
         e.preventDefault();
@@ -1003,6 +1031,7 @@
       <div class="gl-status">${status}</div>
       ${nextR ? `<div class="gl-next"><b>Next: ${esc(nextR.label)}</b>, turn ${nextR.turn}: ${esc(nextR.short || nextR.gain)}</div>` : ""}
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
+      ${state.turn >= (sc.tokensFrom || 5) ? `<div class="row-wrap"><button type="button" class="btn ghost small" id="lh20Add">Light Hello +20 tokens</button><select id="lh20Type" aria-label="Awarded token type"><option value="">Lowest held (auto)</option>${sc.tokens.map((n,i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select>${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo token event</button>' : ""}<span class="mini">Only after the actual event. Choose its type for ties or changed balances. Undo before other changes.</span></div>` : ""}
       <p class="mini">Done adds each training's tokens; Bought takes a lesson's cost. Cap ${E.tokenCap(state, sc)} for now (+50 after each live). Fix the numbers here if the game shows different ones.</p>
       <div id="glCurrentBudget">${currentSongBudgetHTML(sc)}</div>
       <div class="songs-have"><b>Songs you have</b> ${mine.length ? mine.map(([x, t]) => `<span class="have-chip">${esc(x.name)} <button type="button" class="linkish" data-song-rm="${x.id}" aria-label="Remove ${esc(x.name)}">×</button></span>`).join("") : '<span class="mini">none yet</span>'}
@@ -1159,8 +1188,12 @@
       // Every chip keeps the same size from turn to turn: name (cut short if needed), then the bond.
       return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}${hint ? " hint" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""} · tap again to mark a hint (!)">${hint ? '<b class="bang">!</b>' : ""}<span class="mname">${esc(shortName(c))}</span><small class="${bond >= 80 ? "full" : ""}">${Math.round(bond)}</small></button>`;
     }).join("");
+    const quickBond = (f.members || []).map(si => {
+      const sl = state.deck.slots[si]; if (!sl) return ""; const c = D.card(sl.id);
+      return `<div class="row-wrap"><span class="mini">${esc(shortName(c))} bond ${Math.round(slotBond(sl))}</span>${[5,10].map(n => `<button type="button" class="btn ghost small" data-training-bond="${si}" data-add="${n}">+${n} bond</button>`).join("")}</div>`;
+    }).join("");
     const rbNow = rainbowCount(f);
-    return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>
+    return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>${quickBond}
       ${pipsHTML("extra", f.extra || 0, "Others (not in deck)", "c")}
       ${(f.members || []).length ? pipsHTML("rbmark", rbNow, "Rainbow (as in game)", "r") : ""}`;
   }
@@ -1735,10 +1768,14 @@
       <div class="headline">${a.prefix.map((p) => `<span class="pre">${esc(p)} →</span>`).join(" ")}<span>${esc(a.label)}</span></div>
       <div class="pill-row"><span class="pill c-${rec.confidence.replace(" ", "-")}">${esc(rec.confidence)}</span>${a.kind === "train" ? `<span class="pill">score ${score(a.value)}</span>` : ""}</div>
       ${runBox}
+      ${rec.reasons.length ? `<p class="mini">${esc(rec.reasons[0])}</p>` : ""}
+      ${after}
+      <details id="callExplanation"><summary>Expand / shorten explanation</summary>
       ${rec.reasons.length ? `<ul class="why">${rec.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
-      ${vs}${after}
+      ${vs}
       ${rec.events.length ? `<div class="events">${rec.events.map((e) => `<div class="ev"><b>${esc(e.label)}</b> ${esc(e.tip || "")}</div>`).join("")}</div>` : ""}
       <div class="phase"><b>${esc(rec.phase.name)}:</b> ${esc(rec.phase.tip)}</div>
+      </details>
       <div class="fail-row" role="radiogroup" aria-label="Training result"><span class="mini">Training result:</span>${[["", "Success", ""], ["fail", "Failed", "Get Well Soon!: mood -1, -5 to that stat"], ["bad", "Failed badly", "Don't Overdo It! (20%+ failure only): mood -3, -10 to that stat and 2 random stats"]].map(([v, l, t]) => `<button type="button" class="btn ghost small" role="radio" data-fail="${v}" aria-checked="${failPick === v}"${t ? ` title="${esc(t)}"` : ""}>${l}</button>`).join("")}
         ${failPick && !state.practicePoor ? `<label class="chip-toggle"><input type="checkbox" id="gotPoor" ${poorPick ? "checked" : ""}> Got Practice Poor</label>` : ""}</div>
       <div class="actions">
