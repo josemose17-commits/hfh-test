@@ -585,3 +585,26 @@ table.pred .over { color: var(--accent); }
 .tech-head { font-size: .9rem; margin-top: 2px; }
 .shop-songs summary { overflow-wrap: anywhere; }
 .song-jp { display: block; font-weight: 400; color: var(--muted); }
+
+/* Grand Concert: one section. */
+.gl-status { font-size: .88rem; overflow-wrap: anywhere; }
+.gl-next { font-size: .85rem; border-left: 3px solid var(--gold); padding-left: 8px; overflow-wrap: anywhere; }
+.shop { display: grid; gap: 6px; }
+.shop-part > summary { cursor: pointer; font-weight: 600; font-size: .9rem; margin: 2px 0 4px; }
+.shop-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "pick buy" "cost buy"; gap: 2px 8px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; background: var(--surface); }
+.shop-row .tech-pick { grid-area: pick; }
+.shop-row .tech-cost { grid-area: cost; justify-content: flex-start; padding-left: 22px; }
+.shop-row > .btn { grid-area: buy; }
+.shop-row.on { border-color: var(--accent); }
+.shop-row.best { border-color: var(--accent); border-left-width: 4px; box-shadow: 0 0 0 1px var(--accent) inset; }
+.shop-row.held { border-color: var(--gold); border-left-width: 4px; }
+.shop-row.cant .tech-name { color: var(--muted); }
+.shop-row .tech-pick .pill { margin-left: 4px; font-size: .7rem; }
+.songs-have { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: .88rem; }
+.songs-have select { max-width: 100%; font-size: .85rem; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: var(--surface); color: var(--fg); }
+.have-chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 4px 1px 8px; font-size: .8rem; }
+.have-chip .linkish { padding: 0 4px; }
+.gl-more > summary { cursor: pointer; font-size: .88rem; color: var(--accent); }
+.gl-more[open] { display: grid; gap: 8px; }
+.rc-q.rc-auto { font-size: .85rem; }
+.rc-auto .rc-known { font-weight: 600; }

@@ -117,8 +117,8 @@
   const ownedCode = () => D.encodeOwned(owned);
   const readOwnedCode = (text) => D.decodeOwned(text);
   let rec = null;
-  // The Scenario rewards list stays open across re-renders once you open it.
-  let rewardsOpen = false;
+  // Lists inside the Grand Concert section stay open or closed across re-renders.
+  const glOpen = {};
   let openRow = null;
   let resetArmed = null;
 
@@ -217,13 +217,8 @@
             <div id="turnExtras" class="extras"></div>
           </div>
 
-          <details class="panel techs" id="techPanel" hidden>
-            <summary><h2>Lesson shop</h2><span class="mini" id="techSummary"></span></summary>
-            <div class="techs-body" id="techBody"></div>
-          </details>
-
           <details class="panel songs" id="songsPanel" hidden>
-            <summary><h2>Grand Concert songs</h2><span class="mini" id="songSummary"></span></summary>
+            <summary><h2>Grand Concert</h2><span class="mini" id="songSummary"></span></summary>
             <div class="songs-body" id="songsBody"></div>
           </details>
 
@@ -496,21 +491,6 @@
       $("#tabTrainees").hidden = true;
     }
 
-    $("#songsBody").addEventListener("click", (e) => {
-      if (e.target.closest("[data-open-tech]")) {
-        const tp = $("#techPanel");
-        tp.open = true;
-        tp.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
-      }
-      const b = e.target.closest("[data-gllesson]");
-      if (!b) return;
-      const plan = E.songPlan(state, scenario());
-      if (!plan) return;
-      state.gl.lessons = state.gl.lessons || {};
-      state.gl.lessons[plan.period] = Math.max(0, (state.gl.lessons[plan.period] || 0) + +b.dataset.gllesson);
-      commit(true);
-    });
     $("#songsBody").addEventListener("input", (e) => {
       const i = e.target.dataset.tok;
       if (i == null) return;
@@ -518,17 +498,27 @@
       commit();
       renderSongsLight();
     });
-    $("#songsBody").addEventListener("toggle", (e) => { if (e.target.classList && e.target.classList.contains("rewards")) rewardsOpen = e.target.open; }, true);
-    $("#techBody").addEventListener("change", (e) => {
-      const offer = e.target.dataset.techOffer;
-      const type = e.target.dataset.techType;
-      if (!offer && !type) return;
-      state.gl.shop = state.gl.shop || {};
-      if (offer) { if (e.target.checked) state.gl.shop[offer] = state.gl.shop[offer] || {}; else delete state.gl.shop[offer]; }
-      if (type) state.gl.shop[type] = Object.assign({}, state.gl.shop[type], { type: e.target.value === "" ? null : +e.target.value });
-      commit(true);
+    // Open/closed state of the lists inside, kept across re-renders.
+    $("#songsBody").addEventListener("toggle", (e) => { const k = e.target.dataset && e.target.dataset.keep; if (k) glOpen[k] = e.target.open; }, true);
+    $("#songsBody").addEventListener("change", (e) => {
+      const d = e.target.dataset;
+      // Your shop: tick what it shows (and the type an any-type cost asks for).
+      if (d.techOffer || d.techType) {
+        state.gl.shop = state.gl.shop || {};
+        if (d.techOffer) { if (e.target.checked) state.gl.shop[d.techOffer] = state.gl.shop[d.techOffer] || {}; else delete state.gl.shop[d.techOffer]; }
+        if (d.techType) state.gl.shop[d.techType] = Object.assign({}, state.gl.shop[d.techType], { type: e.target.value === "" ? null : +e.target.value });
+        commit(true);
+        return;
+      }
+      // Songs you have: add one you'd learned before (no tokens taken).
+      if (e.target.id === "songAdd" && e.target.value) {
+        const song = scenario().songs.find((x) => x.id === e.target.value);
+        state.gl.songs[song.id] = state.turn;
+        commit(true);
+        flash("Added " + song.name + " to your songs");
+      }
     });
-    $("#techBody").addEventListener("click", (e) => {
+    $("#songsBody").addEventListener("click", (e) => {
       const buy = e.target.closest("[data-tech-buy]");
       if (buy) {
         e.preventDefault();
@@ -547,23 +537,20 @@
         flash("Learned " + state.gl.lastBuy.label + ": tick your shop's new offers");
         return;
       }
+      const rm = e.target.closest("[data-song-rm]");
+      if (rm) {
+        const song = scenario().songs.find((x) => x.id === rm.dataset.songRm);
+        delete state.gl.songs[song.id];
+        commit(true);
+        flash("Removed " + song.name + " (tokens unchanged)");
+        return;
+      }
       if (e.target.closest("[data-tech-undo]")) {
         const label = state.gl.lastBuy && state.gl.lastBuy.label;
         E.undoBuy(state);
         commit(true);
         flash("Undid " + (label || "the buy"));
       }
-    });
-    $("#songsBody").addEventListener("change", (e) => {
-      if (e.target.id === "songNoCost") { state.gl.noCost = e.target.checked; commit(true); return; }
-      const id = e.target.dataset.song;
-      if (!id) return;
-      const song = scenario().songs.find((x) => x.id === id);
-      const sign = e.target.checked ? -1 : 1;
-      if (e.target.checked) state.gl.songs[id] = state.turn; else delete state.gl.songs[id];
-      if (!state.gl.noCost) state.gl.tokens = state.gl.tokens.map((t, i) => Math.max(0, (t || 0) + sign * song.cost[i]));
-      commit(true);
-      flash((e.target.checked ? "Learned " : "Removed ") + song.name);
     });
 
     $("#options").addEventListener("click", (e) => {
@@ -581,6 +568,8 @@
       rcAnswer(key, qid, e.target.value === "" ? null : Math.max(0, +e.target.value || 0));
     });
     $("#call").addEventListener("click", (e) => {
+      const fix = e.target.closest("[data-rc-fix]");
+      if (fix) { rcFix[fix.dataset.rcFix] = true; renderCall(); return; }
       if (e.target.closest("#doneBtn")) done(rec && rec.action);
       if (e.target.closest("#undoBtn")) undoTurn();
       if (e.target.closest("#rcNew")) newCareer($("#rcNew"));
@@ -959,6 +948,10 @@
     </details>`;
   }
 
+  // ---- Grand Concert: one section ----
+  // The coach's pick, what this half still wants and the next reward, your tokens, your shop
+  // (songs first, then techniques), the songs you have, and More (plan, token plan, token aim,
+  // every scenario reward). The shop part fills in after the call (it follows the call's pick).
   function renderSongs() {
     const sc = scenario();
     const panel = $("#songsPanel");
@@ -966,80 +959,72 @@
     if (!sc.songs) return;
     const gl = state.gl;
     const hype = E.hypeStatus(state, sc);
-    const bon = E.songBonuses(state, sc);
     const learnedN = E.songsLearned(state);
+    const plan = E.songPlan(state, sc);
+    const bon = E.songBonuses(state, sc);
     const extras = Object.entries(bon.extra).filter(([, v]) => v).map(([k, v]) => "+" + v + " " + (k === "sp" ? "SP" : E.STAT_LABELS[k])).join(", ");
-    $("#songSummary").textContent = learnedN + " of 22 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
-    const tok = (cost) => cost.map((c, i) => (c ? `<span class="tok t${i}">${sc.tokens[i].slice(0, 2)} ${c}</span>` : "")).join("");
-    const effect = (song) => [
-      ...Object.entries(song.extra || {}).map(([k, v]) => "+" + v + " " + (k === "sp" ? "SP" : E.STAT_LABELS[k]) + " on every " + (k === "sp" ? "training" : E.STAT_LABELS[k] + " training")),
-      ...Object.entries(song.once || {}).map(([k, v]) => "+" + v + " " + (k === "sp" ? "skill points" : E.STAT_LABELS[k]) + " once"),
-      song.fb ? "Friendship +" + song.fb + "% after the next live" : "",
-      song.live || ""
+    const open = (k, def) => (glOpen[k] != null ? glOpen[k] : def) ? " open" : "";
+    const status = [
+      plan ? `This half: <b>${plan.bought} of ${plan.target}</b> songs` : "",
+      hype && hype.next != null ? (hype.need ? `<b>${hype.since}/3</b> songs for the live on turn ${hype.next}` : `Hype full for the live on turn ${hype.next} ✓`) : "",
+      `<b>${learnedN} of 18</b> for GIRLS' LEGEND U`
     ].filter(Boolean).join(" · ");
-    const groups = [[5, "Available from the start"], [25, "After the 1st Promo Live"], [37, "After the 2nd Promo Live"], [49, "After the 3rd Promo Live"]];
+    const nextR = E.glRewards(state, sc).find((x) => x.status !== "done" && x.status !== "once");
+    const mine = Object.entries(gl.songs || {}).map(([id, t]) => [sc.songs.find((x) => x.id === id), t]).filter(([x]) => x).sort((x, y) => x[1] - y[1]);
+    const addable = sc.songs.filter((x) => gl.songs[x.id] == null && x.from <= Math.max(state.turn, 5));
+    $("#songSummary").textContent = learnedN + " of 22 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
     $("#songsBody").innerHTML = `
+      <div id="glShop"></div>
+      <div class="gl-status">${status}</div>
+      ${nextR ? `<div class="gl-next"><b>Next: ${esc(nextR.label)}</b>, turn ${nextR.turn}: ${esc(nextR.short || nextR.gain)}</div>` : ""}
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
-      <p class="mini">Tokens go up by themselves when you press <b>Done</b> on a training (set the token type and amount each training shows on its card; blank uses the estimate), capped at ${E.tokenCap(state, sc)} for now (+50 after each live). Ticking a song takes its cost off. You can still correct the numbers here.</p>
-      <div class="song-status">
-        ${hype && hype.next != null ? `<div><b>${hype.since}/3</b> ${state.turn < 5 ? "songs for the 1st live (Make Debut!, the free song on turn 5, counts as one)" : "songs since the last live"}. Next live: turn ${hype.next} (${esc(E.turnInfo(hype.next, sc).text)})${hype.need ? `, ${hype.need} more for a guaranteed Great Success.` : ", Hype gauge full."}</div>` : ""}
-        <div>Active now: ${extras || "no extra stat gains yet"}${bon.fb ? ` · Friendship +${bon.fb}%` : ""}${bon.pendingFb ? ` · +${bon.pendingFb}% Friendship waiting for the next live` : ""}</div>
-        <div>${learnedN >= 18 ? "18+ songs: special Girls' Legend U unlocked." : (18 - learnedN) + " more song(s) by Senior Late Dec for the special Girls' Legend U (16 by Senior Early Nov for the lyrics event)."}${state.turn >= 5 ? " Make Debut! counts." : ""}</div>
-      </div>
-      ${rewardsHTML(sc)}
-      ${songPlanHTML(sc)}
-      ${tokenPlanHTML(sc)}
-      ${tokenAimHTML(sc)}
-      <div class="songs-have"><span><b>Songs you have</b>: tick each one you've learned.</span> <label class="chip-toggle small"><input type="checkbox" id="songNoCost" ${gl.noCost ? "checked" : ""}> I already took their tokens off</label>
-        <span class="mini">${gl.noCost ? "Ticking marks a song learned without touching your tokens (for songs you had before typing your tokens)." : "Ticking takes the song's cost off your tokens. Tick the box if your tokens above already have them taken off."}</span></div>
-      ${groups.map(([from, label]) => `<div class="song-group"><h3>${label}</h3>${sc.songs.filter((x) => x.from === from).map((song) => {
-        const t = gl.songs[song.id];
-        const locked = song.from > state.turn && t == null;
-        return `<label class="song${t != null ? " on" : ""}${locked ? " locked" : ""}"><input type="checkbox" data-song="${song.id}" ${t != null ? "checked" : ""} ${locked ? "disabled" : ""}>
-          <span class="song-name">${esc(song.name)}${song.jp && song.jp !== song.name ? ` <span class="mini song-jp">${esc(song.jp)}</span>` : ""}${t != null ? ` <span class="mini">turn ${t}</span>` : ""}${t == null && planTag(song.id) ? " " + planTag(song.id) : ""}</span>
-          <span class="song-cost">${tok(song.cost)}</span>
-          <span class="mini song-fx">${esc(effect(song))}</span></label>`;
-      }).join("")}</div>`).join("")}`;
+      <p class="mini">Done adds each training's tokens; Bought takes a lesson's cost. Cap ${E.tokenCap(state, sc)} for now (+50 after each live). Fix the numbers here if the game shows different ones.</p>
+      <div class="songs-have"><b>Songs you have</b> ${mine.length ? mine.map(([x, t]) => `<span class="have-chip">${esc(x.name)} <button type="button" class="linkish" data-song-rm="${x.id}" aria-label="Remove ${esc(x.name)}">×</button></span>`).join("") : '<span class="mini">none yet</span>'}
+        ${addable.length ? `<select id="songAdd" aria-label="Add a song you already have"><option value="">+ add a song you already have</option>${addable.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>` : ""}
+        <span class="mini">Adding or removing here doesn't touch your tokens (Bought in your shop does).</span></div>
+      <details class="gl-more" data-keep="more"${open("more", false)}><summary>More: song plan, token plan, token aim, scenario rewards</summary>
+        ${songPlanHTML(sc)}
+        <div class="mini">Active now: ${extras || "no extra stat gains from songs yet"}${bon.fb ? ` · Friendship +${bon.fb}%` : ""}${bon.pendingFb ? ` · +${bon.pendingFb}% Friendship after the next live` : ""}</div>
+        ${tokenPlanHTML(sc)}
+        ${tokenAimHTML(sc)}
+        ${rewardsHTML(sc)}
+      </details>`;
   }
 
   // What the scenario gives at fixed points, with what you've done toward each so far.
   function rewardsHTML(sc) {
     const list = E.glRewards(state, sc);
     if (!list.length) return "";
-    const nextLive = list.find((x) => x.stats && x.status !== "done");
     const chip = { done: "done", now: "this turn", next: "", once: "once" };
-    return `<details class="rewards"${rewardsOpen ? " open" : ""}><summary><b>Scenario rewards</b>${nextLive ? ` · next: ${esc(nextLive.label)} on turn ${nextLive.turn}` : ""}</summary>
+    return `<div class="rewards"><b>Scenario rewards</b>
       <ol class="reward-list">${list.map((x) => `<li class="rw-${x.status}">
-        <div class="rw-head"><span class="rw-turn">Turn ${x.turn}${x.status === "once" ? "+" : ""}</span> <b>${esc(x.label)}</b> <span class="mini">${esc(E.turnInfo(x.turn, sc).text)}</span>${chip[x.status] ? ` <span class="chip">${chip[x.status]}</span>` : ""}</div>
+        <div class="rw-head"><span class="rw-turn">Turn ${x.turn}${x.status === "once" ? "+" : ""}</span> <b>${esc(x.label)}</b>${chip[x.status] ? ` <span class="chip">${chip[x.status]}</span>` : ""}</div>
         <div class="mini">${esc(x.gain)}</div>
         ${x.sofar && x.status !== "once" ? `<div class="rw-sofar">${esc(x.sofar)}</div>` : ""}
       </li>`).join("")}</ol>
-      <p class="mini">Done adds Make Debut!'s tokens going into turn 5 and each live's stats (when the coach tracks your stats). Skill points aren't tracked. Amounts from uma.guide and GameTora; GameTora says a Great Success also raises your stat caps.</p>
-    </details>`;
+      <p class="mini">Done adds Make Debut!'s tokens going into turn 5 and each live's stats (with "Add training gains" on in Stats). Amounts from uma.guide and GameTora.</p>
+    </div>`;
   }
 
-  // The song plan for this half year, with a technique lesson counter.
+  // The song plan for this half year (no technique counter: the songs you've bought set it).
   function songPlanHTML(sc) {
     const plan = E.songPlan(state, sc);
     if (!plan) return `<div class="song-plan mini">Song plan starts on turn 5, when lessons open. Year one: 5 songs, then carry the 6th over to after the 1st Promo Live.</div>`;
-    const lessons = plan.lessons;
     return `<div class="song-plan">
-      <div><b>Song plan to the ${plan.last ? "Grand Live" : "live on turn " + plan.live}:</b> buy ${plan.target} song${plan.target > 1 ? "s" : ""}${plan.last ? "" : ", then carry 1 over"} · done: <b>${plan.bought}</b> song${plan.bought === 1 ? "" : "s"}, <b>${lessons}</b> technique lesson${lessons === 1 ? "" : "s"}
-        <button type="button" class="btn ghost small square" data-gllesson="-1" aria-label="One fewer technique lesson">−</button>
-        <button type="button" class="btn ghost small" data-gllesson="1">+ technique lesson</button></div>
-      <div class="plan-next">Next: ${esc(plan.text)}${plan.step === "lessons" ? ' <button type="button" class="btn ghost small" data-open-tech>Open the Lesson shop</button>' : ""}</div>
+      <div><b>Song plan to the ${plan.last ? "Grand Live" : "live on turn " + plan.live}:</b> ${plan.target} song${plan.target > 1 ? "s" : ""}${plan.last ? "" : ", then carry 1 over"} · bought: <b>${plan.bought}</b></div>
+      <div class="plan-next">${esc(plan.text)}</div>
       ${budgetHTML(sc)}
     </div>`;
   }
 
-  // This half's token budget: the technique lessons and songs the plan still wants before the
-  // next live, against what you hold and what training should bring by then.
+  // This half's token budget: the songs the plan still wants (and the techniques before them),
+  // against what you hold and what training should bring by the next live.
   function budgetHTML(sc) {
     const p = E.tokenPlan(state, sc);
     const h = p && p.half;
     if (!h || h.need <= 0) return "";
     const short = h.gap > 0;
-    return `<div class="plan-budget${short ? " short" : ""}">Tokens this half: <b>~${Math.round(h.need)}</b> (${h.techLeft} technique lesson${h.techLeft === 1 ? "" : "s"} at ~${h.techCost}, ${h.songsLeft} song${h.songsLeft === 1 ? "" : "s"} at ~${Math.round(h.songTokens / Math.max(1, h.songsLeft))}) · you have ${Math.round(h.have)} · training should bring ~${Math.round(h.supply)} by turn ${h.live}${short ? ` · <b>short by ~${Math.round(h.gap)}</b>: the coach favours trainings with more cards, link cards and friendship (two token types); Wit gives the fewest` : " · on track"}</div>`;
+    return `<div class="plan-budget${short ? " short" : ""}">Tokens this half: ~${Math.round(h.need)} for ${h.songsLeft} song${h.songsLeft === 1 ? "" : "s"} and the techniques before them · you have ${Math.round(h.have)} · training should bring ~${Math.round(h.supply)} by turn ${h.live}${short ? ` · <b>short by ~${Math.round(h.gap)}</b>` : " · on track"}</div>`;
   }
 
   function planTag(id) {
@@ -1050,78 +1035,69 @@
     return "";
   }
 
-  // ---- Grand Concert technique shop ----
-  // Every technique this half, best first. Tick the ones your shop offers and the coach marks
-  // the one to get (the call's own pick when it buys one with the turn, like an Energy
-  // technique before a training). Bought takes the tokens, counts the lesson and adds the stats.
-  function renderTechs() {
+  // Your shop, songs first: tick what it shows and the coach says which one to get (the call's
+  // own pick when it buys one with the turn). Bought takes the tokens and counts the song or
+  // technique; Undo takes it back.
+  function renderShop() {
     const sc = scenario();
-    const panel = $("#techPanel");
-    // Before the shop opens (turn 5) the panel still shows, so you know where it is.
-    if (sc.songs && sc.tokenOf && state.turn < (sc.tokensFrom || 5)) {
-      panel.hidden = false;
-      $("#techSummary").textContent = "Opens on turn " + (sc.tokensFrom || 5);
-      $("#techBody").innerHTML = `<div class="tech-get">Your lesson shop opens on turn ${sc.tokensFrom || 5}, with the free song Make Debut! (+10 of every token). From then on, every time you open the shop, tick the 3 lessons it offers here and the coach says which to get; tap <b>Bought</b> when you buy one.</div>
-        <p class="mini">Before the 1st live the shop has: Stat +5 (10 of that stat's token: Speed Dance, Stamina Passion, Power Vocal, Guts Visual, Wit Mental), Skill Points +5 (10 of the type shown), Energy +20/30/40 (25/30/35) and skill hints Lv +1/2/3 (15/25/35). Songs only show up after technique lessons.</p>`;
+    const box = $("#glShop");
+    if (!sc.songs || !box) return;
+    const open = (k, def) => (glOpen[k] != null ? glOpen[k] : def) ? " open" : "";
+    if (state.turn < (sc.tokensFrom || 5)) {
+      box.innerHTML = `<div class="tech-get">Your lesson shop opens on turn ${sc.tokensFrom || 5}, with the free song Make Debut! (+10 of every token). Then tick what it shows here and the coach says which to get.</div>`;
       return;
     }
-    const r = sc.songs && state.gl ? E.rankTechniques(state, sc) : null;
-    panel.hidden = !r;
-    if (!r) return;
+    const ls = state.gl ? E.lessonShop(state, sc) : null;
+    if (!ls) { box.innerHTML = ""; return; }
     const callTech = rec && rec.action && rec.action.tech;
     const callSong = rec && rec.action && rec.action.song;
-    const plan0 = E.songPlan(state, sc);
-    const hold = plan0 && plan0.step === "hold";
-    // The one to get: what the call buys, else the best song on offer, else the best technique.
-    const getSong = callSong ? r.songs.find((x) => x.song.id === callSong.id) : !callTech && r.bestSong && !hold ? r.bestSong : null;
-    const get = getSong ? null : callTech ? r.items.find((t) => t.id === callTech.id) : r.offered ? r.best : null;
+    const pk = ls.pick;
+    // The one to get: what the call buys with the turn, else the shop's pick.
+    const getSong = callSong ? ls.songs.find((x) => x.song.id === callSong.id) : pk && pk.kind === "song" ? pk.item : null;
+    const getTech = getSong ? null : callTech ? ls.items.find((t) => t.id === callTech.id) : pk && (pk.kind === "tech" ? pk.item : pk.tech) || null;
+    const hold = pk && pk.kind === "hold" ? pk.item : null;
     const chips = (c) => c.map((n, i) => (n ? `<span class="tok t${i}">${sc.tokens[i].slice(0, 2)} ${n}</span>` : "")).join("");
-    const costText = (t) => t.cost ? t.cost.map((n, i) => (n ? n + " " + sc.tokens[i] : "")).filter(Boolean).join(" + ") : t.any + " " + (t.type != null ? sc.tokens[t.type] : "of the type shown");
-    const costHTML = (t) => t.cost ? chips(t.cost)
+    const costText = (c) => c.map((n, i) => (n ? n + " " + sc.tokens[i] : "")).filter(Boolean).join(" + ");
+    const tCost = (t) => (t.cost ? costText(t.cost) : t.any + " " + (t.type != null ? sc.tokens[t.type] : "of the type shown"));
+    const tCostHTML = (t) => t.cost ? chips(t.cost)
       : t.offered ? `<span class="tok-any">${t.any}</span><select class="tech-type${t.type != null ? " t" + t.type : ""}" data-tech-type="${t.id}" aria-label="Token type the shop shows"><option value="">type?</option>${sc.tokens.map((n, i) => `<option value="${i}" ${t.type === i ? "selected" : ""}>${n}</option>`).join("")}</select>`
         : `<span class="tok-any">${t.any} any</span>`;
-    const plan = E.songPlan(state, sc);
-    const need = plan && plan.step === "lessons" ? plan.techNow : 0;
-    const row = (t, i) => {
-      const cant = !t.afford ? (t.cost ? "needs " + t.short.map((n, k) => (n ? n + " more " + sc.tokens[k] : "")).filter(Boolean).join(", ") : "not enough of one type") : "";
-      return `<div class="tech-row${get && get.id === t.id ? " best" : ""}${t.offered ? " on" : ""}${t.afford ? "" : " cant"}">
-        <label class="tech-pick"><input type="checkbox" data-tech-offer="${t.id}" ${t.offered ? "checked" : ""}><span class="tech-name">${esc(t.label)}</span></label>
-        <span class="tech-cost">${costHTML(t)}</span>
-        <button type="button" class="btn ghost small" data-tech-buy="${t.id}">Bought</button>
-        <span class="mini tech-why">#${i + 1}${t.why.length ? " · " + esc(t.why.join(", ")) : ""}${cant ? " · <b>" + esc(cant) + "</b>" : ""}</span>
-      </div>`;
-    };
-    const idx = new Map(r.items.map((t, i) => [t.id, i]));
-    const main = r.items.filter((t, i) => t.offered || i < 6);
-    const rest = r.items.filter((t, i) => !(t.offered || i < 6));
-    const top3 = r.items.filter((t) => t.afford && t.kind !== "energy").slice(0, 3);
-    const lb = state.gl.lastBuy && state.gl.lastBuy.turn === state.turn ? state.gl.lastBuy : null;
-    const songCostText = (song) => song.cost.map((n, i) => (n ? n + " " + sc.tokens[i] : "")).filter(Boolean).join(" + ");
-    $("#techSummary").textContent = getSong ? "Get: " + getSong.song.name + " (" + songCostText(getSong.song) + ")" : get ? "Get: " + get.label + " (" + costText(get) + ")" : r.offered || r.songsOffered ? "Nothing on offer you can afford yet" : "Tick what your shop offers";
-    const songRow = (x) => `<div class="tech-row song-row${getSong && getSong.id === x.id ? " best" : ""}${x.offered ? " on" : ""}${x.afford ? "" : " cant"}">
-        <label class="tech-pick"><input type="checkbox" data-tech-offer="${x.id}" ${x.offered ? "checked" : ""}><span class="tech-name">${esc(x.song.name)}${x.song.jp && x.song.jp !== x.song.name ? ` <span class="mini song-jp">${esc(x.song.jp)}</span>` : ""}</span></label>
+    const tag = (id) => { const pl = ls.songPlan; return !pl ? "" : pl.focus.indexOf(id) !== -1 ? ' <span class="pill c-clear-pick">pick</span>' : pl.avoid.indexOf(id) !== -1 ? ' <span class="pill c-close-call">skip</span>' : ""; };
+    const songRow = (x) => `<div class="shop-row${getSong && getSong.id === x.id ? " best" : ""}${hold && hold.id === x.id ? " held" : ""}${x.offered ? " on" : ""}${x.afford ? "" : " cant"}">
+        <label class="tech-pick"><input type="checkbox" data-tech-offer="${x.id}" ${x.offered ? "checked" : ""}><span class="tech-name">${esc(x.song.name)}${tag(x.song.id)}</span></label>
         <span class="tech-cost">${chips(x.song.cost)}</span>
         <button type="button" class="btn ghost small" data-song-buy="${x.song.id}">Bought</button>
-        <span class="mini tech-why">${esc(x.why.join(", ") || "not in your token aim")}${x.afford ? "" : " · <b>needs " + esc(x.short.map((n, k) => (n ? n + " more " + sc.tokens[k] : "")).filter(Boolean).join(", ")) + "</b>"}</span>
       </div>`;
-    const songsOpen = r.songsOffered || (plan0 && (plan0.step === "song" || hold));
-    const songsHTML = r.songs.length ? `<details class="tech-more shop-songs"${songsOpen ? " open" : ""}><summary><b>Songs</b> · tick the ones your shop shows${plan0 && plan0.step === "lessons" ? " (they show up after your next technique lesson" + (plan0.techNow > 1 ? "s" : "") + ")" : ""}</summary>
-        <div class="tech-list">${r.songs.map(songRow).join("")}</div></details>` : "";
-    $("#techBody").innerHTML = `
-      <div class="tech-get">${getSong
-        ? `<b>Get: ${esc(getSong.song.name)}</b> (${esc(songCostText(getSong.song))})${getSong.why.length ? ": " + esc(getSong.why.join(", ")) : ""}.`
-        : hold && r.bestSong ? `<b>Hold ${esc(r.bestSong.song.name)}</b>: buy it right after the live on turn ${plan0.live}, so it counts for the next live and saves a lesson.`
-        : get ? `<b>Get: ${esc(get.label)}</b> (${esc(costText(get))})${get.why.length ? ": " + esc(get.why.join(", ")) : ""}${callTech ? ", with this turn's call" : ""}.`
-        : r.offered || r.songsOffered ? "None of your shop's offers is affordable yet: keep training for tokens."
-          : `Best if your shop has it: ${top3.map((t) => `<b>${esc(t.label)}</b> (${esc(costText(t))})`).join(", ")}.`}
-        ${need ? ` Your song plan needs <b>${need}</b> more technique lesson${need > 1 ? "s" : ""} before the next song shows.` : ""}</div>
-      ${lb ? `<div class="tech-last">Bought ${esc(lb.label)} <button type="button" class="btn ghost small" data-tech-undo>Undo</button></div>` : ""}
-      <p class="mini">Your shop shows 3 lessons and new ones after each buy. Tick the ones you see, songs or techniques (for a cost in any type, set the type it shows), and the coach marks the one to get. Tap <b>Bought</b> when you buy one: it takes the tokens, and counts the song or the technique lesson (with its stats).</p>
-      ${songsHTML}
-      <div class="tech-head"><b>Techniques</b></div>
-      <div class="tech-list">${main.map((t) => row(t, idx.get(t.id))).join("")}</div>
-      ${rest.length ? `<details class="tech-more"><summary>${rest.length} more technique${rest.length > 1 ? "s" : ""} this half</summary><div class="tech-list">${rest.map((t) => row(t, idx.get(t.id))).join("")}</div></details>` : ""}
-      <p class="mini">Ranked by what each gives for your stat priority (energy by what it saves you, a skill hint at about 10 SP a level, plus the 5 SP every technique pays at the next live) against what its tokens are worth: a type near the cap is cheap to spend, a type your next songs need costs more. Costs from uma.guide.</p>`;
+    const techRow = (t) => `<div class="shop-row${getTech && getTech.id === t.id ? " best" : ""}${t.offered ? " on" : ""}${t.afford ? "" : " cant"}">
+        <label class="tech-pick"><input type="checkbox" data-tech-offer="${t.id}" ${t.offered ? "checked" : ""}><span class="tech-name">${esc(t.label)}</span></label>
+        <span class="tech-cost">${tCostHTML(t)}</span>
+        <button type="button" class="btn ghost small" data-tech-buy="${t.id}">Bought</button>
+      </div>`;
+    const shownTechs = ls.techs.filter((t, i) => t.offered || i < 4);
+    const moreTechs = ls.techs.filter((t, i) => !(t.offered || i < 4));
+    const lb = state.gl.lastBuy && state.gl.lastBuy.turn === state.turn ? state.gl.lastBuy : null;
+    const phaseText = ls.phase === "songs" ? "Songs first: techniques make songs show up, so the coach picks ones that keep your next song's tokens."
+      : ls.phase === "hold" ? "This half's songs are bought: hold the next one for after the live, and spend spare tokens on stat techniques."
+        : "Song plan done: spare tokens go to stat techniques.";
+    let get;
+    if (getSong) get = `<b>Get: ${esc(getSong.song.name)}</b> (${esc(costText(getSong.song.cost))})${getSong.why.length ? ": " + esc(getSong.why.join(", ")) : ""}.`;
+    else if (hold) get = `<b>Hold ${esc(hold.song.name)}</b>: buy it right after the live on turn ${ls.songPlan.live}.${getTech ? ` Meanwhile get <b>${esc(getTech.label)}</b> (${esc(tCost(getTech))}).` : ""}`;
+    else if (getTech) get = `<b>Get: ${esc(getTech.label)}</b> (${esc(tCost(getTech))})${callTech ? ", with this turn's call" : ""}${getTech.why.length ? ": " + esc(getTech.why.join(", ")) : ""}.`;
+    else if (ls.offered || ls.songsOffered) get = "Nothing in your shop to buy right now: keep training for tokens.";
+    else get = `Tick what your shop shows.${ls.ifOffered.length ? ` If it has them: <b>${ls.ifOffered.map((t) => esc(t.label)).join("</b>, <b>")}</b>.` : ""}`;
+    $("#songSummary").textContent = getSong ? "Get: " + getSong.song.name : hold ? "Hold " + hold.song.name + (getTech ? " · get " + getTech.label : "") : getTech ? "Get: " + getTech.label : E.songsLearned(state) + " of 22 songs";
+    box.innerHTML = `
+      <div class="tech-get">${get}${lb ? ` <button type="button" class="btn ghost small" data-tech-undo>Undo ${esc(lb.label)}</button>` : ""}</div>
+      <div class="shop">
+        <div class="tech-head"><b>Your shop</b> <span class="mini">tick what it shows, tap Bought when you buy</span></div>
+        <details class="shop-part" data-keep="songs"${open("songs", ls.songsOffered > 0)}><summary>Songs (${ls.songs.length})${ls.songsOffered ? ` · ${ls.songsOffered} ticked` : " · open it when your shop shows songs"}</summary>
+          <div class="tech-list">${ls.songs.map(songRow).join("")}</div></details>
+        <details class="shop-part" data-keep="techs"${open("techs", true)}><summary>Techniques</summary>
+          <div class="tech-list">${shownTechs.map(techRow).join("")}</div>
+          ${moreTechs.length ? `<details class="tech-more" data-keep="alltechs"${open("alltechs", false)}><summary>${moreTechs.length} more</summary><div class="tech-list">${moreTechs.map(techRow).join("")}</div></details>` : ""}
+        </details>
+        <p class="mini">${phaseText}</p>
+      </div>`;
   }
 
   // Token typing only refreshes the token aim, so the box keeps focus.
@@ -1625,12 +1601,18 @@
   function rcQuestionHTML(it, q) {
     const id = it.key + "|" + q.id;
     const shown = (v) => (v === "yes" ? "Yes" : v === "no" ? "No" : String(v));
+    // The coach answered it from what it tracks; "Not right?" lets you answer it yourself.
+    if (q.auto && !rcFix[id]) {
+      return `<div class="rc-q rc-auto"><span class="rc-qt">${esc(q.text)}</span> <span class="rc-known">${esc(shown(q.answer))}</span>${q.guessWhy ? ` <span class="mini">(${esc(q.guessWhy)})</span>` : ""} <button type="button" class="linkish" data-rc-fix="${id}">Not right?</button></div>`;
+    }
     const guess = q.guess != null && q.answer == null ? `<span class="mini rc-guess">Coach's guess: ${esc(shown(q.guess))}${q.guessWhy ? " (" + esc(q.guessWhy) + ")" : ""}</span>` : "";
     const ctl = q.type === "number"
       ? `<input type="number" inputmode="numeric" min="0" max="30" class="rc-num" data-rc-num="${id}" value="${q.answer != null ? q.answer : ""}" placeholder="${q.guess != null ? q.guess : ""}" aria-label="${esc(q.text)}">`
       : (q.type === "choice" ? q.options : [["yes", "Yes"], ["no", "No"]]).map(([v, l]) => `<button type="button" class="btn ghost small rc-ans" data-rc-ans="${id}|${v}" aria-pressed="${String(q.answer) === v}">${esc(l)}</button>`).join("");
     return `<div class="rc-q"><span class="rc-qt">${esc(q.text)}</span><span class="rc-ctl">${ctl}</span>${guess}</div>`;
   }
+  // Reset questions you chose to answer yourself instead of the coach's own count.
+  const rcFix = {};
   function runBoxHTML(rc) {
     if (!rc) return "";
     const open = rc.items.filter((it) => it.status === "reset" || it.status === "warn");
@@ -1713,7 +1695,7 @@
   function renderCall() {
     const sc = scenario();
     rec = E.recommend(state, sc);
-    renderTechs();
+    renderShop();
     const a = rec.action;
     const kind = a.kind;
     $("#call").className = "panel call k-" + kind + (a.stat ? " s-" + a.stat : "");

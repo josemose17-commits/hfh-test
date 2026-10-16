@@ -262,16 +262,17 @@ test("Grand Concert songs use the Global English names, with the Japanese one ke
   assert.ok(gl.songs.every((x) => x.name && x.jp), "every song has both names");
 });
 
-test("Grand Concert follows the song plan: lessons first, then an affordable song (not the +Guts one in year one)", () => {
+test("Grand Concert songs first: techniques until songs show, then the most important song (not the +Guts one in year one)", () => {
   const gl = sc("grandlive");
   const s = base({ turn: 10, gl: { songs: {}, tokens: [40, 0, 0, 30, 0], lessons: {} } });
   const plan = E.songPlan(s, gl);
   assert.strictEqual(plan.target, 5);
-  assert.strictEqual(plan.step, "lessons", "year one starts with 1 technique lesson before the first song");
-  assert.doesNotMatch(pick(s, "grandlive").headline, /Learn/);
-  s.gl.lessons = { 0: 1 };
+  assert.strictEqual(plan.step, "song", "year one wants songs");
+  assert.match(pick(s, "grandlive").headline, /^Buy a technique lesson \(no turn used\)/, "no song showing: a technique makes one show up");
+  // The shop shows the +Guts song and a better one: learn the better one.
+  s.gl.shop = { "song:nigekiri": {}, "song:tachiichi": {} };
   const r = pick(s, "grandlive");
-  assert.match(r.headline, /Learn .* \(no turn used\)/);
+  assert.match(r.headline, /^Learn Zero Is Where the Center Stands! \(21 Dance \+ 21 Visual, no turn used\)/, r.headline);
   assert.doesNotMatch(r.headline, /Getaway/, "the +Guts song (also affordable) is skipped in year one");
   const adv = E.songAdvice(s, gl);
   assert.ok(adv.find((a) => a.song.id === "nigekiri").avoid);
@@ -281,8 +282,9 @@ test("Grand Concert song plan: 5 songs and a carry-over in year one, 3 + carry a
   const gl = sc("grandlive");
   const at = (turn, songs, lessons) => E.songPlan(base({ turn, gl: { songs, tokens: [0, 0, 0, 0, 0], lessons } }), gl);
   const five = { kiseki: 6, tachiichi: 8, gothisway: 12, runrun: 16, zensoku: 20 };
-  assert.strictEqual(at(22, five, { 0: 14 }).step, "lessons", "2 more lessons until the 6th song shows");
-  assert.strictEqual(at(22, five, { 0: 16 }).step, "hold", "then hold it for after the live");
+  assert.strictEqual(at(22, { kiseki: 6, tachiichi: 8 }, {}).step, "song", "2 of 5 bought: songs still wanted");
+  assert.strictEqual(at(22, five, {}).step, "hold", "5 bought: hold the next one for after the live, whatever the technique count says");
+  assert.match(at(22, five, {}).text, /hold it/);
   const y2 = at(25, five, {});
   assert.strictEqual(y2.target, 3);
   assert.match(y2.text, /carried over first/);
@@ -1116,16 +1118,25 @@ test("Grand Concert plan counts technique lessons: songs only show up after them
   assert.strictEqual(E.songPlan(st({ gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: { 0: 3 } } }), gl).techLeft, 13);
 });
 
-test("Grand Concert: buy the technique lessons the plan needs, keeping the next song's tokens (turn 24 run)", () => {
+test("Grand Concert songs first: techniques keep the next song's tokens; stat techniques only from spare tokens (turn 24 run)", () => {
   const gl = sc("grandlive");
-  const st = (tokens, lessons) => base({ turn: 18, energy: 80, gl: { songs: {}, tokens, lessons: lessons || {} }, facilities: facs({ speed: { cards: 2 } }) });
+  const st = (tokens, o) => base(Object.assign({ turn: 18, energy: 80, gl: { songs: {}, tokens, lessons: {} }, facilities: facs({ speed: { cards: 2 } }) }, o));
   const r = pick(st([60, 50, 30, 9, 100]), "grandlive");
-  assert.match(r.headline, /^Buy 1 technique lesson \(no turn used\)/, r.headline);
+  assert.match(r.headline, /^Buy a technique lesson \(no turn used\)/, r.headline);
   assert.ok(r.action.notes.some((n) => /songs only show up after technique lessons/.test(n)));
-  // With 1 done, the 1st song is next: no more lessons until it's bought.
-  assert.doesNotMatch(pick(st([60, 50, 30, 9, 100], { 0: 1 }), "grandlive").headline, /technique lesson/);
   // Nothing to spare: no lesson.
-  assert.doesNotMatch(pick(st([5, 0, 0, 0, 3]), "grandlive").headline, /technique lesson/);
+  assert.doesNotMatch(pick(st([5, 0, 0, 0, 3]), "grandlive").headline, /technique/);
+  // The shop shows a song you can't afford yet and techniques: only one that keeps that song's tokens.
+  const shop = { "song:zensoku": {}, "stat:speed": {}, "stat:wit": {} };
+  const ls = E.lessonShop(st([35, 50, 30, 9, 100], { gl: { songs: {}, tokens: [35, 50, 30, 9, 100], lessons: {}, shop } }), gl);
+  assert.strictEqual(ls.pick.kind, "tech");
+  assert.strictEqual(ls.pick.item.id, "stat:wit", "Speed +5 would spend the Dance Full Speed Ahead! needs");
+  // Year one's 5 songs bought: hold the 6th, and spare tokens go to the best stat technique.
+  const five = { kiseki: 6, tachiichi: 8, gothisway: 12, runrun: 16, seishun: 17 };
+  const done = E.lessonShop(st([60, 50, 60, 40, 100], { turn: 20, gl: { songs: five, tokens: [60, 50, 60, 40, 100], lessons: {}, shop: { "song:zensoku": {}, "stat:speed": {}, "stat:stamina": {} } } }), gl);
+  assert.strictEqual(done.phase, "hold");
+  assert.strictEqual(done.pick.kind, "hold");
+  assert.strictEqual(done.pick.tech.id, "stat:speed", "stats: Speed over Stamina for a sprinter");
 });
 
 test("Grand Concert: an Energy technique in the shop beats resting, counts as a lesson and takes its tokens", () => {
@@ -1289,4 +1300,28 @@ test("Lesson shop songs: the call learns the most important song on offer, Done 
   const held = st({ "song:kiseki": {} }, { 0: 16 }, { a: 6, b: 8, c: 10, d: 11, e: 12 });
   held.turn = 22;
   assert.doesNotMatch(pick(held, "grandlive").headline, /Learn/);
+});
+
+test("reset checks answer what the coach knows and ask only the rest", () => {
+  const gl = sc("grandlive");
+  const deck = { trainee: null, slots: [{ id: 30101, lb: 4, bond: 85 }, { id: 30052, lb: 4, bond: 55, dates: { done: 0, unlocked: true } }, { id: 20039, lb: 4, bond: 50 }] };
+  const log = (n) => Array.from({ length: n }, (_, i) => ({ turn: i + 1, kind: "train", label: "x" }));
+  const item = (s, key) => (E.runCheck(s, gl) || { items: [] }).items.find((x) => x.key === key);
+  // Debut: a card at 80+ in your deck answers it; Light Hello's question isn't asked.
+  const d = item(base({ turn: 12, deck, log: log(11) }), "debut");
+  assert.strictEqual(d.status, "ok");
+  assert.ok(d.questions.every((q) => q.auto), "nothing to answer");
+  assert.ok(!d.questions.some((q) => q.id === "lh20"));
+  // Your own answer still wins.
+  const mine = item(base({ turn: 12, deck, log: log(11), runChecks: { debut: { a: { rainbow: "no", lh20: "no" } } } }), "debut");
+  assert.strictEqual(mine.status, "reset");
+  // Year one: songs you've marked and a song ticked in your shop.
+  const five = { kiseki: 6, tachiichi: 8, gothisway: 12, runrun: 16, seishun: 17 };
+  assert.strictEqual(item(base({ turn: 23, gl: { songs: five, tokens: [0, 0, 0, 0, 0], lessons: {}, shop: { "song:zensoku": {} } } }), "songs1").status, "ok");
+  // No songs marked: the coach can't be sure, so it asks.
+  const none = item(base({ turn: 23, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} } }), "songs1");
+  assert.strictEqual(none.status, "ask");
+  assert.ok(none.questions.some((q) => q.id === "songs" && !q.auto));
+  // Before the check's turn it waits, even when it could answer.
+  assert.strictEqual(item(base({ turn: 11, deck, log: log(10) }), "debut").status, "wait");
 });
