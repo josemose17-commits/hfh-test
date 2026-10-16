@@ -21,13 +21,33 @@
   const EVENT_SKILL_CHANCE = { 3: 0.8, 2: 0.65, 1: 0.5 }; // chain events completed in a career
   const ABSENT_WEIGHT = 50; // weight of "not at any training" when cards are dealt
   const RACE_SHARE = 0.1; // share of turns spent on optional races
-  const RACE_SHARE_BY_SCENARIO = { trackblazer: 0.35 }; // race-driven scenarios
+  const RACE_SHARE_BY_SCENARIO = { trackblazer: 0.35, grandlive: 0 }; // race-driven scenarios
   const RACE_REWARD = { stats: 8, sp: 40 }; // per race; scaled by the deck's Race Bonus
   const EVENT_STATS = 120; // stats per stat from random events over a career, about the same for any deck
 
   function rng(seed) {
     let s = seed >>> 0 || 1;
     return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  }
+
+  function grandConcertCalendar(opts) {
+    const sc = opts.scenario;
+    const state = { goals: [], deck: { trainee: opts.trainee || null, slots: [] } };
+    const goals = E.traineeGoals(state, sc);
+    const fixed = new Map(goals.filter(g => g.forced).map(g => [g.turn, g]));
+    const finale = new Map([74, 76, 78].map((t,i) => [t, i]));
+    const races = (D.DATA && D.DATA.races) || [];
+    return Array.from({length: sc.totalTurns}, (_,i) => {
+      const turn = i + 1;
+      if (finale.has(turn)) return {turn, kind:"race", finale:true, statsEach:10, statCount:5, sp:[40,60,80][finale.get(turn)], energy:0};
+      const g = fixed.get(turn);
+      if (!g) return {turn, kind:"free"};
+      const debut = turn === 12 || (g.races || []).some(n => /Debut/.test(n));
+      const race = races.find(r => r.t === turn && (g.races || []).includes(r.n));
+      const grade = race ? race.g : 100;
+      return {turn, kind:"race", finale:false, statsEach:3, statCount:debut?3:grade===100?5:4,
+        sp:debut?30:grade===100?45:35, energy:0};
+    });
   }
 
   function buildCtx(opts) {
@@ -40,16 +60,18 @@
     const last = sc.finale && sc.finale.forced && sc.finale.turns.length ? Math.min.apply(null, sc.finale.turns) - 1 : Math.min(72, sc.totalTurns);
     const turns = [];
     for (let t = 1; t <= Math.max(last, 1); t++) if (!forced.has(t)) turns.push(t);
+    const calendar = sc.id === "grandlive" ? grandConcertCalendar(opts) : null;
+    if (calendar) { turns.length = 0; calendar.forEach(day => turns.push(day.turn)); }
     const camp = new Set(E.campTurns(sc));
     const boost = E.scenarioBoost({ fcal: [] }, sc);
     const t = opts.trainee ? D.trainee(opts.trainee) : null;
     return {
-      sc, w: b.w, target, caps, turns, camp, boost,
+      sc, w: b.w, target, caps, turns, camp, boost, calendar,
       growth: t ? t.g : [0, 0, 0, 0, 0],
       start: t && t.b ? t.b.slice(0, 5) : [100, 100, 100, 100, 100],
       skills: opts.skills || {}, // skill id -> median L on the chosen course and style
       costs: opts.costs || {}, // skill id -> skill point cost, for skills deck.js doesn't know
-      raceShare: opts.raceShare != null ? opts.raceShare : RACE_SHARE_BY_SCENARIO[sc.id] || RACE_SHARE,
+      raceShare: opts.raceShare != null ? opts.raceShare : (RACE_SHARE_BY_SCENARIO[sc.id] != null ? RACE_SHARE_BY_SCENARIO[sc.id] : RACE_SHARE),
       skillWeight: opts.skillWeight != null ? opts.skillWeight : 1,
       known: new Set((t ? [].concat(t.us || [], t.is || [], t.as || []) : []).map(String)),
       runs: opts.runs || 10,
@@ -153,7 +175,8 @@
     const hints = deck.map(() => 0);
     const bondAt = deck.map(() => 0);
     const train = [0, 0, 0, 0, 0];
-    let rests = 0, races = 0, fails = 0;
+    let rests = 0, races = 0, fails = 0, requiredRaces = 0;
+    const scheduled = new Map((ctx.calendar || []).map(day => [day.turn, day]));
     for (let run = 0; run < R; run++) {
       const rand = rng(ctx.seed + run * 7919);
       const x = ctx.start.map((v, i) => Math.min(ctx.caps[STATS[i]], v + initial[i]));
@@ -179,8 +202,19 @@
         for (let i = 0; i < 5; i++) x[i] += (EVENT_STATS + evStats[i]) / ctx.turns.length;
         sp += evSp / ctx.turns.length;
         energy = Math.min(100, energy + evEnergy / ctx.turns.length);
+        const day = scheduled.get(turn);
+        if (day && day.kind === "race") {
+          // Conditional on winning: random rewarded stats are represented by their expectation.
+          const multiplier = 1 + raceBonus / 100;
+          const perStat = Math.floor(day.statsEach * multiplier + 1e-9) * day.statCount / 5;
+          for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + perStat);
+          sp += Math.floor(day.sp * multiplier + 1e-9);
+          energy = Math.max(0, energy - day.energy);
+          requiredRaces++;
+          continue;
+        }
         // Optional races: stats and SP, raised by the deck's race bonus, for some energy.
-        if (turn > 12 && rand() < ctx.raceShare) {
+        if (turn > 12 && (!ctx.calendar || turn <= 72) && rand() < ctx.raceShare) {
           for (let i = 0; i < 5; i++) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + RACE_REWARD.stats / 5 * (1 + raceBonus / 100));
           sp += RACE_REWARD.sp * (1 + raceBonus / 100);
           energy = Math.max(0, energy - 15);
@@ -251,6 +285,15 @@
       trainMix: train.map((n) => n / R),
       rests: rests / R,
       races: races / R,
+      requiredRaces: requiredRaces / R,
+      calendarAssumptions: ctx.calendar ? {
+        requiredRaceResult:"wins assumed; race failure and aptitude feasibility not simulated",
+        randomGoalStats:"expected distribution across five stats",
+        choiceAndFanGoals:"only automatically fixed race objectives scheduled",
+        rewards:"standard goal/URA base rewards; no separate career-end, secret-event or concert rewards added here",
+        scheduledRaces:ctx.calendar.filter(d => d.kind === "race").map(d => d.turn),
+        freeTurns:ctx.calendar.filter(d => d.kind === "free").length
+      } : null,
       fails: fails / R,
       skills: skill.list,
       initial,
@@ -633,7 +676,7 @@
     };
   }
 
-  const api = { optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, statsValue, targetFit, targetSearch, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, statsValue, targetFit, targetSearch, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

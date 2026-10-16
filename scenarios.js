@@ -255,7 +255,7 @@
         chase: { name: "Light Hello", from: 5, event: { mood: 1, stats: { speed: 13, guts: 13 }, bond: 10 }, note: "train with her now, whichever training she's on. Her first-training event gives mood +1, Speed +13, Guts +13 and +10 bond, and her outings can't open until you've trained with her" }
       },
       train: { speed: [8, 0, 4, 0, 0, 4, -19], stamina: [0, 8, 0, 6, 0, 4, -20], power: [0, 4, 9, 0, 0, 4, -20], guts: [2, 0, 2, 7, 0, 4, -20], wit: [2, 0, 0, 0, 6, 5, 5] },
-      finale: { name: "Grand Concert", turns: [], forced: false, note: "The career builds to the Grand Concert. Mark goal races as your game shows them." },
+      finale: { name: "URA Finals", turns: [74, 76, 78], forced: true, note: "After the Grand Live: train on turns 73, 75 and 77; race the URA Qualifier, Semifinal and Final on 74, 76 and 78." },
       summary: "Training earns performance points (Dance, Passion, Vocal, Visual, Mental; 200 each at first). You spend them on song lessons, which take no turn. Promo concerts run every six months from Late December of Junior year.",
       coreLoop: [
         "Lessons don't use a turn, so buy songs as soon as you can afford them. Extra Stat Gain songs add a permanent bonus to that training; Friendship Bonus songs boost every friendship training after the next live.",
