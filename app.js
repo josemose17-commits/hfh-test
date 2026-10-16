@@ -519,38 +519,6 @@
       }
     });
     $("#songsBody").addEventListener("click", (e) => {
-      if (e.target.closest("#lh20Add")) {
-        const sc = scenario();
-        const tokens = state.gl.tokens;
-        const selected = $("#lh20Type").value;
-        const low = Math.min(...tokens);
-        const tied = tokens.map((n, i) => n === low ? i : -1).filter(i => i >= 0);
-        if (selected === "" && tied.length !== 1) { flash("Lowest types are tied: choose the type the game awarded."); return; }
-        const type = selected === "" ? tied[0] : +selected;
-        delete state.gl.lh20Undo;
-        const before = JSON.stringify(state);
-        const prior = tokens[type];
-        tokens[type] = Math.min(E.tokenCap(state, sc), prior + 20);
-        state.extras = state.extras || {};
-        state.extras.lh20 = true;
-        delete state.gl.lh20Undo;
-        const after = JSON.stringify(state);
-        state.gl.lh20Undo = { before, after };
-        commit(true);
-        flash("Light Hello: +" + (tokens[type] - prior) + " " + sc.tokens[type]);
-        return;
-      }
-      if (e.target.closest("#lh20Undo")) {
-        const entry = state.gl.lh20Undo;
-        if (!entry) return;
-        const current = Object.assign({}, state, { gl: Object.assign({}, state.gl) });
-        delete current.gl.lh20Undo;
-        if (JSON.stringify(current) !== entry.after) { flash("Run changed since this event. Correct the token balance manually or undo later actions first."); return; }
-        state = JSON.parse(entry.before);
-        commit(true);
-        flash("Undid Light Hello token event");
-        return;
-      }
       const buy = e.target.closest("[data-tech-buy]");
       if (buy) {
         e.preventDefault();
@@ -991,6 +959,24 @@
   // The coach's pick, what this half still wants and the next reward, your tokens, your shop
   // (songs first, then techniques), the songs you have, and More (plan, token plan, token aim,
   // every scenario reward). The shop part fills in after the call (it follows the call's pick).
+  function currentSongBudgetHTML(sc) {
+    const p = E.tokenPlan(state, sc);
+    const plan = E.songPlan(state, sc);
+    if (!p || !plan) return "";
+    const left = Math.max(0, plan.target - plan.bought);
+    const selected = p.queue.filter(x => x.now).slice(0, left);
+    const need = [0, 0, 0, 0, 0];
+    selected.forEach(x => x.song.cost.forEach((n, i) => need[i] += n));
+    const rows = sc.tokens.map((name, i) => `<tr><th>${esc(name)}</th><td>${need[i]}</td><td>${p.have[i] || 0}</td><td>${Math.max(0, need[i] - (p.have[i] || 0))}</td></tr>`).join("");
+    return `<div class="token-plan"><h3>Tokens for this period's priority songs</h3>
+      <div class="table-wrap"><table class="tp"><thead><tr><th>Token</th><th>Songs cost</th><th>You have</th><th>Still needed</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="mini">${selected.length} selected unlocked songs, of ${left} remaining in this period's plan. Unlocked does not mean currently offered in your shop. These totals use the existing priority ranking, not a new optimization model.</p>
+      ${selected.length < left ? '<p class="mini warn">Not enough unlocked songs in the current priority queue: this is a partial budget.</p>' : ""}
+      <details><summary>Which songs are included?</summary><ul>${selected.map(x => `<li>${esc(x.song.name)} — ${x.song.cost.map((n,i) => n ? `${n} ${esc(sc.tokens[i])}` : "").filter(Boolean).join(", ")}</li>`).join("") || '<li>No additional songs selected for this period.</li>'}</ul></details>
+      <p class="mini">Additional technique budget: approximately ${plan.techLeft * plan.techCost} tokens for ${plan.techLeft} lessons at the planner's assumed cost. Types depend on shop offers; recovery and hint lessons can cost differently. Not included in the song totals above.</p>
+    </div>`;
+  }
+
   function renderSongs() {
     const sc = scenario();
     const panel = $("#songsPanel");
@@ -1017,13 +1003,8 @@
       <div class="gl-status">${status}</div>
       ${nextR ? `<div class="gl-next"><b>Next: ${esc(nextR.label)}</b>, turn ${nextR.turn}: ${esc(nextR.short || nextR.gain)}</div>` : ""}
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
-      ${state.turn >= (sc.tokensFrom || 5) ? `<div class="row-wrap">
-        <button type="button" class="btn ghost small" id="lh20Add">Light Hello +20 tokens</button>
-        <select id="lh20Type" aria-label="Light Hello awarded token type"><option value="">Lowest held (auto)</option>${sc.tokens.map((n, i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select>
-        ${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo token event</button>' : ""}
-        <span class="mini">Press only after the event occurs. For ties or purchases since the event, select the actual awarded type. Undo is available before other run changes.</span>
-      </div>` : ""}
       <p class="mini">Done adds each training's tokens; Bought takes a lesson's cost. Cap ${E.tokenCap(state, sc)} for now (+50 after each live). Fix the numbers here if the game shows different ones.</p>
+      <div id="glCurrentBudget">${currentSongBudgetHTML(sc)}</div>
       <div class="songs-have"><b>Songs you have</b> ${mine.length ? mine.map(([x, t]) => `<span class="have-chip">${esc(x.name)} <button type="button" class="linkish" data-song-rm="${x.id}" aria-label="Remove ${esc(x.name)}">×</button></span>`).join("") : '<span class="mini">none yet</span>'}
         ${addable.length ? `<select id="songAdd" aria-label="Add a song you already have"><option value="">+ add a song you already have</option>${addable.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>` : ""}
         <span class="mini">Adding or removing here doesn't touch your tokens (Bought in your shop does).</span></div>
@@ -1147,6 +1128,8 @@
 
   // Token typing only refreshes the token aim, so the box keeps focus.
   function renderSongsLight() {
+    const budget = $("#glCurrentBudget");
+    if (budget) budget.innerHTML = currentSongBudgetHTML(scenario());
     const el = $("#songsBody .token-aim");
     if (!el) return;
     const tmp = document.createElement("div");
