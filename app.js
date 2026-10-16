@@ -519,6 +519,38 @@
       }
     });
     $("#songsBody").addEventListener("click", (e) => {
+      if (e.target.closest("#lh20Add")) {
+        const sc = scenario();
+        const tokens = state.gl.tokens;
+        const selected = $("#lh20Type").value;
+        const low = Math.min(...tokens);
+        const tied = tokens.map((n, i) => n === low ? i : -1).filter(i => i >= 0);
+        if (selected === "" && tied.length !== 1) { flash("Lowest types are tied: choose the type the game awarded."); return; }
+        const type = selected === "" ? tied[0] : +selected;
+        delete state.gl.lh20Undo;
+        const before = JSON.stringify(state);
+        const prior = tokens[type];
+        tokens[type] = Math.min(E.tokenCap(state, sc), prior + 20);
+        state.extras = state.extras || {};
+        state.extras.lh20 = true;
+        delete state.gl.lh20Undo;
+        const after = JSON.stringify(state);
+        state.gl.lh20Undo = { before, after };
+        commit(true);
+        flash("Light Hello: +" + (tokens[type] - prior) + " " + sc.tokens[type]);
+        return;
+      }
+      if (e.target.closest("#lh20Undo")) {
+        const entry = state.gl.lh20Undo;
+        if (!entry) return;
+        const current = Object.assign({}, state, { gl: Object.assign({}, state.gl) });
+        delete current.gl.lh20Undo;
+        if (JSON.stringify(current) !== entry.after) { flash("Run changed since this event. Correct the token balance manually or undo later actions first."); return; }
+        state = JSON.parse(entry.before);
+        commit(true);
+        flash("Undid Light Hello token event");
+        return;
+      }
       const buy = e.target.closest("[data-tech-buy]");
       if (buy) {
         e.preventDefault();
@@ -985,6 +1017,12 @@
       <div class="gl-status">${status}</div>
       ${nextR ? `<div class="gl-next"><b>Next: ${esc(nextR.label)}</b>, turn ${nextR.turn}: ${esc(nextR.short || nextR.gain)}</div>` : ""}
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
+      ${state.turn >= (sc.tokensFrom || 5) ? `<div class="row-wrap">
+        <button type="button" class="btn ghost small" id="lh20Add">Light Hello +20 tokens</button>
+        <select id="lh20Type" aria-label="Light Hello awarded token type"><option value="">Lowest held (auto)</option>${sc.tokens.map((n, i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select>
+        ${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo token event</button>' : ""}
+        <span class="mini">Press only after the event occurs. For ties or purchases since the event, select the actual awarded type. Undo is available before other run changes.</span>
+      </div>` : ""}
       <p class="mini">Done adds each training's tokens; Bought takes a lesson's cost. Cap ${E.tokenCap(state, sc)} for now (+50 after each live). Fix the numbers here if the game shows different ones.</p>
       <div class="songs-have"><b>Songs you have</b> ${mine.length ? mine.map(([x, t]) => `<span class="have-chip">${esc(x.name)} <button type="button" class="linkish" data-song-rm="${x.id}" aria-label="Remove ${esc(x.name)}">×</button></span>`).join("") : '<span class="mini">none yet</span>'}
         ${addable.length ? `<select id="songAdd" aria-label="Add a song you already have"><option value="">+ add a song you already have</option>${addable.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>` : ""}
