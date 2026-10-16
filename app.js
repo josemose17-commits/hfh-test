@@ -2027,6 +2027,7 @@
     const tg = cmTargets(c);
     // Independent Training parent runs race a G1-heavy agenda: about 1 turn in 4.
     const raceShare = c.independent ? 0.25 : undefined;
+    const simulationMeta = { scenario: scenario().id, trainee: state.deck.trainee };
     const done = (r, opts, fit) => {
       // The predicted stats: the target search's own careers, or a readout from the same
       // simulation for Euophrys' pick.
@@ -2037,7 +2038,7 @@
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
-      optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       wish = null;
       optRun = null;
       if (state.tab === "cm") renderCM();
@@ -2293,6 +2294,34 @@
     </div>`;
   }
 
+  // Render diagnostics from the returned simulation, not a reconstructed expected calendar.
+  function simulationDiagnosticsHTML(r) {
+    const est = r.est || {};
+    const cal = est.calendarAssumptions;
+    const meta = r.simulationMeta || {};
+    const count = (n) => typeof n === "number" && Number.isFinite(n) ? String(Math.round(n * 100) / 100) : "Not reported";
+    const turns = cal && Array.isArray(cal.scheduledRaces) ? cal.scheduledRaces : null;
+    const tr = meta.trainee != null ? D.trainee(meta.trainee) : null;
+    const sc = SCENARIOS.find((s) => s.id === meta.scenario);
+    const ready = !!(turns && typeof cal.freeTurns === "number" && typeof est.requiredRaces === "number");
+    const scenarioName = sc ? sc.name : (meta.scenario || "Not recorded");
+    const traineeName = tr ? traineeLabel(tr) : meta.trainee != null ? String(meta.trainee) : "No trainee selected";
+    return `<details class="pred-help" open>
+      <summary>Simulation diagnostics</summary>
+      <p class="mini">Display build: diagnostics-ui-1. Calendar model: ${ready ? "calendar/reward metadata returned (optimizer version not reported)" : "not verified: calendar/reward metadata missing"}.</p>
+      <p class="mini">Scenario used: ${esc(scenarioName)}. Trainee used: ${esc(traineeName)}.</p>
+      <ul class="mini">
+        <li>Required-race turns: ${turns ? (turns.length ? turns.map((t) => esc(String(t))).join(", ") : "None scheduled") : "Not reported"}.</li>
+        <li>Scheduled required races: ${turns ? turns.length : "Not reported"}. Simulated required races per career: ${count(est.requiredRaces)}.</li>
+        <li>Available training/rest turns: ${count(cal && cal.freeTurns)}.</li>
+        <li>Optional races per career: ${count(est.races)}.</li>
+        <li>Rest turns per career: ${count(est.rests)}.</li>
+      </ul>
+      ${ready ? `<p class="mini">These counts come from the returned simulation. Available turns can be used for training, rest or optional racing; they are not guaranteed trainings.</p>` : `<p class="mini short">Do not infer a correct calendar from the predicted stats alone. This optimizer has not supplied the calendar diagnostics; it may be an older build or a scenario without this instrumentation.</p>`}
+      ${cal ? `<p class="mini">Model assumptions: ${[cal.requiredRaceResult, cal.randomGoalStats, cal.choiceAndFanGoals, cal.rewards].filter(Boolean).map(esc).join("; ")}.</p>` : ""}
+    </details>`;
+  }
+
   // Predicted stats from the simulated careers, against your targets when you set them.
   function predictedHTML(r) {
     if (!r.est) return "";
@@ -2313,9 +2342,10 @@
         ${parent ? `<tr class="blue-row">${E.STATS.map((_, i) => `<td class="num"><span class="mini">3★ ${blue(r.est.stats[i])}%</span></td>`).join("")}</tr>` : ""}</tbody></table>
       <p class="mini">Skill points: about ${r.est.sp}.${parent ? " 3★: the chance of a 3-star blue spark if that stat is the one picked (uma.guide: 0% under 600, 5% to 1100, 10% over). Inheritance isn't in these numbers and adds more." : ""}</p>
       ${f ? `<p class="mini">${f.after.short ? Math.round(f.after.short) + " points short in all" : "Every target reached"}; Euophrys' pick alone: ${Math.round(f.before.short)} short.${f.swaps.length ? " Swapped for your targets: " + f.swaps.map((x) => esc(D.card(x.out).n) + " → " + esc(D.card(x.in).n)).join(", ") + "." : " Euophrys' pick was already the closest."}</p>` : ""}
+      ${simulationDiagnosticsHTML(r)}
       <details class="pred-help"><summary>What the predicted stats include</summary>
-        <p class="mini"><b>Included:</b> your trainee's starting stats and growth bonuses (100 each without a trainee); every training turn up to the finale, with your cards dealt onto trainings by their specialty priority and the best training picked for your targets each turn (rest when energy runs low, failures by energy); the game's training formula with friendship at bond 80+, training effectiveness, stat bonuses, mood effect and unique effects; facility levels (+1 per 4 trainings, level 5 at summer camp); bonds (+7 per training, +5 per hint, plus card events); each card's event stats, skill points and energy; about 120 per stat from random events; optional races on ${r.independent ? "about 1 turn in 4 (a G1-heavy Independent Training agenda)" : "about 1 turn in 10 after the debut (more in Trackblazer)"} with your race bonus; half gains past 1200; your stat caps with sparks; a flat multiplier for the scenario's own bonuses.</p>
-        <p class="mini"><b>Not included, so add these yourself:</b> inheritance (the two inspiration events from your parents' sparks), goal and finale race rewards, friend card outings, New Year events, hint events' stats, scenario mechanics beyond the flat multiplier (Grand Concert songs, items, Overdrive and so on), and mood drops (it assumes Great all career). Real runs usually end higher, mostly from inheritance; what matters is how decks compare.</p>
+        <p class="mini"><b>Included:</b> your trainee's starting stats and growth bonuses (100 each without a trainee); every training turn up to the finale, with your cards dealt onto trainings by their specialty priority and the best training picked for your targets each turn (rest when energy runs low, failures by energy); the game's training formula with friendship at bond 80+, training effectiveness, stat bonuses, mood effect and unique effects; facility levels (+1 per 4 trainings, level 5 at summer camp); bonds (+7 per training, +5 per hint, plus card events); each card's event stats, skill points and energy; about 120 per stat from random events; ${r.est.calendarAssumptions ? "scheduled goal and URA races with winning rewards and Race Bonus; optional races: " + (typeof r.est.races === "number" ? Math.round(r.est.races * 100) / 100 : "not reported") + " per career" : "optional races on " + (r.independent ? "about 1 turn in 4 (a G1-heavy Independent Training agenda)" : "about 1 turn in 10 after the debut (more in Trackblazer)") + " with your race bonus"}; half gains past 1200; your stat caps with sparks; a flat multiplier for the scenario's own bonuses.</p>
+        <p class="mini"><b>Not included, so add these yourself:</b> inheritance (the two inspiration events from your parents' sparks), ${r.est.calendarAssumptions ? "separate career-end and secret-event rewards" : "goal and finale race rewards"}, friend card outings, New Year events, hint events' stats, scenario mechanics beyond the flat multiplier (Grand Concert songs, items, Overdrive and so on), and mood drops (it assumes Great all career). These are simplified estimates, not guaranteed results. Missing mechanics can change both the predicted stats and how decks compare.</p>
       </details>
     </div>`;
   }
