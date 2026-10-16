@@ -1026,7 +1026,7 @@
     const rb = facilityRainbows(f, state) > 0;
     if (rb || set(ex.tok2)) {
       const t2 = set(ex.tokType2) ? +ex.tokType2 : order.find((i) => i !== main);
-      out.push({ type: t2, amount: set(ex.tok2) ? +ex.tok2 : Math.round(est * 0.6), est: !set(ex.tok2), second: true });
+      out.push({ type: t2, amount: set(ex.tok2) ? +ex.tok2 : amount, est: !set(ex.tok2), second: true });
     }
     return out;
   }
@@ -1277,7 +1277,7 @@
         out[pri] += n * per * 0.6;
         out[sec] += n * per * 0.3;
         for (let i = 0; i < 5; i++) if (i !== pri && i !== sec) out[i] += (n * per * 0.1) / 3;
-        extra += n * per * 0.6 * 0.4;
+        extra += n * per * 0.4;
       });
       return { out, extra };
     };
