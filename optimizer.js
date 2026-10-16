@@ -132,6 +132,10 @@
 
   // Simulates `runs` careers with these cards. cards: [{ card, lb }].
   function simulate(ctx, cards) {
+    // Deck slots do not change outcomes: use the same draw assignment for every permutation.
+    cards = cards.slice().sort((a, b) =>
+      Number(a.card.id) - Number(b.card.id) || Number(a.lb) - Number(b.lb)
+    );
     const fx = makeEffects();
     const deck = cards.map((c) => {
       const level = D.levelFor(c.card, c.lb);
