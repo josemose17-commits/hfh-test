@@ -2,6 +2,8 @@
 
 Checked 2026-10-16 against repository base `ea3fcd6`. Scope: competitive ace coaching and the career estimator. Card availability continues to follow the release dates in the support database. Future variants need their own verified event profile; the current profiles deliberately identify the two existing card IDs rather than assuming every future card named Light Hello behaves identically.
 
+The follow-up [shop and concert audit](grand-concert-shop-audit.md) corrects free-song counting, the turn-71 guarantee deadline, actual carry observation, persistent technique prices, purchases/Undo, recovery comparisons and delayed bonus valuation. Its findings supersede the initial fixed carry policy described below.
+
 ## What was wrong, and what changed
 
 | Area | Previous behavior | Result of this change |
@@ -87,7 +89,7 @@ This is a transparent comparison model, not evidence that one deck will always o
 | Fifth-outing outcome probability | Assumed 50/50 | Both reward branches are verified; their probability is not |
 | Shop draws | Sample published category weights; simplified selection within categories | Exact current Global draw distributions have not been verified |
 | Friendship's second Performance type | Sample a currently lowest type other than the first | References describe a strong tendency, not a guaranteed deterministic rule |
-| Song policy | Greedy valuation plus a carry policy | Not a solved dynamic program or a proof of optimal song choices |
+| Song policy | Greedy valuation plus a conditional carry policy comparing delayed benefits with one saved technique | Not a solved dynamic program or a proof of optimal song choices; see the follow-up audit |
 
 Guest/supporter placements, the benefit of support-event-frequency songs, random mood drops, Some Crafty Research's random timing, R's secondary repeat event, other Pal/Group outings, inheritance and some secret/ending rewards remain omitted. Those omissions can affect both absolute stats and deck ordering. The model starts Grand Concert at Normal mood and lets its actions raise mood; it does not simulate every mood-loss event. Comparisons involving another Pal or Group are especially incomplete because only Hello has an explicit lifecycle here.
 
