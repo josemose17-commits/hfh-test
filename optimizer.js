@@ -12,6 +12,7 @@
   const E = root.UmaEngine || (typeof require !== "undefined" ? require("./engine.js") : null);
   const H = root.UmaLightHello || (typeof require !== "undefined" ? require("./light-hello.js") : null);
   const GC = root.UmaGrandConcert || (typeof require !== "undefined" ? require("./grand-concert.js") : null);
+  const SkillEvents = root.UmaSkillEvents || (typeof require !== "undefined" ? require("./skill-events.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const SP_VALUE = 0.35;
   // Value points per length (L) of race gain. Roughly what 1 L of speed stat costs, and in line
@@ -20,7 +21,6 @@
   // Cost discount from hint levels 1-5.
   const HINT_DISCOUNT = [0, 0.1, 0.2, 0.3, 0.35, 0.4];
   const HINT_CHANCE = 0.075; // chance per card per training it is on (before Hint Frequency)
-  const EVENT_SKILL_CHANCE = { 3: 0.8, 2: 0.65, 1: 0.5 }; // chain events completed in a career
   const ABSENT_WEIGHT = 50; // weight of "not at any training" when cards are dealt
   const RACE_SHARE = 0.1; // share of turns spent on optional races
   const RACE_SHARE_BY_SCENARIO = { trackblazer: 0.35, grandlive: 0 }; // race-driven scenarios
@@ -80,6 +80,10 @@
       seed: opts.seed || 12345,
       helloProcRate: opts.helloProcRate != null ? Math.max(0, Math.min(1, +opts.helloProcRate)) : 0.4,
       helloUnlockRate: opts.helloUnlockRate != null ? Math.max(0, Math.min(1, +opts.helloUnlockRate)) : 0.15,
+      eventSuccessRate: opts.eventSuccessRate == null ? 0.5 : Math.max(0, Math.min(1, +opts.eventSuccessRate)),
+      eventSongBoost: opts.eventSongBoost == null ? 0 : Math.max(0, Math.min(0.5, +opts.eventSongBoost)),
+      must: (opts.must || []).map(String),
+      independent: !!opts.independent,
     };
   }
 
@@ -198,6 +202,7 @@
     const liveTotals = { songs: 0, techniques: 0, greatConcerts: 0, lessonEnergy: 0, helloTokens: 0, helloEvents: 0, helloTrainings: 0, helloOutings: 0, helloEnergyRecovered: 0, helloEnergyWasted: 0, helloEnergySaved: 0, helloCompletions: 0, helloUnlocks: 0, lyrics: 0, special: 0 };
     const earnedTokens = [0, 0, 0, 0, 0], spentTokens = [0, 0, 0, 0, 0], finalTokens = [0, 0, 0, 0, 0];
     const helloSkillEvents = new Map();
+    const eventExposures = [];
     const scheduled = new Map((ctx.calendar || []).map(day => [day.turn, day]));
     for (let run = 0; run < R; run++) {
       const rand = rng(ctx.seed + run * 7919);
@@ -257,7 +262,7 @@
             const options = h.p.newYear(true);
             const chosen = energy < maxEnergy - 15 ? options[1] : options[0];
             applyEvent(chosen); bond[k] = Math.min(100, bond[k] + chosen.b);
-            (chosen.h || []).forEach(([id, lv]) => { h.hints[id] = lv; });
+            (chosen.h || []).forEach(([id, lv]) => { h.hints[id] = Math.min(5, (h.hints[id] || 0) + lv); });
           });
           live.shop(turn, energy, maxEnergy, applyEvent);
         }
@@ -358,7 +363,7 @@
           liveTotals.helloEnergyRecovered += recovered;
           liveTotals.helloEnergyWasted += Math.max(0, (outcome.e || 0) - recovered);
           bond[k] = Math.min(100, bond[k] + (outcome.b || 0));
-          (outcome.h || []).forEach(([id, lv]) => { h.hints[id] = lv; });
+          (outcome.h || []).forEach(([id, lv]) => { h.hints[id] = Math.min(5, (h.hints[id] || 0) + lv); });
           h.done++; outings++; liveTotals.helloOutings++;
           finishTurn(turn); continue;
         }
@@ -402,12 +407,13 @@
           if (h.done === 5) liveTotals.helloCompletions++;
           Object.entries(h.hints).forEach(([id, lv]) => {
             const key = h.p.card.id + ":" + id;
-            const old = helloSkillEvents.get(key) || { count: 0, levels: 0 };
-            old.count++; old.levels += lv; helloSkillEvents.set(key, old);
+            const old = helloSkillEvents.get(key) || { count: 0, byLevel: {} };
+            old.count++; old.byLevel[lv] = (old.byLevel[lv] || 0) + 1; helloSkillEvents.set(key, old);
           });
         });
         live.shop(78, energy, maxEnergy, applyEvent, true);
         const ls = live.state;
+        eventExposures.push(ls.eventLevelTurns / ctx.turns.length);
         liveTotals.songs += Object.keys(ls.songs).length + 1;
         liveTotals.techniques += ls.techniques; liveTotals.greatConcerts += ls.greatConcerts; liveTotals.lessonEnergy += ls.lessonEnergy;
         if (ls.songCountAtLyrics >= 16) liveTotals.lyrics++;
@@ -419,6 +425,7 @@
       for (let i = 0; i < 5; i++) statSum[i] += x[i];
     }
     ctx.helloSkillEvents = helloSkillEvents;
+    ctx.eventExposures = eventExposures;
     const skill = skillValue(ctx, deck, hints.map((h) => h / R));
     return {
       value: total / R + skill.value * ctx.skillWeight,
@@ -441,7 +448,8 @@
         Object.fromEntries(Object.entries(liveTotals).map(([k, n]) => [k, n / R])), {
           earnedTokens: earnedTokens.map((n) => n / R), spentTokens: spentTokens.map((n) => n / R), finalTokens: finalTokens.map((n) => n / R),
           model: "discrete-lessons-v1", helloProcRate: ctx.helloProcRate, helloUnlockRate: ctx.helloUnlockRate,
-          assumptions: "repeat event and outing-unlock rates are configurable assumptions; defaults 40% (repeat) and 15% (unlock after meeting and bond 60); fifth outing: assumed 50/50; R +10 token floor; sampled shop approximates published category weights; guest placements, event-chain-rate songs and random mood drops omitted; no flat scenario multiplier"
+          eventSuccessRate: ctx.eventSuccessRate, eventSongBoost: ctx.eventSongBoost, eventLevelExposure: eventExposures.reduce((n, x) => n + x, 0) / R,
+          assumptions: "repeat/unlock rates, conditional event success and chain arrival priors are assumptions; song event levels activate after concerts; per-level relative arrival boost is an experimental assumption (default 0, uncalibrated magnitude); event stats remain spread estimates; guest placements and random mood drops omitted"
         }) : null,
       calendarAssumptions: ctx.calendar ? {
         requiredRaceResult:"wins assumed; race failure and aptitude feasibility not simulated",
@@ -453,6 +461,7 @@
       } : null,
       fails: fails / R,
       skills: skill.list,
+      eventModel: { successRate: ctx.eventSuccessRate, songBoost: ctx.eventSongBoost, completionPriors: SkillEvents.PRIOR, coverage: skill.coverage },
       initial,
       initialSp,
     };
@@ -461,16 +470,22 @@
   // Skills a deck can hint, each valued by its race gain minus its skill point cost.
   function skillValue(ctx, deck, hintEvents) {
     const offers = D.skillOffers();
+    const coverage = [];
     const add = (id, prob, lv, src, kind) => offers.add(id, prob, lv, src, kind);
     deck.forEach((d, k) => {
       const hs = d.card.hs || [];
-      hs.forEach((id) => add(id, 1 - Math.exp(-hintEvents[k] / Math.max(1, hs.length)), d.hintLv, d.card.id, "training"));
-      (d.card.es || []).forEach((id) => {
-        if (d.hello) {
+      hs.forEach((id) => offers.trainingHints(id, hintEvents[k] / Math.max(1, hs.length), d.hintLv, d.card.id));
+      if (d.hello) (d.card.es || []).forEach((id) => {
           const observed = ctx.helloSkillEvents.get(d.card.id + ":" + id);
-          if (observed) add(id, observed.count / ctx.runs, Math.round(observed.levels / observed.count), d.card.id);
-        } else add(id, EVENT_SKILL_CHANCE[d.card.r] || 0.5, 1, d.card.id);
+          if (observed) offers.exclusive(Object.entries(observed.byLevel).map(([level, count]) => ({ p: count / ctx.runs, levels: { [id]: +level } })), d.card.id);
       });
+      else {
+        const exposures = ctx.eventExposures.length ? ctx.eventExposures : [0];
+        const models = exposures.map((exposure) => SkillEvents.model(d.card, ctx, { success: ctx.eventSuccessRate, multiplier: 1 + ctx.eventSongBoost * exposure, independent: ctx.independent }));
+        coverage.push({ card: d.card.id, eventSkills: (d.card.es || []).length, unresolved: models[0].fallback, conditionalNotes: [...new Set(models[0].routes.map((r) => r.note).filter(Boolean))] });
+        models[0].groups.forEach((_, i) => offers.exclusive(models.flatMap((m) => m.groups[i].outcomes.map((o) => ({ p: o.p / models.length, levels: o.levels }))), d.card.id));
+        models[0].fallback.forEach((id) => add(id, models[0].completion, 1, d.card.id));
+      }
     });
     const list = [];
     offers.values().forEach((offer) => {
@@ -485,7 +500,7 @@
     // A career only has the skill points for so many skills: the best few count in full.
     let value = 0;
     list.forEach((s, i) => { if (s.surplus > 0) value += s.p * s.surplus * (i < 8 ? 1 : 0.4); });
-    return { value, list };
+    return { value, list, coverage };
   }
 
   // Characters can only appear once in a deck, and never the trainee's own character.
@@ -635,7 +650,7 @@
   const FIT_TYPES = ["speed", "stamina", "power", "guts", "wit", "friend", "group"];
   function targetSearch(opts, sim, start, pool, borrowPool) {
     const Tr = root.UmaTiers || (typeof require !== "undefined" ? require("./tiers.js") : null);
-    const ctx = buildCtx(Object.assign({}, sim, { runs: FIT_RUNS, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight }));
+    const ctx = buildCtx(Object.assign({}, sim, { runs: FIT_RUNS, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent }));
     const comp = opts.comp || {};
     const locked = new Set(opts.locked || []);
     // Parent decks: the skills are the point, so a swap may cost at most a share of the start
@@ -651,7 +666,8 @@
       const fit = targetFit(c, s.stats, s.sp);
       const sk = Tr.deckSkills(opts, deck);
       const over = sk.value < floor - 1e-9 ? 1e9 : 0;
-      return Object.assign({}, s, { value: fit.value + sw * sk.value + sk.mustValue - over, short: fit.short, skill: sk.value });
+      const skillScore = c.sc.id === "grandlive" && !opts.parent ? s.skillValue : sk.value;
+      return Object.assign({}, s, { value: fit.value + sw * skillScore + sk.mustValue - over, short: fit.short, skill: skillScore });
     };
     const score = (deck) => {
       const k = deck.map((x) => x.id + ":" + x.lb).sort().join(",");
@@ -696,7 +712,7 @@
     }
     // The start and final decks, rescored with more careers for the readout.
     function result() {
-      const full = buildCtx(Object.assign({}, sim, { runs: 16, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight }));
+      const full = buildCtx(Object.assign({}, sim, { runs: 16, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent }));
       // Validate every candidate actually evaluated by the cheap search, not just its winner.
       const finalists = new Map(testedDecks);
       const put = d => finalists.set(d.map(x => x.id + ":" + x.lb).sort().join(","), d);
@@ -715,10 +731,47 @@
       const removed = start.filter(x => !winner.some(y => x.id === y.id && x.lb === y.lb && !!x.borrowed === !!y.borrowed));
       const added = winner.filter(x => !start.some(y => x.id === y.id && x.lb === y.lb && !!x.borrowed === !!y.borrowed));
       removed.forEach((x, i) => { if (added[i]) finalSwaps.push({out:x.id, in:added[i].id, inLb:added[i].lb}); });
-      return { cards: winner, swaps: finalSwaps, before, after, target: ctx.target, caps: ctx.caps,
+      return { cards: winner, startCards: start.map((x) => Object.assign({}, x)), swaps: finalSwaps, before, after, target: ctx.target, caps: ctx.caps,
         validation: { runs:16, candidates:finalists.size, method:"rescore-all-tested" } };
     }
     return { next, result, progress: () => (slots.length ? Math.min(1, step / (slots.length * 2)) : 1) };
+  }
+
+  // Paired, held-out seed checks, separate from the seeds used to search decks.
+  // Ranges across assumptions are sensitivity diagnostics, not confidence bounds.
+  function sensitivity(sim, candidates, settings = {}) {
+    if (candidates.length < 2) throw new Error("Choose at least two decks to compare.");
+    const seeds = settings.seeds || [857563, 962293, 1067023];
+    const runs = settings.runs || 8;
+    const defaults = { helloProcRate: sim.helloProcRate == null ? 0.4 : sim.helloProcRate, helloUnlockRate: sim.helloUnlockRate == null ? 0.15 : sim.helloUnlockRate, eventSuccessRate: sim.eventSuccessRate == null ? 0.5 : sim.eventSuccessRate, eventSongBoost: sim.eventSongBoost || 0 };
+    const proposed = settings.profiles || [
+      { name: "Selected assumptions" }, { name: "Slow Hello", helloProcRate: 0.36, helloUnlockRate: 0.05 }, { name: "Fast Hello", helloProcRate: 0.45, helloUnlockRate: 0.3 },
+      { name: "Conditional event success 25%", eventSuccessRate: 0.25 }, { name: "Conditional event success 75%", eventSuccessRate: 0.75 },
+      { name: "No assumed song-rate boost", eventSongBoost: 0 }, { name: "Assumed chain rate +5% per level", eventSongBoost: 0.05 }, { name: "Assumed chain rate +10% per level", eventSongBoost: 0.1 }
+    ];
+    const seen = new Set();
+    const profiles = proposed.filter((p) => { const values = Object.assign({}, defaults, p); const key = Object.keys(defaults).map((k) => values[k]).join(":"); if (seen.has(key)) return false; seen.add(key); return true; });
+    if (!profiles.length || !seeds.length) throw new Error("Sensitivity needs a profile and a seed.");
+    const jobs = profiles.flatMap((profile, i) => seeds.map((seed) => ({ profile, i, seed })));
+    const comparisons = profiles.map((profile) => candidates.slice(1).map((candidate) => ({ profile: profile.name, candidate: candidate.name, deltas: [] })));
+    let at = 0;
+    function next() {
+      if (at >= jobs.length) return false;
+      const job = jobs[at++];
+      const ctx = buildCtx(Object.assign({}, sim, defaults, job.profile, { seed: job.seed, runs }));
+      const scores = candidates.map((candidate) => {
+        const result = simulate(ctx, candidate.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
+        return targetFit(ctx, result.stats, result.sp).value + ctx.skillWeight * result.skillValue;
+      });
+      comparisons[job.i].forEach((comparison, i) => comparison.deltas.push(scores[0] - scores[i + 1]));
+      return at < jobs.length;
+    }
+    function result() {
+      if (at < jobs.length) throw new Error("Sensitivity check is still running.");
+      return { baseline: candidates[0].name, seeds: seeds.slice(), runsPerSeed: runs, profiles: profiles.map((p) => Object.assign({}, defaults, p)),
+        comparisons: comparisons.flat().map((c) => ({ profile: c.profile, candidate: c.candidate, meanDelta: c.deltas.reduce((n, x) => n + x, 0) / c.deltas.length, minDelta: Math.min(...c.deltas), maxDelta: Math.max(...c.deltas), wins: c.deltas.filter((x) => x > 1e-6).length, ties: c.deltas.filter((x) => Math.abs(x) <= 1e-6).length })) };
+    }
+    return { next, result, progress: () => at / jobs.length };
   }
 
   // Cards you don't own (or own at a lower limit break) that would raise the deck most.
@@ -832,7 +885,7 @@
     };
   }
 
-  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, statsValue, targetFit, targetSearch, L_VALUE, SP_VALUE, HINT_DISCOUNT };
+  const api = { grandConcertCalendar, optimize, simulate, wishlist, runJob, parseChart, tierScores, compOK, buildCtx, statsValue, targetFit, targetSearch, sensitivity, L_VALUE, SP_VALUE, HINT_DISCOUNT };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaOptimizer = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

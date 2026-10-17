@@ -279,28 +279,49 @@
   // a rare Lv5 opportunity must not discount every more likely Lv1 outcome.
   function skillOffers() {
     const skills = new Map();
+    function exclusive(outcomes, source, kind = "event") {
+      const ids = new Set(outcomes.flatMap((o) => Object.keys(o.levels || {})));
+      ids.forEach((id) => {
+        const incoming = [1, 0, 0, 0, 0, 0];
+        outcomes.forEach((o) => { const lv = Math.min(5, Math.max(0, Math.floor((o.levels || {})[id] || 0))); if (lv) { incoming[lv] += o.p; incoming[0] -= o.p; } });
+        incoming[0] = Math.max(0, incoming[0]);
+        const incomingTotal = incoming.reduce((a, b) => a + b, 0);
+        for (let n = 0; n <= 5; n++) incoming[n] /= incomingTotal;
+        const chance = 1 - incoming[0];
+        const x = skills.get(id) || { id, levels: [1, 0, 0, 0, 0, 0], src: [], eventMiss: 1, trainingMiss: 1 };
+        const combined = [0, 0, 0, 0, 0, 0];
+        for (let a = 0; a <= 5; a++) for (let b = 0; b <= 5; b++) combined[Math.min(5, a + b)] += x.levels[a] * incoming[b];
+        const combinedTotal = combined.reduce((a, b) => a + b, 0);
+        x.levels = combined.map((n) => n / combinedTotal);
+        if (!x.src.includes(source)) x.src.push(source);
+        if (kind === "training") x.trainingMiss *= 1 - chance; else x.eventMiss *= 1 - chance;
+        if (chance > 0) skills.set(id, x);
+      });
+    }
     function add(id, probability, level, source, kind = "event") {
       const p = Math.max(0, Math.min(1, probability));
       if (!(p > 0)) return;
       const lv = Math.max(1, Math.min(5, Math.floor(level)));
-      const key = String(id);
-      const x = skills.get(key) || { id: key, miss: [1, 1, 1, 1, 1, 1], lv: 0, src: [], eventMiss: 1, trainingMiss: 1 };
-      for (let n = 1; n <= lv; n++) x.miss[n] *= 1 - p;
-      x.lv = Math.max(x.lv, lv);
-      if (!x.src.includes(source)) x.src.push(source);
-      if (kind === "training") x.trainingMiss *= 1 - p; else x.eventMiss *= 1 - p;
-      skills.set(key, x);
+      exclusive([{ p, levels: { [id]: lv } }], source, kind);
+    }
+    function trainingHints(id, mean, level, source) {
+      const mu = Math.max(0, mean), lv = Math.max(1, Math.min(5, Math.floor(level)));
+      const cap = Math.ceil(5 / lv), outcomes = [];
+      let probability = Math.exp(-mu), remaining = 1 - probability;
+      for (let n = 1; n < cap; n++) { probability *= mu / n; outcomes.push({ p: probability, levels: { [id]: n * lv } }); remaining -= probability; }
+      outcomes.push({ p: Math.max(0, remaining), levels: { [id]: 5 } });
+      exclusive(outcomes, source, "training");
     }
     function values() {
       const discount = [0, 0.1, 0.2, 0.3, 0.35, 0.4];
       return [...skills.values()].map((x) => {
-        const p = 1 - x.miss[1];
-        let expectedDiscount = 0;
-        for (let n = 1; n <= 5; n++) expectedDiscount += (1 - x.miss[n]) * (discount[n] - discount[n - 1]);
-        return { id: x.id, p, lv: x.lv, src: x.src, expectedDiscount, conditionalDiscount: expectedDiscount / p, eventP: 1 - x.eventMiss, trainingP: 1 - x.trainingMiss };
+        const p = 1 - x.levels[0];
+        const expectedDiscount = x.levels.reduce((n, probability, lv) => n + probability * discount[lv], 0);
+        const lv = x.levels.reduce((n, p, i) => p > 0 ? i : n, 0);
+        return { id: x.id, p, lv, src: x.src, expectedDiscount, conditionalDiscount: Math.min(0.4, expectedDiscount / p), eventP: 1 - x.eventMiss, trainingP: 1 - x.trainingMiss };
       });
     }
-    return { add, values };
+    return { add, exclusive, trainingHints, values };
   }
 
   const api = {

@@ -22,6 +22,7 @@
       period: 0, periodSongs: 0, techSince: 0, cycleSongs: 0, periodTech: 0,
       extra: [0, 0, 0, 0, 0], extraSp: 0, friendship: 0, pendingFriendship: 0,
       specialty: 0, pendingSpecialty: 5, shop: null, held: false, begun: false,
+      eventLevel: 0, pendingEventLevel: 0, eventLevelTurns: 0,
       songCountAtLyrics: null, songCountAtFinalDeadline: null, greatConcerts: 0
     };
     const cap = () => 200 + s.concerts * 50;
@@ -89,6 +90,7 @@
           apply({ s: gains });
           s.pendingFriendship += pick.fb || 0;
           if (/Specialty/.test(pick.live || "")) s.pendingSpecialty += 5;
+          if (/Support Event Chance/.test(pick.live || "")) s.pendingEventLevel++;
           s.periodSongs++;
           if (s.held) { s.techSince++; s.held = false; } else { s.cycleSongs++; s.techSince = 0; }
         } else {
@@ -115,6 +117,7 @@
       }
     }
     function start(turn, apply) {
+      s.eventLevelTurns += s.eventLevel;
       if (turn === 5 && !s.begun) { for (let i = 0; i < 5; i++) add(i, 10); s.begun = true; }
       if (turn === 69) s.songCountAtLyrics = Object.keys(s.songs).length + 1;
       if (turn === 72) { s.songCountAtFinalDeadline = Object.keys(s.songs).length + 1; apply({ s: [10, 10, 10, 10, 10] }); s.pendingFriendship += 10; }
@@ -127,6 +130,7 @@
       if (great) s.greatConcerts++;
       s.friendship += s.pendingFriendship; s.pendingFriendship = 0;
       s.specialty += s.pendingSpecialty; s.pendingSpecialty = 0;
+      s.eventLevel += s.pendingEventLevel; s.pendingEventLevel = 0;
       // Every displayed offer survives, including its old technique tier/cost.
       // Only the cadence resets; buying a carried song credits one technique.
       s.held = !!(s.shop && s.shop.kind === "song");

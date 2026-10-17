@@ -258,5 +258,32 @@ function load(state, owned) {
     assert.match(result, /Fifth outing completed/);
     assert.match(result, /Event skills and training hints/);
   } finally { ui.w.close(); }
-  console.log("Coach DOM integration: Hello, purchases, conditions, full-run exports, download, alternative choices and Undo passed.");
+
+  const compare = fixture(30052, 5); compare.tab = "cm";
+  compare.cm = { goal: "race", ownedOnly: true, borrow: false, targets: {}, locked: ids.filter((id) => id !== 30078), comp: { speed: 2, stamina: 2, wit: 1, friend: 1 } };
+  ui = load(compare, Object.fromEntries(ids.concat([30028]).map((id) => [id, 4])));
+  try {
+    const original = ui.w.UmaOptimizer.sensitivity;
+    ui.w.UmaOptimizer.sensitivity = (sim, candidates) => original(sim, candidates, { runs: 2, seeds: [857563, 962293], profiles: [{ name: "Selected assumptions" }, { name: "Assumed boost 10%", eventSongBoost: 0.1 }] });
+    assert.equal(ui.doc.querySelector('[data-cm="eventSuccessRate"]').value, "0.5");
+    assert.equal(ui.doc.querySelector('[data-cm="eventSongBoost"]').value, "0");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    ui.doc.querySelector("#cmRun").click();
+    for (let i = 0; i < 1000 && !ui.doc.querySelector(".opt-result"); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(ui.doc.querySelector(".opt-result"), "Grand Concert refinement with blank target inputs completes");
+    assert.match(ui.doc.querySelector("#cmOut").textContent, /Predicted stats vs your targets/);
+    assert.match(ui.doc.querySelector("#cmOut").textContent, /Event-skill source coverage/);
+    assert.equal(ui.doc.querySelector("#cmSensitivity").disabled, false, ui.doc.querySelector("#cmOut").textContent.slice(0, 350));
+    ui.doc.querySelector("#cmSensitivity").click();
+    for (let i = 0; i < 1000 && !ui.doc.querySelector("#sensitivityResult"); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(ui.doc.querySelector("#sensitivityResult"));
+    assert.match(ui.doc.querySelector("#sensitivityResult").textContent, /held-out seeds/);
+    assert.match(ui.doc.querySelector("#sensitivityResult").textContent, /not confidence intervals/);
+    const boost = ui.doc.querySelector('[data-cm="eventSongBoost"]'); boost.value = "0.1";
+    boost.dispatchEvent(new ui.w.Event("input", { bubbles: true }));
+    assert.equal(ui.saved().cm.eventSongBoost, "0.1");
+    assert.match(ui.doc.querySelector("#cmOut").textContent, /Settings or cards changed/);
+    assert.equal(ui.doc.querySelector("#cmSensitivity").disabled, true);
+  } finally { ui.w.close(); }
+  console.log("Coach DOM integration: coach controls, run exports, event assumptions, automatic Grand Concert refinement and paired deck sensitivity passed.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
