@@ -1830,10 +1830,10 @@
   }
 
   function skillSourcesHTML(skills) {
-    const shown = skills.filter((s) => s.eventP != null && s.trainingP != null);
+    const shown = skills.filter((s) => s.eventP != null && s.trainingP != null && (s.eventP > 0 || s.trainingP > 0));
     if (!shown.length) return "";
     const pct = (n) => Math.round(n * 100) + "%";
-    return `<details class="pred-help"><summary>Event skills and training hints</summary><p class="mini">Estimated opportunities for this race. Training hints share a card's hint pool; high Hint Frequency raises their chance. Event skills use separate completion assumptions. The sources can overlap, so their percentages do not add. Hint discounts follow their actual modeled likelihood, rather than assuming the highest hint level always happens.</p><div class="table-wrap"><table><thead><tr><th>Skill</th><th>Event</th><th>Training hint</th><th>Either</th></tr></thead><tbody>${shown.map((s) => `<tr><th>${esc(debuffOrSkillName(s.id))}</th><td>${pct(s.eventP)}</td><td>${pct(s.trainingP)}</td><td>${pct(s.p)}</td></tr>`).join("")}</tbody></table></div><p class="mini">These are model estimates. Known event choices and success/failure branches are modeled separately. Missing event results retain availability priors. Conditional success is assumed; raw-text conditions and hint-pool sampling remain approximations.</p></details>`;
+    return `<details class="pred-help"><summary>Event skills and training hints</summary><p class="mini">Estimated direct hint opportunities for this race. Training hints share a card's hint pool; high Hint Frequency raises their chance. Event skills use separate completion assumptions. The sources can overlap, so their percentages do not add. Hint discounts follow their actual modeled likelihood, rather than assuming the highest hint level always happens.</p><div class="table-wrap"><table><thead><tr><th>Skill</th><th>Event</th><th>Training hint</th><th>Either source</th></tr></thead><tbody>${shown.map((s) => `<tr><th>${esc(debuffOrSkillName(s.id))}</th><td>${pct(s.eventP)}</td><td>${pct(s.trainingP)}</td><td>${pct(s.sourceP == null ? s.p : s.sourceP)}</td></tr>`).join("")}</tbody></table></div><p class="mini">These are model estimates. Known event choices and success/failure branches are modeled separately. Missing event results retain availability priors. Conditional success is assumed; raw-text conditions and hint-pool sampling remain approximations. Trainee availability and lower tiers unlocked by a gold hint are additional purchase routes.</p></details>`;
   }
 
   function renderCall() {
@@ -1936,6 +1936,7 @@
   let optResult = null; // last result, with the settings it was found for
   let sensitivityJob = null;
   let wish = null; // cards worth getting for optResult
+  let wishJob = null;
   let skillLimit = 60;
 
   const presetById = (id) => (P ? P.list.find((p) => p.id === id) : null);
@@ -2128,11 +2129,11 @@
       if (!est) {
         try {
           const sv = skillMap(p.id, c.style);
-          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare, runs: 16, skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent });
+          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare, runs: 16, skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent, skillBudget: c.goal === "race" });
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
-      if (scenario().id === "grandlive" && c.goal === "race" && est) r.skills = est.skills.filter((s) => s.surplus > 0 && s.p >= 0.15).slice(0, 10);
+      if (scenario().id === "grandlive" && c.goal === "race" && est) r.skills = est.skills;
       optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       wish = null;
       optRun = null;
@@ -2236,7 +2237,7 @@
     if (!r.sensitivity) return "";
     const s = r.sensitivity, anyLoss = s.comparisons.some((x) => x.minDelta < -1e-6);
     const number = (n) => (n > 0 ? "+" : "") + n.toFixed(1);
-    return `<details class="pred-help" open id="sensitivityResult"><summary>Deck sensitivity check</summary><p class="mini${anyLoss ? " warn" : ""}">${anyLoss ? "The lead changes in at least one check. Compare these decks as close or assumption-dependent options." : "The suggested deck keeps its lead or ties in these checks."} This covers the listed alternatives only. Ranges are model sensitivity, not confidence intervals or proof of the best deck.</p><p class="mini">${s.seeds.length} held-out seeds; ${s.runsPerSeed} careers per deck per seed. Positive gaps favor the suggested deck. Scores use target fit, skill points and modeled skill value.</p><div class="table-wrap"><table><thead><tr><th>Alternative</th><th>Assumptions</th><th>Mean gap</th><th>Seed range</th><th>Leads</th></tr></thead><tbody>${s.comparisons.map((x) => `<tr><td>${esc(x.candidate)}</td><td>${esc(x.profile)}</td><td>${number(x.meanDelta)}</td><td>${number(x.minDelta)} to ${number(x.maxDelta)}</td><td>${x.wins}/${s.seeds.length}${x.ties ? " · " + x.ties + " tied" : ""}</td></tr>`).join("")}</tbody></table></div></details>`;
+    return `<details class="pred-help" open id="sensitivityResult"><summary>Deck sensitivity check</summary><p class="mini${anyLoss ? " warn" : ""}">${anyLoss ? "The lead changes in at least one check. Compare these decks as close or assumption-dependent options." : "The suggested deck keeps its lead or ties in these checks."} This covers the listed alternatives only. Ranges are model sensitivity, not confidence intervals or proof of the best deck.</p><p class="mini">${s.seeds.length} held-out seeds; ${s.runsPerSeed} careers per deck per seed. Positive gaps favor the suggested deck. Scores use target fit and affordable skill value; SP contributes through the skills it can buy.</p><div class="table-wrap"><table><thead><tr><th>Alternative</th><th>Assumptions</th><th>Mean gap</th><th>Seed range</th><th>Leads</th></tr></thead><tbody>${s.comparisons.map((x) => `<tr><td>${esc(x.candidate)}</td><td>${esc(x.profile)}</td><td>${number(x.meanDelta)}</td><td>${number(x.minDelta)} to ${number(x.maxDelta)}</td><td>${x.wins}/${s.seeds.length}${x.ties ? " · " + x.ties + " tied" : ""}</td></tr>`).join("")}</tbody></table></div></details>`;
   }
 
   function runWishlist() {
@@ -2245,6 +2246,44 @@
     const p = presetById(optResult.preset);
     const opts = euOpts(c, p);
     const deck = optResult.cards;
+    if (optResult.est && optResult.est.skillBudget) {
+      if (wishJob || optResult.key !== optKey()) return;
+      const r = optResult, jobs = [];
+      const required = (r.must || []).filter((m) => m.p > 0).map((m) => String(m.id));
+      deck.forEach((cur, i) => {
+        if (cur.borrowed || c.locked.includes(cur.id)) return;
+        const rest = deck.filter((_, j) => j !== i), ty = D.card(cur.id).ty;
+        const candidates = D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r >= 2 && x.ty === ty && (owned[x.id] == null || owned[x.id] < 4)).map((x) => ({ id: x.id, lb: 4 }));
+        T.rank(opts, ty, rest, candidates).slice(0, 3).forEach((candidate) => {
+          const cards = deck.map((x, j) => j === i ? { id: candidate.id, lb: candidate.lb, borrowed: false } : x);
+          const covered = new Set(T.deckSkills(opts, cards).must.filter((m) => m.p > 0).map((m) => String(m.id)));
+          if (required.every((id) => covered.has(id))) jobs.push({ cards, id: candidate.id, lb: candidate.lb, replaces: cur.id });
+        });
+      });
+      const sv = skillMap(p.id, c.style);
+      const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: c.independent ? 0.25 : undefined };
+      const token = {}; wishJob = token; wish = null; renderCM();
+      const out = []; let at = 0;
+      const tick = () => {
+        if (wishJob !== token) return;
+        if (optResult !== r || r.key !== optKey()) { wishJob = null; if (state.tab === "cm") renderCM(); return; }
+        try {
+          if (at < jobs.length) {
+            const job = jobs[at++];
+            const check = OPT.sensitivity(sim, [{ name: "Suggested", cards: deck }, { name: "Upgrade", cards: job.cards }], { runs: 8, seeds: [857563], profiles: [{ name: "Selected assumptions" }] });
+            while (check.next()) {} // one paired deck comparison
+            const gain = -check.result().comparisons[0].meanDelta;
+            if (gain > 1e-6) out.push({ id: job.id, lb: job.lb, replaces: job.replaces, gain });
+            setTimeout(tick, 0); return;
+          }
+          const seen = new Set();
+          wish = out.sort((a, b) => b.gain - a.gain).filter((x) => !seen.has(x.id) && seen.add(x.id)).slice(0, 10);
+          r.wishMeta = { runs: 8, seed: 857563, candidates: jobs.length }; wishJob = null;
+          if (state.tab === "cm") renderCM();
+        } catch (err) { wishJob = null; flash(err.message || String(err)); if (state.tab === "cm") renderCM(); }
+      };
+      setTimeout(tick, 0); return;
+    }
     const out = [];
     deck.forEach((cur, i) => {
       if (cur.borrowed || c.locked.indexOf(cur.id) !== -1) return;
@@ -2343,8 +2382,9 @@
     const t = c.targets || {};
     const coach = state.targets && E.STATS.some((s) => state.targets[s] > 0);
     const parent = c.goal === "ace" || c.goal === "debuff";
+    const automatic = state.scenario === "grandlive" && c.goal === "race";
     return `<div class="cm-targets">
-      <span class="mini"><b>Target stats</b> (optional). Blank: Euophrys' pick. Set any, and the optimizer simulates careers and swaps cards until the predicted stats come as close to your targets as it can, keeping good skills and your must-haves. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
+      <span class="mini"><b>Target stats</b> (optional). ${automatic ? "Blank boxes use the build targets below and still receive career comparison." : "Blank: Euophrys' pick. Set any target to compare simulated careers."} The optimizer tries swaps toward your targets while keeping useful skills and must-have coverage. Blank boxes use the ${esc(E.BUILDS[p.build].label)} targets shown.${parent ? " For a parent, stats decide spark quality: the blue spark's stat (picked at random) needs 600+ for any chance of 3★ (5%), and over 1100 doubles it (10%); a final rating of SS (17,500+) also doubles the 3★ chance of white sparks. <b>Stats still count</b> sets how much of the skill score the search may give up to get closer: A little 4%, Some 10%, Half 20%, Fully 40%." : ""}</span>
       <div class="tg-row">${E.STATS.map((s) => `<label class="field"><span>${E.STAT_LABELS[s]}</span><input type="number" inputmode="numeric" min="0" max="2500" step="50" data-cm-target="${s}" value="${t[s] > 0 ? t[s] : ""}" placeholder="${bt[s]}"></label>`).join("")}</div>
       ${coach || cmTargets(c) || parent ? `<div class="row-wrap">${parent ? '<button type="button" class="btn ghost small" id="cmTgSpark">Blue spark targets (1100 each)</button>' : ""}${coach ? '<button type="button" class="btn ghost small" id="cmTgCoach">Use the turn coach\'s targets</button>' : ""}${cmTargets(c) ? '<button type="button" class="btn ghost small" id="cmTgClear">Clear targets</button>' : ""}</div>` : ""}
       ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Grand Concert simulation assumptions</summary><div class="row-wrap"><label class="field"><span>Light Hello repeat-event estimate</span><select data-cm="helloProcRate">${[["0.36", "36% (lower estimate)"], ["0.4", "40% (default estimate)"], ["0.45", "45% (upper estimate)"]].map(([v, l]) => `<option value="${v}" ${c.helloProcRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Outing unlock model, after meeting and bond 60</span><select data-cm="helloUnlockRate">${[["0.05", "5% per turn (slow sensitivity check)"], ["0.15", "15% per turn (default assumption)"], ["0.3", "30% per turn (fast sensitivity check)"]].map(([v, l]) => `<option value="${v}" ${c.helloUnlockRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">These are model assumptions, not confirmed game probabilities. Compare results across settings. The turn coach only uses outings once you mark the actual unlock; expected token events never change its saved balances.</p></details>` : ""}
@@ -2367,7 +2407,7 @@
       <datalist id="cmSkillList">${names.map((n) => `<option value="${esc(n)}"></option>`).join("")}</datalist>
       ${c.must.length ? `<div class="row-wrap">${c.must.map((id) => {
         const n = (src[id] || []).length;
-        const note = known.has(String(id)) ? "your trainee has it" : n ? n + (mine ? " of your cards" : " cards") : mine ? "none of your cards" : "no support card";
+        const note = known.has(String(id)) ? "available to your trainee" : n ? n + (mine ? " of your cards" : " cards") : mine ? "none of your cards" : "no support card";
         return `<span class="chip lockchip${n || known.has(String(id)) ? "" : " warnchip"}">${esc(debuffOrSkillName(id))} <span class="mini">${note}</span> <button type="button" class="linkish" data-must-del="${id}" aria-label="Remove ${esc(debuffOrSkillName(id))}">✕</button></span>`;
       }).join("")}</div>` : ""}
       <p class="mini">The deck will include a card that can hint each must-have skill or give it through an event, before anything else counts. Cards only offer a skill by chance, so the result shows how likely you are to see it.</p>
@@ -2395,6 +2435,26 @@
 
   const debuffOrSkillName = (id) => (window.UmaDebuffs && window.UmaDebuffs[id] ? window.UmaDebuffs[id].n : skillInfo(id)[0]);
 
+  function affordableSkillsHTML(r) {
+    const budget = r.est.skillBudget, example = budget.example;
+    const number = (n) => Number.isInteger(n) ? String(n) : n.toFixed(1);
+    const pct = (n) => Math.round(n * 100) + "%";
+    const skills = r.est.skills.filter((s) => s.sampledAvailableP > 0 || s.selectedP > 0);
+    return `<div id="skillBudget" class="pred-help">
+      <b>Affordable skills</b>
+      ${budget.valuesAvailable ? "" : '<p class="mini warn">No positive race skill values are loaded. This comparison cannot value SP through skills. Load the race results or paste your skill chart, then search again.</p>'}
+      <p class="mini">Average of ${budget.careers} simulated careers: <b>${number(budget.learned)} final skills</b>, spending <b>${number(budget.spent)} / ${number(budget.budget)} SP</b>; ${number(budget.unspent)} SP left. Each career chooses its own set within its own budget, including lower-tier costs. Upgrades count as one final skill.</p>
+      <details><summary>Skills selected across these careers</summary>
+        <p class="mini">Counts describe this sample of simulated careers. Availability includes trainee skills and lower tiers unlocked by gold hints. Purchases also depend on the other available skills and SP. Each career's strongest affordable set uses the chart's additive gains.</p>
+        <div class="table-wrap"><table><thead><tr><th>Final skill</th><th>Available</th><th>Purchased</th><th>Mean SP when purchased</th></tr></thead><tbody>${skills.map((s) => `<tr><th>${esc(skillInfo(s.id)[0])}${s.innate ? ' <span class="mini">trainee</span>' : ""}</th><td>${pct(s.sampledAvailableP)}</td><td>${pct(s.selectedP)}</td><td>${s.meanPurchaseCost == null ? "–" : number(s.meanPurchaseCost)}</td></tr>`).join("") || '<tr><td colspan="4">No valued skills were available in these sampled careers.</td></tr>'}</tbody></table></div>
+      </details>
+      ${example ? `<details id="skillBudgetExample"><summary>One complete purchase example</summary><p class="mini">One simulated career: ${example.budget} SP, ${example.spent} spent, ${example.unspent} left. White/gold and ○/◎ versions replace each other's race gain; the cost includes every required tier.</p><div class="table-wrap"><table><thead><tr><th>Final skill</th><th>Total SP</th><th>Cost breakdown</th></tr></thead><tbody>${example.selected.map((s) => `<tr><th>${esc(skillInfo(s.id)[0])}</th><td>${s.cost}</td><td class="mini">${s.tiers.map((t) => `${esc(skillInfo(t.id)[0])}: ${t.cost} SP (hint Lv${t.hint})`).join(" + ")}</td></tr>`).join("") || '<tr><td colspan="3">No valued purchase fits this career.</td></tr>'}</tbody></table></div></details>` : ""}
+      ${budget.must.length ? `<p class="mini">Must-have purchases in this sample: ${budget.must.map((m) => `${esc(debuffOrSkillName(m.id))} ${pct(m.learnedP)}`).join("; ")}. Available must-haves get purchase priority; a shortfall can mean missing offers or insufficient SP.</p>` : ""}
+      ${budget.unsupported.length ? `<p class="mini warn">Purchase data missing or unsupported; excluded from affordable skill value: ${budget.unsupported.map((id) => esc(skillInfo(id)[0])).join(", ")}.</p>` : ""}
+      <details><summary>Purchase assumptions</summary><p class="mini">All listed innate and awakening skills are assumed available at hint Lv0 and still cost SP. The trainee's own unique is already learned. Skills are bought at career end. Inherited skills, random scenario skills, Fast Learner, free skill grants, evolved skills and the effect of early purchases are omitted. Chart gains are added; skill interactions are not simulated. Event choices use the stated assumptions. SP contributes through affordable purchases, with no extra raw-SP bonus.</p></details>
+    </div>`;
+  }
+
   function optResultHTML(r, c) {
     const p = presetById(r.preset);
     const stale = r.key !== optKey();
@@ -2418,21 +2478,22 @@
       ${mustResultHTML(r, c)}
       ${predictedHTML(r)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>
-      ${r.simulationMeta && r.simulationMeta.scenario === "grandlive" && r.goal === "race" ? '<p class="mini">The final suggestion also considers simulated careers. A lower static total can still finish closer to your targets or offer better modeled skills.</p>' : ""}
+      ${r.simulationMeta && r.simulationMeta.scenario === "grandlive" && r.goal === "race" ? '<p class="mini">The final suggestion also considers simulated careers. A lower static total can still finish closer to your targets or buy a stronger affordable skill set.</p>' : ""}
       ${r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
-        <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${esc(debuffOrSkillName(x.id))} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${esc(skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
+        <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${esc(debuffOrSkillName(x.id))} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.est && r.est.skillBudget ? affordableSkillsHTML(r) : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${esc(skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
       ${skillSourcesHTML(r.skills || [])}
       <div class="row-wrap">
         <button type="button" class="btn" data-use-opt="1">Use this deck in the coach</button>
-        <button type="button" class="btn ghost" id="cmWish">Which cards would improve it?</button>
+        <button type="button" class="btn ghost" id="cmWish" ${wishJob || stale && r.est && r.est.skillBudget ? "disabled" : ""}>${wishJob ? "Comparing upgrades…" : "Which cards would improve it?"}</button>
         ${r.simulationMeta && r.simulationMeta.scenario === "grandlive" && r.goal === "race" ? `<button type="button" class="btn ghost" id="cmSensitivity" ${stale || sensitivityJob || comparisonDecks(r, c).length < 2 ? "disabled" : ""}>${sensitivityJob ? "Checking…" : "Check ranking sensitivity"}</button>${sensitivityJob ? '<span class="mini" id="sensitivityProgress">0%</span>' : ""}` : ""}
       </div>
       ${sensitivityHTML(r)}
+      ${r.wishMeta && Array.isArray(w) ? `<p class="mini" id="wishlistMethod">Upgrade comparison: ${r.wishMeta.candidates} shortlisted replacements, ${r.wishMeta.runs} careers per deck on paired seed ${r.wishMeta.seed}; target fit and affordable skills. Locked cards, borrowing and must-have coverage are preserved. This is a limited sample; use ranking sensitivity for closer checks.</p>` : ""}
       ${Array.isArray(w) ? (w.length ? `<div class="wish"><h4>Cards worth getting</h4><ol>${w.map((x) => {
         const cd = D.card(x.id);
         const have = owned[x.id] != null;
         return `<li><b>${esc(cd.n)}</b> <span class="mini">[${esc(cd.t)}] ${D.RARITY[cd.r]} ${D.typeLabel(cd.ty)}</span> ${have ? "from LB" + owned[x.id] + " to LB4" : "at LB4"}: <b>+${Math.round(x.gain)}</b>, replacing ${esc(D.card(x.replaces).n)}</li>`;
-      }).join("")}</ol><p class="mini">Each card is tried in the slot of the same type, with the other five cards fixed.</p></div>` : `<p class="mini">No card at LB4 beats your current picks for their slots.</p>`) : ""}
+      }).join("")}</ol><p class="mini">Each card is tried in the slot of the same type, with the other five cards fixed.</p></div>` : `<p class="mini">${r.wishMeta ? "No shortlisted LB4 replacement improves the simulated score in this check." : "No card at LB4 beats your current picks for their slots."}</p>`) : ""}
     </div>`;
   }
 
@@ -2538,24 +2599,25 @@
       : "No skills match.";
     return `<section class="panel cm-skills">
       <h3>Skills for this race · ${STYLE_LABEL[c.style]}</h3>
-      <p class="mini">${mine ? "Using <b>your pasted Umalator results</b> for this race and style." : `Median length gain (L = one horse length) of each skill on this course, from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>: the same skill chart, run here for every skill.`} Gold skill costs don't include the white skill they need. L per 100 SP shows which skills are worth their points.</p>
+      <p class="mini">${mine ? "Using <b>your pasted Umalator results</b> for this race and style." : `Median length gain (L = one horse length) of each skill on this course, from <a href="https://alpha123.github.io/uma-tools/umalator-global/" target="_blank" rel="noopener">alpha123's Umalator</a>: the same skill chart, run here for every skill.`} SP totals include every required tier before hints. L per 100 SP uses that full price. The affordable-skill result applies the hints available in each simulated career.</p>
       <div class="db-controls">
         <label class="field grow"><span>Search</span><input data-cm="sq" value="${esc(c.sq || "")}" placeholder="Skill name" autocomplete="off"></label>
         <label class="field"><span>Show</span><select data-cm="sfilter">${opt([["all", "All skills"], ["cards", c.ownedOnly && ownedIds().length ? "Skills my cards can give" : "Skills Global cards can give"], ["deck", "Skills my coach deck can give"]], c.sfilter)}</select></label>
         <label class="chip-toggle"><input type="checkbox" data-cm="globalSkills" ${c.globalSkills ? "checked" : ""}> On Global only</label>
       </div>
-      <div id="cmSkillTable">${shown.length ? `<div class="table-wrap"><table class="skills"><thead><tr><th>Skill</th><th class="num">Median</th>${mine ? "" : '<th class="num opt-col">Mean</th>'}<th class="num">SP</th><th class="num">L / 100 SP</th><th class="opt-col">From cards</th></tr></thead><tbody>
+      <div id="cmSkillTable">${shown.length ? `<div class="table-wrap"><table class="skills"><thead><tr><th>Skill</th><th class="num">Median</th>${mine ? "" : '<th class="num opt-col">Mean</th>'}<th class="num">SP total</th><th class="num">L / 100 SP</th><th class="opt-col">From cards</th></tr></thead><tbody>
         ${shown.map((r) => {
           const info = skillInfo(r.id);
+          const cost = window.UmaSkillBudget.baseCost(r.id);
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
           const must = c.must.indexOf(String(r.id)) !== -1;
-          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}${known.has(r.id) ? ' <span class="pill" title="Your trainee already has this skill (unique, innate or awakening)">she has it</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${info[1] || "–"}</td><td class="num">${info[1] ? (r.L / info[1] * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       <details class="paste">
         <summary>Use your own Umalator results</summary>
-        <p class="mini">In the Umalator's <b>Skill chart</b> tab, set up your own uma for this race and run it, then select the whole results table, copy it and paste it here. The coach reads each skill's median and uses it for this race and running style (${STYLE_LABEL[c.style]}).</p>
+        <p class="mini">In the Umalator's <b>Skill chart</b> tab, set up your own uma for this race and run it, then select the whole results table, copy it and paste it here. The coach reads each skill's median and uses it for this race and running style (${STYLE_LABEL[c.style]}). For purchase comparisons, use a chart with no purchased skills; the Umalator's learned-skill list is not imported.</p>
         <textarea id="cmPaste" rows="5" placeholder="Paste the Skill chart table here"></textarea>
         <div class="row-wrap"><button type="button" class="btn small" id="cmPasteBtn">Use these values</button>${mine ? '<button type="button" class="btn ghost small" id="cmPasteReset">Go back to the built-in values</button>' : ""}</div>
       </details>

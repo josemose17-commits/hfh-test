@@ -4,15 +4,16 @@
 // five trainings (or none), weighted by its specialty priority, and the trainee takes the
 // training worth most for the build. Gains use the same card formula as the turn coach
 // (deck.js), so friendship trainings, training effectiveness, mood effect, stat bonuses and
-// conditional unique effects all count. Skill hints are tracked per card, and every skill a
-// deck can hint is valued by its length gain (median L from alpha123's Umalator) on the chosen
-// Champions Meeting course, minus what it costs in skill points.
+// conditional unique effects all count. Grand Concert race comparisons select affordable
+// final skill sets using median L from alpha123's Umalator on the chosen course. Other
+// comparisons retain the earlier expected skill-surplus heuristic.
 (function (root) {
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
   const E = root.UmaEngine || (typeof require !== "undefined" ? require("./engine.js") : null);
   const H = root.UmaLightHello || (typeof require !== "undefined" ? require("./light-hello.js") : null);
   const GC = root.UmaGrandConcert || (typeof require !== "undefined" ? require("./grand-concert.js") : null);
   const SkillEvents = root.UmaSkillEvents || (typeof require !== "undefined" ? require("./skill-events.js") : null);
+  const SkillBudget = root.UmaSkillBudget || (typeof require !== "undefined" ? require("./skill-budget.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const SP_VALUE = 0.35;
   // Value points per length (L) of race gain. Roughly what 1 L of speed stat costs, and in line
@@ -76,6 +77,9 @@
       raceShare: opts.raceShare != null ? opts.raceShare : (RACE_SHARE_BY_SCENARIO[sc.id] != null ? RACE_SHARE_BY_SCENARIO[sc.id] : RACE_SHARE),
       skillWeight: opts.skillWeight != null ? opts.skillWeight : 1,
       known: new Set((t ? [].concat(t.us || [], t.is || [], t.as || []) : []).map(String)),
+      learned: new Set((t ? t.us || [] : []).map(String)),
+      available: (t ? [].concat(t.is || [], t.as || []) : []).map(String),
+      skillBudget: sc.id === "grandlive" && opts.skillBudget !== false,
       runs: opts.runs || 10,
       seed: opts.seed || 12345,
       helloProcRate: opts.helloProcRate != null ? Math.max(0, Math.min(1, +opts.helloProcRate)) : 0.4,
@@ -203,8 +207,12 @@
     const earnedTokens = [0, 0, 0, 0, 0], spentTokens = [0, 0, 0, 0, 0], finalTokens = [0, 0, 0, 0, 0];
     const helloSkillEvents = new Map();
     const eventExposures = [];
+    const careers = [];
+    const purchase = ctx.skillBudget ? SkillBudget.create({ skills: ctx.skills, costs: ctx.costs, learned: ctx.learned, available: ctx.available, must: ctx.must, lengthValue: L_VALUE, spValue: SP_VALUE }) : null;
+    const eventCtx = purchase ? Object.assign({}, ctx, { known: ctx.learned, must: ctx.must.filter((id) => !ctx.available.includes(id)), eventUtility: purchase.hintUtility, eventUtilityKey: purchase.key }) : ctx;
     const scheduled = new Map((ctx.calendar || []).map(day => [day.turn, day]));
     for (let run = 0; run < R; run++) {
+      const runHints = deck.map(() => 0);
       const rand = rng(ctx.seed + run * 7919);
       const x = ctx.start.map((v, i) => Math.min(ctx.caps[STATS[i]], v + initial[i]));
       let sp = 120 + initialSp;
@@ -379,7 +387,7 @@
         rainbowTotal += bestG.rainbows;
         at[best].forEach((k) => {
           bond[k] = Math.min(100, bond[k] + D.BOND_PER_TRAINING);
-          if ((deck[k].card.hs || []).length && rand() < deck[k].hintRate) { hints[k]++; bond[k] = Math.min(100, bond[k] + D.BOND_PER_HINT); }
+          if ((deck[k].card.hs || []).length && rand() < deck[k].hintRate) { hints[k]++; runHints[k]++; bond[k] = Math.min(100, bond[k] + D.BOND_PER_HINT); }
         });
         if (live) {
           bestTokens.forEach((t) => live.add(t.type, t.amount));
@@ -414,23 +422,28 @@
         live.shop(78, energy, maxEnergy, applyEvent, true);
         const ls = live.state;
         eventExposures.push(ls.eventLevelTurns / ctx.turns.length);
+        if (purchase) careers.push({ sp, hints: runHints, hello: hello.map((h) => h ? Object.assign({}, h.hints) : {}), exposure: ls.eventLevelTurns / ctx.turns.length });
         liveTotals.songs += Object.keys(ls.songs).length + 1;
         liveTotals.techniques += ls.techniques; liveTotals.greatConcerts += ls.greatConcerts; liveTotals.lessonEnergy += ls.lessonEnergy;
         if (ls.songCountAtLyrics >= 16) liveTotals.lyrics++;
         if (ls.songCountAtFinalDeadline >= 18) liveTotals.special++;
         for (let i = 0; i < 5; i++) { earnedTokens[i] += ls.earned[i]; spentTokens[i] += ls.spent[i]; finalTokens[i] += ls.tokens[i]; }
       }
-      total += statsValue(ctx, x) + sp * SP_VALUE;
+      total += statsValue(ctx, x) + (purchase ? 0 : sp * SP_VALUE);
       spTotal += sp;
       for (let i = 0; i < 5; i++) statSum[i] += x[i];
     }
     ctx.helloSkillEvents = helloSkillEvents;
     ctx.eventExposures = eventExposures;
-    const skill = skillValue(ctx, deck, hints.map((h) => h / R));
+    Object.assign(eventCtx, { helloSkillEvents, eventExposures });
+    const skill = skillValue(eventCtx, deck, hints.map((h) => h / R));
+    const budget = purchase ? affordableSkills(ctx, eventCtx, purchase, deck, careers, skill.list) : null;
+    if (budget) { skill.value = budget.value; skill.list = budget.skills; }
     return {
       value: total / R + skill.value * ctx.skillWeight,
       trainValue: total / R,
       skillValue: skill.value,
+      skillBudget: budget && budget.summary,
       stats: statSum.map((s) => Math.round(s / R)),
       sp: Math.round(spTotal / R),
       rainbows: rainbowTotal / R,
@@ -465,6 +478,71 @@
       initial,
       initialSp,
     };
+  }
+
+  // Sample complete event routes and distribute each collected training hint to
+  // one pool skill. These streams do not change the training/calendar random draws.
+  // Stable card-specific seeds preserve pairing when deck order changes.
+  function affordableSkills(ctx, eventCtx, purchase, deck, careers, analytic) {
+    const plans = [], rows = new Map(analytic.filter((s) => purchase.chain(s.id)).map((s) => [String(s.id), Object.assign({}, s, { offered: 0, selected: 0, spent: 0, givenBy: new Set() })]));
+    const diagnosticRows = new Map(analytic.map((s) => [String(s.id), s]));
+    const unsupported = new Set();
+    careers.forEach((career, run) => {
+      const levels = {}, sources = new Map();
+      function add(id, lv, card) {
+        id = String(id); if (!(lv > 0)) return;
+        levels[id] = Math.min(5, (levels[id] || 0) + lv);
+        if (!sources.has(id)) sources.set(id, new Set()); sources.get(id).add(card);
+      }
+      deck.forEach((d, k) => {
+        const seed = (ctx.seed + run * 7919) ^ Math.imul(+d.card.id, 2654435761);
+        const training = rng(seed ^ 0x19e7d31), event = rng(seed ^ 0x428bd57);
+        const hs = d.card.hs || [];
+        for (let n = 0; n < career.hints[k] && hs.length; n++) add(hs[Math.floor(training() * hs.length)], d.hintLv, d.card.id);
+        if (d.hello) Object.entries(career.hello[k]).forEach(([id, lv]) => add(id, lv, d.card.id));
+        else {
+          const model = SkillEvents.model(d.card, eventCtx, { success: ctx.eventSuccessRate, multiplier: 1 + ctx.eventSongBoost * career.exposure, independent: ctx.independent });
+          model.groups.forEach((group) => {
+            let r = event();
+            const outcome = group.outcomes.find((o) => (r -= o.p) < 0);
+            Object.entries(outcome ? outcome.levels : {}).forEach(([id, lv]) => add(id, lv, d.card.id));
+          });
+          model.fallback.forEach((id) => { if (event() < model.completion) add(id, 1, d.card.id); });
+        }
+      });
+      const plan = purchase.solve(levels, career.sp);
+      plan.hintLevels = levels;
+      plan.unsupported.forEach((id) => unsupported.add(id));
+      plan.offered.forEach((id) => {
+        if (!rows.has(id)) rows.set(id, Object.assign({}, diagnosticRows.get(id) || { id, L: ctx.skills[id] || 0, p: 0, src: [], eventP: 0, trainingP: 0 }, { offered: 0, selected: 0, spent: 0, givenBy: new Set() }));
+        const row = rows.get(id); row.offered++;
+        // A gold hint also unlocks its lower tiers for purchase.
+        Object.entries(levels).forEach(([hintId]) => {
+          if (purchase.unlocks(hintId).includes(id)) (sources.get(hintId) || []).forEach((card) => row.givenBy.add(card));
+        });
+      });
+      plan.selected.forEach((s) => { const row = rows.get(s.id); row.selected++; row.spent += s.cost; });
+      plans.push(plan);
+    });
+    const R = plans.length;
+    const avg = (key) => plans.reduce((n, p) => n + p[key], 0) / R;
+    const skills = [...rows.values()].map((s) => {
+      const selectedP = s.selected / R;
+      return Object.assign({}, s, { sourceP: diagnosticRows.has(s.id) ? diagnosticRows.get(s.id).p : 0,
+        p: ctx.available.includes(s.id) ? 1 : diagnosticRows.has(s.id) ? s.p : s.offered / R,
+        sampledAvailableP: s.offered / R, selectedP, meanPurchaseCost: s.selected ? s.spent / s.selected : null,
+        src: [...new Set(s.src.concat([...s.givenBy]))], innate: ctx.available.includes(s.id), raceValue: s.L * L_VALUE, surplus: undefined,
+        offered: undefined, selected: undefined, spent: undefined, givenBy: undefined });
+    }).sort((a, b) => b.selectedP * b.L - a.selectedP * a.L || +a.id - +b.id);
+    const ordered = plans.slice().sort((a, b) => a.budget - b.budget);
+    const example = ordered[Math.floor((ordered.length - 1) / 2)];
+    const summary = { model: "sampled-skill-budget-v1", careers: R, budget: avg("budget"), spent: avg("spent"), unspent: avg("unspent"),
+      valuesAvailable: Object.values(ctx.skills).some((n) => Number.isFinite(n) && n > 0),
+      learned: plans.reduce((n, p) => n + p.selected.length, 0) / R, L: avg("L"),
+      must: ctx.must.map((id) => ({ id, learnedP: plans.filter((p) => !p.unmetMust.includes(id)).length / R })),
+      unsupported: [...unsupported].sort(), example, plans,
+      assumptions: "end-of-career purchases; all listed innate/awakening skills available at Lv0; own unique already learned; no inherited or scenario-random skills, Fast Learner, early purchases, free grants or evolved skills; additive chart gains; independent training-hint pool draws; event routes use stated priors; must-haves prioritize affordable purchases; SP is scored through affordable skills, without a second raw-SP bonus" };
+    return { value: avg("value"), skills, summary };
   }
 
   // Skills a deck can hint, each valued by its race gain minus its skill point cost.
@@ -631,7 +709,7 @@
       value -= miss * (1 + miss / 500) * (1 + ctx.w[s] / top);
       value += 0.1 * Math.max(0, Math.min(stats[i], ctx.caps[s]) - t);
     });
-    return { value: value + sp * SP_VALUE, short: Math.round(short) };
+    return { value: value + (ctx.skillBudget ? 0 : sp * SP_VALUE), short: Math.round(short) };
   }
 
   // Starts from a deck (Euophrys' pick) and goes slot by slot: the best few cards of each type
@@ -650,7 +728,7 @@
   const FIT_TYPES = ["speed", "stamina", "power", "guts", "wit", "friend", "group"];
   function targetSearch(opts, sim, start, pool, borrowPool) {
     const Tr = root.UmaTiers || (typeof require !== "undefined" ? require("./tiers.js") : null);
-    const ctx = buildCtx(Object.assign({}, sim, { runs: FIT_RUNS, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent }));
+    const ctx = buildCtx(Object.assign({}, sim, { runs: FIT_RUNS, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent }));
     const comp = opts.comp || {};
     const locked = new Set(opts.locked || []);
     // Parent decks: the skills are the point, so a swap may cost at most a share of the start
@@ -712,7 +790,7 @@
     }
     // The start and final decks, rescored with more careers for the readout.
     function result() {
-      const full = buildCtx(Object.assign({}, sim, { runs: 16, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent }));
+      const full = buildCtx(Object.assign({}, sim, { runs: 16, skills: opts.skills, costs: opts.costs, skillWeight: opts.skillWeight, must: opts.must, independent: opts.independent, skillBudget: !opts.parent }));
       // Validate every candidate actually evaluated by the cheap search, not just its winner.
       const finalists = new Map(testedDecks);
       const put = d => finalists.set(d.map(x => x.id + ":" + x.lb).sort().join(","), d);
