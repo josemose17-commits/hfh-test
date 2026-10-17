@@ -47,9 +47,11 @@ function load(state, owned) {
     assert.equal(ui.saved().gl.tokens[1], 40);
     assert.equal(ui.saved().stats.guts, 404);
     assert.equal(ui.saved().deck.slots[0].bond, 97);
+    assert.equal(ui.saved().runPending.filter((e) => e.kind === "helloEvent").length, 1);
     ui.doc.querySelector("#lh20Undo").click();
     assert.equal(ui.saved().stats.guts, 400);
     assert.equal(ui.saved().gl.tokens[1], 20);
+    assert.equal((ui.saved().runPending || []).length, 0);
     ui.doc.querySelector('[data-outing-result="great"]').click();
     assert.match(ui.doc.querySelector("#call .after").textContent, /68/);
     ui.doc.querySelector("#doneBtn").click();
@@ -144,6 +146,75 @@ function load(state, owned) {
   } finally { ui.w.close(); }
 
   const state = fixture();
+  const storage = fixture(30052, 5); storage.turn = 25; storage.energy = 100;
+  ui = load(storage);
+  try {
+    for (let i = 0; i < 6; i++) {
+      const energy = ui.doc.querySelector("#energy"); energy.value = "100";
+      energy.dispatchEvent(new ui.w.Event("input", { bubbles: true }));
+      assert.equal(ui.w.UmaEngine.recommend(ui.saved(), ui.w.UmaScenarios.SCENARIOS.find((s) => s.id === "grandlive")).action.kind, "train");
+      ui.doc.querySelector("#doneBtn").click();
+      ui.doc.querySelector("#lh20Type").value = "1";
+      ui.doc.querySelector("#lh20Add").click();
+      assert.equal(ui.saved().gl.lh20Undo.v, 2);
+      assert.equal(JSON.parse(ui.saved().gl.lh20Undo.before).log, undefined);
+      assert.ok(ui.w.localStorage.getItem("uma-turn-coach-v2").length < 500000, "event backups must not embed the growing turn history");
+    }
+    assert.equal(ui.saved().gl.helloEvents.length, 6);
+    const turns = ui.saved().log.length;
+    ui.doc.querySelector("#doneBtn").click();
+    ui.doc.querySelector("#undoBtn").click();
+    ui.doc.querySelector("#lh20Undo").click();
+    assert.equal(ui.saved().log.length, turns, "Hello Undo preserves the independently restored turn history");
+    assert.equal(ui.saved().gl.helloEvents.length, 5);
+  } finally { ui.w.close(); }
+
+  const diagnostics = fixture(30052, 5); diagnostics.energy = 100;
+  diagnostics.gl.tokens = [100, 100, 100, 100, 100]; diagnostics.gl.shop = { "song:tachiichi": { turn: 30 } };
+  ui = load(diagnostics);
+  try {
+    // Export is available with reset advice off, before any command is logged.
+    ui.doc.querySelector('[data-tab="log"]').click();
+    const note = ui.doc.querySelector("[data-run-why]"); note.value = "second concert check";
+    note.dispatchEvent(new ui.w.Event("input", { bubbles: true }));
+    ui.doc.querySelector("#tabBody [data-run-copy]").click();
+    let report = JSON.parse(ui.doc.querySelector("#tabBody [data-run-output]").value.split("\n\n").slice(-1)[0]);
+    assert.equal(report.why, "second concert check"); assert.equal(report.coverage.loggedTurns, 0);
+    ui.doc.querySelector('[data-song-buy="tachiichi"]').click();
+    const songCost = ui.w.UmaScenarios.SCENARIOS.find((s) => s.id === "grandlive").songs.find((s) => s.id === "tachiichi").cost;
+    assert.equal(ui.saved().runPending[0].kind, "purchase");
+    // Entered balances are corrections, not training income.
+    const balance = ui.doc.querySelector('[data-tok="4"]'); balance.value = String(+balance.value + 7);
+    balance.dispatchEvent(new ui.w.Event("input", { bubbles: true }));
+    const rec = ui.w.UmaEngine.recommend(ui.saved(), ui.w.UmaScenarios.SCENARIOS.find((s) => s.id === "grandlive"));
+    const alternative = rec.ranked.findIndex((o, i) => i > 0 && o.kind === "train");
+    assert.ok(alternative > 0);
+    ui.doc.querySelector('[data-row="' + alternative + '"]').click();
+    ui.doc.querySelector('[data-did="' + alternative + '"]').click();
+    const log = ui.saved().log[0];
+    assert.equal(log.diagnostics.followedRecommendation, false);
+    assert.equal(log.diagnostics.events.length, 2);
+    assert.equal(ui.saved().runPending, undefined);
+    ui.doc.querySelector("#tabBody [data-run-copy]").click();
+    report = JSON.parse(ui.doc.querySelector("#tabBody [data-run-output]").value.split("\n\n").slice(-1)[0]);
+    assert.equal(report.coverage.detailedTurns, 1);
+    assert.deepEqual(report.totals.netPurchaseSpend, Array.from(songCost));
+    assert.equal(report.totals.balanceCorrections[4], 7);
+    assert.deepEqual(report.totals.unreconciled, [0, 0, 0, 0, 0]);
+    assert.equal(report.turns[0].inputs.facilities.length, 5);
+    let downloaded;
+    ui.w.URL.createObjectURL = (blob) => { assert.equal(blob.type, "application/json"); return "blob:run-report"; };
+    ui.w.URL.revokeObjectURL = () => {};
+    ui.w.HTMLAnchorElement.prototype.click = function () { downloaded = this.download; };
+    ui.doc.querySelector("#tabBody [data-run-download]").click();
+    assert.equal(downloaded, "uma-run-grandlive-turn-31.json");
+    ui.doc.querySelector("#undoBtn").click();
+    assert.equal(ui.saved().log.length, 0); assert.equal(ui.saved().runPending.length, 2);
+    ui.doc.querySelector("#report [data-run-copy]").click();
+    report = JSON.parse(ui.doc.querySelector("#reportOut").value.split("\n\n").slice(-1)[0]);
+    assert.equal(report.events.length, 2); assert.equal(report.coverage.loggedTurns, 0);
+  } finally { ui.w.close(); }
+
   const feedback = fixture(); feedback.turn = 34; feedback.energy = 80;
   feedback.gl.songs = { tachiichi: 20 };
   feedback.facilities[0].members = [0];
@@ -187,5 +258,5 @@ function load(state, owned) {
     assert.match(result, /Fifth outing completed/);
     assert.match(result, /Event skills and training hints/);
   } finally { ui.w.close(); }
-  console.log("Coach DOM integration: SSR/R Hello events, Undo, outings, target search, song rewards/history, typed purchases, held prices and deadline status passed.");
+  console.log("Coach DOM integration: Hello, purchases, conditions, full-run exports, download, alternative choices and Undo passed.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -57,6 +57,14 @@ The checks (under **Settings → Reset advice**: **Building an ace (strict)**, t
 - **Yukoma Hot Springs**: on turn 21 (Junior November), "How many springs have you dug?": fewer than 2 is a reset (game8).
 - **Bonds** (every scenario, ace mode): going into Classic (turn 24), "Are most of your stat cards (60% or more) at friendship?": a no is a warning, never a reset on its own.
 
+## Detailed run reports
+
+Open **Career log → Detailed run report**, or **This call looks wrong? → Copy full run report**. Reports are available even with reset advice off and before any command is logged. **Download run JSON** saves a file for a larger run. The existing reset-check summary uses the same detailed export.
+
+New logged turns retain the recommendation, every ranked option, your actual chosen command, entered training inputs, the recorded result and the command's closing state. Grand Concert adds per-type token accounting, cap losses and progress at each recorded concert. Song and technique purchases made between commands, purchase Undo, observed Hello events, song-history corrections and entered token-balance corrections are included. Formula amounts and assumed token types are identified; expected Hello events never become recorded income. Token corrections remain separate from earned tokens and recorded purchase costs.
+
+Existing saves remain usable. Their original input snapshots are exported where available, while missing decisions, outcomes and purchases stay unknown. The report identifies gaps and partial history instead of reconstructing an unobserved run. Full reporting starts with actions recorded in this version. Reports are generated locally and shared only when you copy or download them. See the [diagnostics audit](docs/grand-concert-run-diagnostics.md).
+
 ## My cards
 
 Mark the support cards you own and their limit break, with the **Owned** picker on any card or **Quick add** under **My cards** in the Support cards tab. They're saved in your browser. **Copy backup code** gives a short code (`UMA1:...`) you can keep or paste into **Restore** on another device. When you add a card you own to your deck, it starts at your limit break, and **Cards I own** limits the deck picker to your cards.

@@ -8,6 +8,7 @@
   const D = window.UmaDeck;
   const H = window.UmaLightHello;
   const C = window.UmaConditions;
+  const R = window.UmaRunReport;
   const HAS_DATA = !!(D && D.DATA);
   const TODAY = new Date().toISOString().slice(0, 10);
   const APT = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
@@ -514,7 +515,9 @@
       }
       const i = e.target.dataset.tok;
       if (i == null) return;
+      const before = state.gl.tokens.slice();
       state.gl.tokens[+i] = Math.max(0, +e.target.value || 0);
+      R.balanceCorrection(state, before, +i);
       commit();
       renderSongsLight();
     });
@@ -537,6 +540,7 @@
         const at = +$("#songAddTurn").value;
         if (!Number.isInteger(at) || at < song.from || at > state.turn) { flash("Choose the actual learned turn, from " + song.from + " through " + state.turn + "."); e.target.value = ""; return; }
         state.gl.songs[song.id] = at;
+        R.event(state, "songBackfill", { id: song.id, label: song.name, learnedTurn: at, paid: false });
         commit(true);
         flash("Added " + song.name + " to your songs");
       }
@@ -548,25 +552,32 @@
         if (selected === "" && tied.length !== 1) { flash("Choose the actual awarded type: lowest balances are tied."); return; }
         const type = selected === "" ? tied[0] : +selected;
         delete state.gl.lh20Undo;
-        const before = JSON.stringify(state);
+        // The event does not change the turn log. Keeping the full log inside
+        // every event backup makes subsequent turn snapshots grow recursively.
+        const before = JSON.stringify(Object.assign({}, state, { log: undefined }));
         const amount = +$("#lhAmount").value;
         const last = (state.log || []).slice(-1)[0];
         const turn = last && last.kind === "train" && last.turn === state.turn - 1 ? last.turn : state.turn;
         const recorded = E.recordHelloEvent(state, sc, { amount, type, mood: $("#lhMood").checked, turn });
         if (!recorded) { flash("No eligible Light Hello event, or it was already recorded for that turn."); return; }
-        const entry = { before, after: "" }; state.gl.lh20Undo = entry;
+        R.event(state, "helloEvent", recorded, recorded.turn);
+        const entry = { v: 2, before, after: "" }; state.gl.lh20Undo = entry;
         commit(true);
         // Rendering normalizes a few saved fields. Compare Undo against the
         // resulting state, rather than the pre-render object.
-        const current = Object.assign({}, state, { gl: Object.assign({}, state.gl) }); delete current.gl.lh20Undo;
+        const current = Object.assign({}, state, { log: undefined, gl: Object.assign({}, state.gl) }); delete current.gl.lh20Undo;
         entry.after = JSON.stringify(current); save();
         flash("Light Hello: +" + recorded.credited + " " + sc.tokens[type] + ", Guts +" + recorded.guts + ", +7 bond; " + recorded.sp + " SP in game"); return;
       }
       if (e.target.closest("#lh20Undo")) {
         const entry = state.gl.lh20Undo; if (!entry) return;
         const current = Object.assign({}, state, {gl: Object.assign({}, state.gl)}); delete current.gl.lh20Undo;
+        if (entry.v === 2) delete current.log;
         if (JSON.stringify(current) !== entry.after) { flash("Run changed since event: undo later actions first or correct balances manually."); return; }
-        state = JSON.parse(entry.before); commit(true); flash("Undid Light Hello event"); return;
+        const log = state.log;
+        state = JSON.parse(entry.before);
+        if (entry.v === 2) state.log = log;
+        commit(true); flash("Undid Light Hello event"); return;
       }
       const buy = e.target.closest("[data-tech-buy]");
       if (buy) {
@@ -576,6 +587,7 @@
         const previous = state.gl.lastBuy;
         E.buyTechnique(state, scenario(), id, offer ? offer.type : null);
         if (state.gl.lastBuy === previous) { flash("Purchase not recorded: check your Performance balance and choose the type shown in the shop."); return; }
+        R.purchase(state, state.gl.lastBuy);
         commit(true);
         flash("Bought " + state.gl.lastBuy.label + (state.gl.lastBuy.sp ? "; +" + state.gl.lastBuy.sp + " SP in game" : "") + ": tick your shop's new offers");
         return;
@@ -586,6 +598,7 @@
         const previous = state.gl.lastBuy;
         E.buySong(state, scenario(), sbuy.dataset.songBuy);
         if (state.gl.lastBuy === previous) { flash("Purchase not recorded: check your Performance balance and whether you already learned this song."); return; }
+        R.purchase(state, state.gl.lastBuy);
         commit(true);
         flash("Learned " + state.gl.lastBuy.label + (state.gl.lastBuy.sp ? "; +" + state.gl.lastBuy.sp + " SP in game" : "") + ": tick your shop's new offers");
         return;
@@ -593,7 +606,9 @@
       const rm = e.target.closest("[data-song-rm]");
       if (rm) {
         const song = scenario().songs.find((x) => x.id === rm.dataset.songRm);
+        const learnedTurn = state.gl.songs[song.id];
         delete state.gl.songs[song.id];
+        R.event(state, "songRemoval", { id: song.id, label: song.name, learnedTurn, refunded: false });
         commit(true);
         flash("Removed " + song.name + " (tokens unchanged)");
         return;
@@ -603,6 +618,7 @@
         const previous = state.gl.lastBuy;
         E.undoBuy(state);
         if (previous && state.gl.lastBuy === previous) { flash("Run changed since purchase: undo later actions first or correct balances manually."); return; }
+        if (previous) R.purchase(state, previous, true);
         commit(true);
         flash("Undid " + (label || "the buy"));
       }
@@ -830,10 +846,13 @@
     state.example = false;
     const failed = option.kind === "train" ? failPick : "";
     const poor = !!failed && poorPick;
-    const next = E.advance(state, scenario(), option, failed || undefined, { outing: outingPick, cured: curePick });
+    const before = state;
+    const observed = { result: failed || null, outing: outingPick, cured: curePick, gotPracticePoor: poor };
+    const next = E.advance(state, scenario(), option, failed || undefined, observed);
     if (next === state) { flash("The lesson can no longer be bought. Check your shop and Performance balance, then choose again."); return; }
     state = next;
     if (poor) C.set(state, "poor", true);
+    R.recordTurn(before, state, scenario(), rec, option, observed);
     failPick = "";
     curePick = true;
     poorPick = false;
@@ -1708,8 +1727,30 @@
   // The report box keeps what you typed while the coach re-renders.
   let reportOpen = false;
   let reportWhy = "";
+  let runWhy = "";
   document.addEventListener("toggle", (e) => { if (e.target.id === "report") reportOpen = e.target.open; }, true);
   document.addEventListener("input", (e) => { if (e.target.id === "reportWhy") reportWhy = e.target.value; });
+  document.addEventListener("input", (e) => { if (e.target.matches("[data-run-why]")) runWhy = e.target.value; });
+  document.addEventListener("click", (e) => {
+    const button = e.target.closest("[data-run-copy], [data-run-download]");
+    if (!button) return;
+    const box = button.closest("[data-run-export]");
+    const note = box.querySelector("[data-run-why], #reportWhy");
+    const report = R.build(state, scenario(), note ? note.value : "", rec);
+    const out = box.querySelector("[data-run-output]");
+    const text = R.format(report, scenario());
+    out.hidden = false; out.value = text;
+    if (button.hasAttribute("data-run-download")) {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url; link.download = "uma-run-" + scenario().id + "-turn-" + state.turn + ".json";
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      flash("Run report downloaded");
+      return;
+    }
+    try { navigator.clipboard.writeText(text).then(() => flash("Full run report copied: paste it to me"), () => { out.select(); flash("Select the report and copy it"); }); } catch (_) { out.select(); flash("Select the report and copy it"); }
+  });
 
   // Everything needed to check a call: the turn's inputs, deck, tokens and every option's score.
   // ---- Reset check: questions, then reset or finish the run, with a run summary ----
@@ -1765,31 +1806,7 @@
 
   // The whole run so far, for the coach to be fixed: a short readable recap, then the data.
   function runSummary(why) {
-    const sc = scenario();
-    const rc = E.runCheck(state, sc);
-    const t = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
-    const info = E.deckInfo(state);
-    const tg = Object.assign({}, E.BUILDS[state.build].target, state.targets || {});
-    const songs = Object.entries((state.gl && state.gl.songs) || {}).sort((a, b) => a[1] - b[1]).map(([id, turn]) => ((sc.songs || []).find((x) => x.id === id) || { name: id }).name + " (turn " + turn + ")");
-    const lines = [
-      "Uma coach run summary",
-      sc.name + " · " + E.BUILDS[state.build].label + (t ? " · " + t.n : "") + " · turn " + state.turn + " of " + sc.totalTurns + " (" + E.turnInfo(state.turn, sc).text + ")",
-      (why || "").trim() ? "What went wrong: " + why.trim() : "",
-      "Checks: " + (rc ? rc.items.map((it) => it.label + " " + it.status).join("; ") : "none"),
-      "Stats: " + E.STATS.map((s) => E.STAT_LABELS[s] + " " + (state.stats[s] || "?") + "/" + tg[s]).join(", ") + (state.priority ? " · priority " + state.priority.map((s) => E.STAT_LABELS[s]).join(" > ") : ""),
-      info ? "Deck: " + info.used.map((sl) => sl.card.n + " LB" + (state.deck.slots[sl.idx].lb) + " bond " + Math.round(sl.bond)).join(", ") : "",
-      sc.songs ? "Songs: " + (songs.join(", ") || "none") + " · tokens " + sc.tokens.map((n, i) => n + " " + ((state.gl.tokens || [])[i] || 0)).join(", ") : "",
-      "Energy " + state.energy + "/" + (state.maxEnergy || 100) + " · mood " + E.MOODS[state.mood] + " · fans " + (state.fans || 0),
-      "Turns: " + ((state.log || []).map((l) => l.turn + " " + l.label).join("; ") || "none logged")
-    ].filter(Boolean);
-    const data = {
-      v: 1, kind: "run", why: (why || "").trim(), scenario: sc.id, build: state.build, priority: state.priority, trainee: t ? t.n : null, turn: state.turn,
-      stats: state.stats, targets: state.targets || {}, caps: state.caps, sparks: state.sparks, maxEnergy: state.maxEnergy, energy: state.energy, mood: E.MOODS[state.mood], risk: state.risk, fans: state.fans,
-      extras: state.extras, gl: state.gl, runChecks: state.runChecks || {}, checks: rc ? rc.items.map((it) => ({ label: it.label, status: it.status })) : [],
-      deck: (state.deck.slots || []).map((sl) => sl && sl.id ? { id: sl.id, card: D.card(sl.id) ? D.card(sl.id).n : sl.id, lb: sl.lb, bond: Math.round(slotBond(sl)), dates: sl.dates } : null),
-      log: (state.log || []).map((l) => ({ t: l.turn, a: l.label, e: l.energy, m: l.mood }))
-    };
-    return lines.join("\n") + "\n\n" + JSON.stringify(data);
+    return R.format(R.build(state, scenario(), why, rec), scenario());
   }
 
   function turnReport(why) {
@@ -1857,11 +1874,11 @@
         <button type="button" class="btn" id="doneBtn">Done, next turn ▶</button>
         <button type="button" class="btn ghost" id="undoBtn" ${(state.log || []).length ? "" : "disabled"}>Undo last</button>
       </div>
-      <details class="report" id="report" ${reportOpen ? "open" : ""}><summary>This call looks wrong?</summary>
+      <details class="report" id="report" data-run-export ${reportOpen ? "open" : ""}><summary>This call looks wrong?</summary>
         <p class="mini">Say why, then copy the report and paste it to me. It has this turn's inputs, your deck and tokens, and every option's score, so the call can be checked and the coach fixed.</p>
         <textarea id="reportWhy" rows="3" placeholder="e.g. Wit had a rainbow and 2 more cards, I think it beats Power">${esc(reportWhy)}</textarea>
-        <button type="button" class="btn ghost small" id="reportCopy">Copy report</button>
-        <textarea id="reportOut" rows="4" readonly hidden></textarea>
+        <div class="row-wrap"><button type="button" class="btn ghost small" id="reportCopy">Copy this turn</button><button type="button" class="btn ghost small" data-run-copy>Copy full run report</button><button type="button" class="btn ghost small" data-run-download>Download run JSON</button></div>
+        <textarea id="reportOut" data-run-output rows="4" readonly hidden></textarea>
       </details>`;
     const fp = $("#fanPlan");
     const gp = rec.gradePlan;
@@ -2850,6 +2867,7 @@
             <tr><td class="num"><button type="button" class="linkish" data-goto="${l.turn}">${l.turn}</button></td><td>${esc(E.turnInfo(l.turn, sc).text)}</td><td class="k-${l.kind}${l.stat ? " s-" + l.stat : ""}"><span class="logdot"></span>${esc(l.label)}</td><td class="num">${l.energy}</td><td>${E.MOODS[l.mood]}</td></tr>`).join("")}</tbody></table></div>
             <div class="log-actions"><button type="button" class="btn ghost" data-undo="1">Undo last turn</button><span class="mini">${log.length} turn(s) logged. ${summary(log)}</span></div>`
         : `<div class="empty"><b>No turns logged yet.</b> Press <b>Done, next turn</b> after each turn and your run builds up here. Energy and mood carry forward, and the coach learns your deck strength from any gains you type.</div>`;
+      body.insertAdjacentHTML("afterbegin", `<details class="panel report" data-run-export><summary>Detailed run report</summary><p class="mini">Includes logged choices, training inputs, shop purchases, token changes and concert progress. Entered values and estimates are identified. Older turns have partial history.</p><textarea data-run-why rows="2" placeholder="What should be checked?">${esc(runWhy)}</textarea><div class="row-wrap"><button type="button" class="btn ghost small" data-run-copy>Copy full run report</button><button type="button" class="btn ghost small" data-run-download>Download run JSON</button></div><textarea data-run-output rows="6" readonly hidden></textarea></details>`);
     } else {
       const logged = new Map((state.log || []).map((l) => [l.turn, l]));
       let rows = "";
