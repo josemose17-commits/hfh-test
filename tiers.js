@@ -22,7 +22,6 @@
   // worth its length gain (1 L counted like 60 Speed, at the Speed weight of the card's tab)
   // plus the skill points the hint discount saves (at the skill point weight).
   const SPEED_PER_L = 60;
-  const HINT_DISCOUNT = [0, 0.1, 0.2, 0.3, 0.35, 0.4];
   const HINT_CHANCE = 0.075; // per turn trained with the card, before its hint frequency
   const TRAIN_SHARE = { type: 0.3, friend: 0.22 }; // share of training turns spent with the card
   const EVENT_SKILL_CHANCE = { 3: 0.8, 2: 0.65, 1: 0.5 };
@@ -86,7 +85,7 @@
 
   // Expected skill value of a set of cards: each skill once, by its chance to be offered.
   function skillValue(cards, ctx) {
-    const p = new Map();
+    const offers = D.skillOffers();
     const days = Math.max(1, 65 - (ctx.races || 0));
     cards.forEach((c) => {
       const card = D.card(c.id);
@@ -97,27 +96,22 @@
       const hints = days * share * HINT_CHANCE * (eu ? eu.hint_rate : 1 + (fx[18] || 0) / 100);
       const lv = 1 + (fx[17] || 0);
       const hs = card.hs || [];
-      const add = (id, prob, hlv) => {
-        const k = String(id);
-        const cur = p.get(k) || [1, 0, []];
-        cur[0] *= 1 - prob;
-        cur[1] = Math.max(cur[1], hlv);
-        cur[2].push(card.id);
-        p.set(k, cur);
-      };
-      hs.forEach((id) => add(id, 1 - Math.exp(-hints / Math.max(1, hs.length)), lv));
+      const add = (id, prob, hlv, kind) => offers.add(id, prob, hlv, card.id, kind);
+      hs.forEach((id) => add(id, 1 - Math.exp(-hints / Math.max(1, hs.length)), lv, "training"));
       const late = ctx.it ? lateChainSkills(card) : null;
       // Maverick requires declining Light Hello's outings. It cannot be credited
       // together with the outings and her fifth-outing skill in an ace deck.
       (card.es || []).filter((id) => !(card.n === "Light Hello" && +id === 200272)).forEach((id) => add(id, (EVENT_SKILL_CHANCE[card.r] || 0.5) * (late && late.has(String(id)) ? IT_LATE_CHAIN : 1), 1));
     });
     const list = [];
-    p.forEach(([miss, lv, src], id) => {
+    const probabilities = offers.values();
+    probabilities.forEach((offer) => {
+      const { id } = offer;
       const L = ctx.skills[id];
       if (L == null || ctx.known.has(id)) return;
       const cost = ctx.costs[id] || D.skillCost(id) || 150;
-      const surplus = L * SPEED_PER_L * ctx.speedWeight + cost * HINT_DISCOUNT[Math.min(5, lv)] * ctx.spWeight;
-      list.push({ id, p: 1 - miss, L, cost, surplus, src });
+      const surplus = L * SPEED_PER_L * ctx.speedWeight + cost * offer.conditionalDiscount * ctx.spWeight;
+      list.push(Object.assign({}, offer, { L, cost, surplus }));
     });
     list.sort((a, b) => b.surplus * b.p - a.surplus * a.p);
     let value = 0;
@@ -127,10 +121,10 @@
     // Must-have skills: the chance the deck offers each, and which cards give it.
     let mustValue = 0;
     const must = (ctx.must || []).map((id) => {
-      const e = p.get(id);
-      const pr = e ? 1 - e[0] : 0;
+      const e = probabilities.find((x) => x.id === String(id));
+      const pr = e ? e.p : 0;
       if (pr > 0) mustValue += MUST_COVER + MUST_P * pr;
-      return { id, p: pr, src: e ? e[2] : [] };
+      return { id, p: pr, src: e ? e.src : [] };
     });
     return { value, list, must, mustValue };
   }

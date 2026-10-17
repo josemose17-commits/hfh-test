@@ -460,18 +460,11 @@
 
   // Skills a deck can hint, each valued by its race gain minus its skill point cost.
   function skillValue(ctx, deck, hintEvents) {
-    const p = new Map(); // skill id -> [probability not hinted, best hint level, sources]
-    const add = (id, prob, lv, src) => {
-      const k = String(id);
-      const cur = p.get(k) || [1, 0, []];
-      cur[0] *= 1 - prob;
-      cur[1] = Math.max(cur[1], lv);
-      cur[2].push(src);
-      p.set(k, cur);
-    };
+    const offers = D.skillOffers();
+    const add = (id, prob, lv, src, kind) => offers.add(id, prob, lv, src, kind);
     deck.forEach((d, k) => {
       const hs = d.card.hs || [];
-      hs.forEach((id) => add(id, 1 - Math.exp(-hintEvents[k] / Math.max(1, hs.length)), d.hintLv, d.card.id));
+      hs.forEach((id) => add(id, 1 - Math.exp(-hintEvents[k] / Math.max(1, hs.length)), d.hintLv, d.card.id, "training"));
       (d.card.es || []).forEach((id) => {
         if (d.hello) {
           const observed = ctx.helloSkillEvents.get(d.card.id + ":" + id);
@@ -480,12 +473,13 @@
       });
     });
     const list = [];
-    p.forEach(([miss, lv, src], id) => {
+    offers.values().forEach((offer) => {
+      const { id } = offer;
       const L = ctx.skills[id];
       if (L == null || ctx.known.has(id)) return;
       const cost = ctx.costs[id] || D.skillCost(id) || 150;
-      const surplus = L * L_VALUE - cost * (1 - HINT_DISCOUNT[Math.min(5, lv)]) * SP_VALUE;
-      list.push({ id, p: 1 - miss, L, cost, lv: Math.min(5, lv), surplus, src });
+      const surplus = L * L_VALUE - cost * (1 - offer.conditionalDiscount) * SP_VALUE;
+      list.push(Object.assign({}, offer, { L, cost, surplus }));
     });
     list.sort((a, b) => b.surplus * b.p - a.surplus * a.p);
     // A career only has the skill points for so many skills: the best few count in full.

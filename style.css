@@ -603,6 +603,9 @@ table.pred .over { color: var(--accent); }
 .songs-have { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: .88rem; }
 .songs-have select { max-width: 100%; font-size: .85rem; border: 1px solid var(--line); border-radius: 6px; padding: 3px; background: var(--surface); color: var(--fg); }
 .song-learned-turn input { width: 5.5rem; padding: 3px 6px; }
+.conditions-panel { margin-top: 10px; }
+.conditions-panel .row-wrap { margin: 8px 0; }
+.song-progress { margin: 10px 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: .88rem; line-height: 1.5; }
 .have-chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 4px 1px 8px; font-size: .8rem; }
 .have-chip .linkish { padding: 0 4px; }
 .gl-more > summary { cursor: pointer; font-size: .88rem; color: var(--accent); }
