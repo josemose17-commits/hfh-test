@@ -275,10 +275,38 @@
     return out;
   }
 
+  // Independent opportunities for each skill. Keep the hint-level distribution:
+  // a rare Lv5 opportunity must not discount every more likely Lv1 outcome.
+  function skillOffers() {
+    const skills = new Map();
+    function add(id, probability, level, source, kind = "event") {
+      const p = Math.max(0, Math.min(1, probability));
+      if (!(p > 0)) return;
+      const lv = Math.max(1, Math.min(5, Math.floor(level)));
+      const key = String(id);
+      const x = skills.get(key) || { id: key, miss: [1, 1, 1, 1, 1, 1], lv: 0, src: [], eventMiss: 1, trainingMiss: 1 };
+      for (let n = 1; n <= lv; n++) x.miss[n] *= 1 - p;
+      x.lv = Math.max(x.lv, lv);
+      if (!x.src.includes(source)) x.src.push(source);
+      if (kind === "training") x.trainingMiss *= 1 - p; else x.eventMiss *= 1 - p;
+      skills.set(key, x);
+    }
+    function values() {
+      const discount = [0, 0.1, 0.2, 0.3, 0.35, 0.4];
+      return [...skills.values()].map((x) => {
+        const p = 1 - x.miss[1];
+        let expectedDiscount = 0;
+        for (let n = 1; n <= 5; n++) expectedDiscount += (1 - x.miss[n]) * (discount[n] - discount[n - 1]);
+        return { id: x.id, p, lv: x.lv, src: x.src, expectedDiscount, conditionalDiscount: expectedDiscount / p, eventP: 1 - x.eventMiss, trainingP: 1 - x.trainingMiss };
+      });
+    }
+    return { add, values };
+  }
+
   const api = {
     DATA, STATS, RARITY, BOND_FRIENDSHIP, BOND_PER_TRAINING, BOND_PER_HINT, BOND_PER_DATE,
     card, trainee, skillCost, addSkillCosts, levelFor, effectTable, baseEffects, effectsIn, conditionalUniques, effectName, formatEffect, uniqueText,
-    onGlobal, label, typeLabel, encodeOwned, decodeOwned, eventRewards, initialBond, isRainbow, trainingGain, suggestBuild
+    onGlobal, label, typeLabel, encodeOwned, decodeOwned, eventRewards, initialBond, isRainbow, trainingGain, suggestBuild, skillOffers
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaDeck = api;

@@ -59,6 +59,16 @@ function load(state, owned) {
     assert.equal(ui.saved().deck.slots[0].dates.done, 4);
   } finally { ui.w.close(); }
 
+  const migraineOuting = fixture(); migraineOuting.conditions = { migraine: true };
+  ui = load(migraineOuting);
+  try {
+    assert.match(ui.doc.querySelector("#call .after").textContent, /mood Normal/);
+    ui.doc.querySelector('[data-outing-result="great"]').click();
+    assert.match(ui.doc.querySelector("#call .after").textContent, /mood Normal/);
+    ui.doc.querySelector("#doneBtn").click();
+    assert.equal(ui.saved().mood, 2);
+  } finally { ui.w.close(); }
+
   ui = load(fixture(10083));
   try {
     const outingDetails = ui.doc.querySelector(".dates").textContent;
@@ -117,7 +127,51 @@ function load(state, owned) {
     assert.match(ui.doc.querySelector(".gl-status").textContent, /17 of 18 by turn 71/);
   } finally { ui.w.close(); }
 
+  const treatment = fixture(30052, 5); treatment.energy = 100;
+  treatment.conditions = { migraine: true, nightOwl: true, perfect: true };
+  treatment.facilities.forEach((f) => { f.fail = 100; });
+  ui = load(treatment);
+  try {
+    assert.match(ui.doc.querySelector("#call .headline").textContent, /Infirmary/);
+    ui.doc.querySelector('[data-cure-result="no"]').click();
+    ui.doc.querySelector("#doneBtn").click();
+    assert.equal(ui.saved().conditions.migraine, true);
+    ui.doc.querySelector("#undoBtn").click();
+    ui.doc.querySelector('[data-cure-result="yes"]').click();
+    ui.doc.querySelector("#doneBtn").click();
+    assert.equal(ui.saved().conditions.migraine, false);
+    assert.equal(ui.saved().conditions.perfect, true);
+  } finally { ui.w.close(); }
+
   const state = fixture();
+  const feedback = fixture(); feedback.turn = 34; feedback.energy = 80;
+  feedback.gl.songs = { tachiichi: 20 };
+  feedback.facilities[0].members = [0];
+  ui = load(feedback);
+  try {
+    assert.match(ui.doc.querySelector(".song-progress").textContent, /Songs: 2 total/);
+    assert.match(ui.doc.querySelector(".song-progress").textContent, /3 more before the concert on turn 36/);
+    assert.equal(ui.doc.querySelector('.advanced-techniques').open, false);
+    assert.equal(ui.doc.querySelector("#grandFocus").value, "songs");
+    const explanation = ui.doc.querySelector("#callExplanation"); explanation.open = true;
+    const before = ui.saved().deck.slots[0].bond;
+    ui.doc.querySelector('[data-training-bond="0"][data-add="5"]').click();
+    assert.equal(ui.saved().deck.slots[0].bond, Math.min(100, before + 5));
+    assert.equal(ui.doc.querySelector("#callExplanation").open, true);
+    ui.doc.querySelector('[data-energy="5"]').click(); assert.equal(ui.saved().energy, 85);
+    ui.doc.querySelector("#maxEnergyPlus4").click(); assert.equal(ui.saved().maxEnergy, 104);
+    const selectCondition = (id, checked = true) => {
+      const el = ui.doc.querySelector('[data-condition="' + id + '"]'); el.checked = checked;
+      el.dispatchEvent(new ui.w.Event("change", { bubbles: true }));
+    };
+    selectCondition("charming"); assert.equal(ui.saved().conditions.charming, true);
+    ui.doc.querySelector("#practicePoor").checked = true;
+    ui.doc.querySelector("#practicePoor").dispatchEvent(new ui.w.Event("change", { bubbles: true }));
+    selectCondition("perfect");
+    assert.equal(ui.saved().practicePoor, false); assert.equal(ui.saved().conditions.perfect, true);
+    assert.match(ui.doc.querySelector("#conditionsBody").textContent, /Slow Metabolism/);
+  } finally { ui.w.close(); }
+
   const ids = [30002, 30016, 30010, 30078, 30043, 30052];
   state.tab = "cm";
   state.cm = { goal: "race", ownedOnly: true, borrow: false, targets: { speed: 1500 }, locked: ids, helloProcRate: "0.36", helloUnlockRate: "0.3" };
@@ -131,6 +185,7 @@ function load(state, owned) {
     assert.match(result, /Outing unlock assumption: 30%/);
     assert.doesNotMatch(result, /metadata missing/);
     assert.match(result, /Fifth outing completed/);
+    assert.match(result, /Event skills and training hints/);
   } finally { ui.w.close(); }
   console.log("Coach DOM integration: SSR/R Hello events, Undo, outings, target search, song rewards/history, typed purchases, held prices and deadline status passed.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

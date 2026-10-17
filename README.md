@@ -95,6 +95,14 @@ Unlike a racing deck, every target skill counts (not just the best 8), and **Sta
 
 ## Grand Concert
 
+The default **Songs first · usable Performance** preference now favors the largest expected usable Performance among safe, worthwhile trainings when the baseline call is to train. It respects caps, your failure limit, recovery choices, goal races and Light Hello's first meeting. **Balance stats and songs** retains the previous scoring policy. This preference is not a guarantee of a particular song count.
+
+The main call shows total songs, songs in the current concert period, and the remaining Hype requirement. **Bought does not advance the turn**: you can buy a song, refresh the game shop, and make further purchases before training. The primary budget totals the priority songs by Performance type. Technique recording is under a closed **Advanced** section; after an unrecorded in-game unlock purchase, synchronize the five balances before recording the next song. The explanation stays expanded when you edit inputs.
+
+**Good and bad conditions** provides named common conditions and separate character/version entries. Verified command effects include Practice Perfect/Poor failure modifiers, Charming's training bond, Hot Topic's Akikawa bond, Slow Metabolism's training Speed restriction, and Migraine's mood restriction. Random outcomes are entered when observed. Infirmary results can be marked Cured or Not cured; camp rest clears ordinary negative conditions, while character conditions follow their career events. Fast Learner is displayed but the coach does not track all skill purchases.
+
+Deck skill scoring now retains the probability of each hint level. A rare Lv5 training hint no longer grants its full discount to the much more likely Lv1 event outcome. **Event skills and training hints** shows the separate estimated source probabilities. Event completion rates and Grand Concert event-frequency song effects still need calibration; no blanket event-skill multiplier was added. See the [run-feedback audit](docs/grand-concert-run-feedback.md).
+
 A **Grand Concert** section appears in this scenario, kept short:
 - **Get**: what to buy in your lesson shop right now (or **Hold** a song for after the live), with **Undo** for your last buy.
 - **Your shop**: tick what the game's shop shows and tap **Bought** when you buy one (it takes the tokens, marks the song learned or counts the technique with its stats or energy, and clears the ticks for the shop's new offers). **Songs** (the ones you can learn now, most important first; open it when your shop shows songs) and **Techniques** (the best 4, more under **more**). Pressing Done on a call that buys a song or technique does the same, even if the training fails.

@@ -11,6 +11,7 @@
   const Dates = root.UmaDates || (typeof require !== "undefined" ? require("./data/dates.js") : null);
   const CardEvents = root.UmaCardEvents || (typeof require !== "undefined" ? require("./data/card-events.js") : null);
   const Hello = root.UmaLightHello || (typeof require !== "undefined" ? require("./light-hello.js") : null);
+  const Conditions = root.UmaConditions || (typeof require !== "undefined" ? require("./conditions.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const STAT_LABELS = { speed: "Speed", stamina: "Stamina", power: "Power", guts: "Guts", wit: "Wit" };
   const MOODS = ["Awful", "Bad", "Normal", "Good", "Great"];
@@ -791,6 +792,7 @@
   // Goal races in the next 3 turns add value too, since mood also affects race results.
   function moodStepValue(from, state, sc, calib) {
     if (from >= 4 || from < 0) return 0;
+    if (Conditions.has(state, "migraine") && from >= state.mood) return 0;
     const forced = forcedTurns(state, sc);
     let sum = 0;
     let races = 0;
@@ -1836,8 +1838,8 @@
   // worth more the more turns are left.
   function cureValue(state, ctx) {
     let v = 0;
-    if (state.badCondition) v += 0.7 * ctx.typ * Math.min(1, ctx.turnsLeft / 10);
-    if (state.practicePoor) v += Math.min(0.8, 0.02 * ctx.turnsLeft) * ctx.typ;
+    if (state.badCondition || Conditions.list.some((c) => c.cure && c.id !== "poor" && Conditions.has(state, c.id))) v += 0.7 * ctx.typ * Math.min(1, ctx.turnsLeft / 10);
+    if (Conditions.has(state, "poor")) v += Math.min(0.8, 0.02 * ctx.turnsLeft) * ctx.typ;
     return v;
   }
 
@@ -1849,11 +1851,15 @@
   }
 
   // Value of one outcome, split into parts so the comparison reasons stay readable.
+  function curedMoodStep(ctx, from) {
+    const state = Object.assign({}, ctx.state, { conditions: Object.assign({}, ctx.state.conditions, { migraine: false }) });
+    return moodStepValue(from, state, ctx.sc, ctx.calib) * ctx.sat;
+  }
   function dateParts(o, ctx) {
     const st = ctx.state;
     let mood = 0;
     for (let i = 0, m = st.mood; i < Math.abs(o.mo || 0); i++) {
-      if (o.mo > 0 && m < 4) { mood += ctx.moodStep(m); m++; } else if (o.mo < 0 && m > 0) { mood -= ctx.moodStep(m - 1); m--; }
+      if (o.mo > 0 && m < 4) { mood += o.cure ? curedMoodStep(ctx, m) : ctx.moodStep(m); m++; } else if (o.mo < 0 && m > 0) { mood -= ctx.moodStep(m - 1); m--; }
     }
     const rand = o.r ? (o.r * (o.rn || 1)) / 5 : 0; // a random stat, spread as an average
     const stats = DATE_STATS.reduce((a, k, i) => { const g = ((o.s || [])[i] || 0) + rand; return a + (g ? ctx.gainValue(k, g) : 0); }, 0);
@@ -1953,7 +1959,7 @@
         if (out.me) notes.push("max energy goes up to " + (ctx.maxE + out.me));
         const statGains = {};
         DATE_STATS.forEach((k, i) => { const g = ((out.s || [])[i] || 0) + (out.r ? (out.r * (out.rn || 1)) / 5 : 0); if (g) statGains[k] = g; });
-        if (out.cure) base.consume = { badCondition: false, practicePoor: false };
+        if (out.cure) base.consume = { cureConditions: true };
         return Object.assign(base, {
           label: "Outing with " + sl.card.n + " (" + n + "/" + info.dates.length + ")",
           energyDelta: out.e || 0, moodDelta: Math.max(-state.mood, Math.min(4 - state.mood, out.mo || 0)),
@@ -1996,7 +2002,7 @@
     r.level = L;
     r.boost = boost;
     r.rawTotal = r.total;
-    r.gains = r.gains.map((g) => g * boost);
+    r.gains = r.gains.map((g, i) => i === 0 && Conditions.has(state, "slowMetabolism") ? 0 : g * boost);
     r.total = r.gains.reduce((a, b) => a + b, 0);
     r.sp *= boost;
     r.members = members;
@@ -2028,11 +2034,11 @@
   }
   const FOCUS_FOLLOW = 0.6;
   const FOCUS_DECAY = 0.92;
-  function focusScore(x, w) {
+  function focusScore(x, w, bondGain = BOND_PER_TRAINING_E) {
     const sp = x.spec;
     const pSpec = (100 + sp) / (550 + sp);
     const pHere = (500 + sp) / (550 + sp);
-    const trainings = Math.ceil(Math.max(0, 80 - x.bond) / BOND_PER_TRAINING_E);
+    const trainings = Math.ceil(Math.max(0, 80 - x.bond) / bondGain);
     const T = trainings / (pHere * FOCUS_FOLLOW);
     const sw = w && w[x.type] != null ? w[x.type] : 1;
     return { pSpec, trainings, T, score: pSpec * Math.pow(FOCUS_DECAY, T) * (1 + x.fb / 100) * (0.75 + 0.25 * sw) };
@@ -2043,7 +2049,7 @@
     const all = deck.used.filter((s) => s.card.ty !== "friend" && s.card.ty !== "group").map((s) => {
       const fx = Deck.baseEffects(s.card, s.level);
       const x = { idx: s.idx, card: s.card, bond: s.bond, type: s.card.ty, spec: fx[19] || 0, fb: fx[1] || 0, level: s.level };
-      return Object.assign(x, focusScore(x, w));
+      return Object.assign(x, focusScore(x, w, BOND_PER_TRAINING_E + (state && Conditions.has(state, "charming") ? 2 : 0)));
     });
     const tie = (a, b) => b.spec - a.spec || b.fb - a.fb || b.level - a.level;
     const orange = all.filter((x) => x.bond >= 80).sort((a, b) => b.pSpec - a.pSpec || tie(a, b));
@@ -2187,7 +2193,7 @@
       unbonded = dg.unbonded;
       spPts = dg.sp * scale;
       energyDelta = dg.energy;
-      fail = failBlank ? clamp(Math.round(estimateFail(f.stat, ctx.E) * dg.failMult) + (state.practicePoor ? 2 : 0), 0, 100) : clamp(+f.fail, 0, 100);
+      fail = failBlank ? clamp(Math.round(estimateFail(f.stat, ctx.E) * dg.failMult) + Conditions.failure(state), 0, 100) : clamp(+f.fail, 0, 100);
     } else {
       cards = f.cards || 0;
       rainbows = Math.min(f.rainbows || 0, cards);
@@ -2195,7 +2201,7 @@
       // Split by the scenario's base values and halve past 1200; a typed gain (what the game
       // shows) keeps that split.
       const sp = splitFor(f.stat, sc);
-      Object.keys(sp).forEach((st) => { statGains[st] = trainedGain(st, rawGain * sp[st], ctx.stats); });
+      Object.keys(sp).forEach((st) => { statGains[st] = st === "speed" && Conditions.has(state, "slowMetabolism") ? 0 : trainedGain(st, rawGain * sp[st], ctx.stats); });
       const adjTotal = Object.keys(statGains).reduce((a, st) => a + statGains[st], 0);
       gain = est ? adjTotal : +f.gain;
       if (!est && adjTotal > 0) Object.keys(statGains).forEach((st) => { statGains[st] *= gain / adjTotal; });
@@ -2203,7 +2209,7 @@
       spPts = (est ? rawGain : gain) * SP_RATE[f.stat];
       const ec = energyCost(f.stat, state.turn, sc, facLevelFor(state, sc, f.stat));
       energyDelta = ec < 0 ? -ec + 2 * rainbows : -ec;
-      fail = failBlank ? clamp(estimateFail(f.stat, ctx.E) + (state.practicePoor ? 2 : 0), 0, 100) : clamp(+f.fail, 0, 100);
+      fail = failBlank ? clamp(estimateFail(f.stat, ctx.E) + Conditions.failure(state), 0, 100) : clamp(+f.fail, 0, 100);
     }
     let stats = 0;
     Object.keys(statGains).forEach((st) => { stats += ctx.gainValue(st, statGains[st]); });
@@ -2221,7 +2227,7 @@
       parts: {
         stats,
         sp: spPts * SP_VALUE,
-        bond: unbonded * bondK(state.turn) * typ,
+        bond: unbonded * bondK(state.turn) * typ * (Conditions.has(state, "charming") ? 9 / 7 : 1),
         hint: (dg ? (f.hints || []).filter((i) => (f.members || []).indexOf(i) !== -1).length : f.hint ? 1 : 0) * 0.12 * typ,
         scenario: 0
       }
@@ -2279,14 +2285,15 @@
     if (!(f.extras && f.extras.aki)) return null;
     const chk = akikawaCheck(ctx.state, ctx.sc);
     if (!chk) return null;
-    const trainings = Math.ceil(chk.short / AKI_PER_TRAINING);
+    const gained = Math.floor(AKI_PER_TRAINING * (Conditions.has(ctx.state, "hotTopic") ? 1.4 : 1));
+    const trainings = Math.ceil(chk.short / gained);
     const turnsLeft = chk.turn - ctx.state.turn + 1;
     // She's on a training only now and then (about 1 turn in 4), so few turns left makes each
     // chance count more. A missed check costs a unique skill level.
     const urgency = Math.min(3, trainings / Math.max(1, turnsLeft / 4));
     return {
       add: (0.1 + 0.15 * urgency) * ctx.typ,
-      note: "Akikawa is here: her bond " + chk.bond + " → " + Math.min(100, chk.bond + AKI_PER_TRAINING) + " (needs " + chk.need + " by turn " + chk.turn + " for the unique skill level-up)"
+      note: "Akikawa is here: her bond " + chk.bond + " → " + Math.min(100, chk.bond + gained) + " (needs " + chk.need + " by turn " + chk.turn + " for the unique skill level-up)"
     };
   }
 
@@ -2311,6 +2318,31 @@
 
   function bestTraining(options) {
     return options.filter((o) => o.kind === "train").sort((a, b) => b.value - a.value)[0];
+  }
+  function applySongFocus(ctx, options) {
+    const state = ctx.state, sc = ctx.sc;
+    if (sc.id !== "grandlive" || !state.gl || state.gl.focus !== "songs" || state.turn < 5 || state.turn > 71 || !concertGoal(state).left) return;
+    const best = options[0];
+    if (!best || best.kind !== "train" || best.firstEvent) return;
+    const recovery = Math.max(-Infinity, ...options.filter((o) => o.kind !== "train").map((o) => o.value));
+    const candidates = options.filter((o) => o.kind === "train" && o.fail <= state.risk && o.value >= recovery).map((o) => {
+      const before = JSON.parse(JSON.stringify(state));
+      if (o.song) buySong(before, sc, o.song.id);
+      if (o.tech) buyTechnique(before, sc, o.tech.id, o.tech.type);
+      const room = before.gl.tokens.map((n) => Math.max(0, tokenCap(before, sc) - n));
+      const f = before.facilities.find((f) => f.stat === o.stat);
+      let tokens = 0;
+      tokenGain(f, before, sc, true).forEach((g) => { const take = Math.min(room[g.type], g.amount); room[g.type] -= take; tokens += take; });
+      return { o, tokens: tokens * (1 - o.fail / 100) };
+    }).sort((a, b) => b.tokens - a.tokens || b.o.value - a.o.value);
+    if (!candidates.length) return;
+    const chosen = candidates[0];
+    chosen.o.notes.unshift("Songs first: about " + chosen.tokens.toFixed(1) + " usable Performance after failure risk and caps; recovery and the first Hello meeting stay protected");
+    if (chosen.o !== best) {
+      chosen.o.parts.songFocus = Math.max(0, best.value - chosen.o.value) + 0.01 * ctx.typ;
+      chosen.o.value = sumParts(chosen.o.parts);
+      options.sort((a, b) => b.value - a.value);
+    }
   }
 
   function evaluate(state, sc, deferOpening = false) {
@@ -2348,7 +2380,8 @@
       const camp = ctx.camp;
       const restParts = {
         energy: REST_OUTCOMES.reduce((a, [g, p]) => a + p * ctx.energyValue(camp ? 40 : g), 0),
-        mood: camp ? ctx.moodStep(state.mood) : 0
+        mood: camp ? curedMoodStep(ctx, state.mood) : 0,
+        condition: camp ? cureValue(state, ctx) : 0
       };
       options.push({
         kind: "rest", label: camp ? "Rest (camp outing)" : "Rest",
@@ -2368,10 +2401,10 @@
         });
       }
       outingOptions(ctx).forEach((o) => options.push(o));
-      if (state.badCondition || state.practicePoor) {
+      if (Conditions.curable(state)) {
         const p = { condition: cureValue(state, ctx), energy: ctx.energyValue(20) };
         options.push({
-          kind: "infirmary", label: "Infirmary", energyDelta: 20, moodDelta: 0, prefix: [], consume: { badCondition: false, practicePoor: false },
+          kind: "infirmary", label: "Infirmary", energyDelta: 20, moodDelta: 0, prefix: [], consume: { cureConditions: true },
           notes: [state.practicePoor && !state.badCondition ? "cures Practice Poor (+2% failure on every stat training until then)" : "clears the bad condition before it costs more mood, energy or stats" + (state.practicePoor ? ", and cures Practice Poor" : "")],
           parts: p, value: sumParts(p)
         });
@@ -2428,12 +2461,12 @@
       hook.items(ctx, options);
       options.sort((a, b) => b.value - a.value);
     }
-    if (!deferOpening) applyOpening(ctx, options);
+    if (!deferOpening) { applyOpening(ctx, options); applySongFocus(ctx, options); }
     return { options, ctx };
   }
 
   const PART_LABELS = {
-    stats: "stat gains", sp: "skill points", bond: "bond building", hint: "skill hint", scenario: "scenario bonus", tokens: "tokens for songs",
+    stats: "stat gains", sp: "skill points", bond: "bond building", hint: "skill hint", scenario: "scenario bonus", tokens: "tokens for songs", songFocus: "your Songs first preference",
     energy: "energy", mood: "mood", risk: "failure risk", condition: "curing the condition", fans: "fans", item: "item or buff", goal: "goal race", opening: "the scenario's opening plan"
   };
 
@@ -2470,7 +2503,7 @@
     }
     const after = {
       energy: clamp(Math.round(ctx.E + (best.energyDelta || 0)), 0, ctx.maxE + (best.maxEnergyDelta || 0)),
-      mood: clamp(state.mood + (best.moodDelta || 0), 0, 4)
+      mood: Conditions.moodAfter(state, best.moodDelta, (best.kind === "rest" && isCamp(state.turn, scenario)) || (best.consume && best.consume.cureConditions))
     };
     return {
       action: best,
@@ -2498,7 +2531,7 @@
   // stat and -10 to 2 random stats (type those in yourself). Either can bring Practice Poor;
   // tick Bad condition if it did. No bond, tokens or scenario gains, and it doesn't count
   // toward the facility's level.
-  const FAIL_RESULT = { fail: { mood: -1, stat: -5, energy: 0, label: "failed" }, bad: { mood: -3, stat: -10, energy: 10, label: "failed badly" } };
+  const FAIL_RESULT = { fail: { mood: -1, stat: -5, energy: 0, label: "failed" }, bad: { mood: -3, stat: -10, energy: 10, label: "failed badly" }, slacker: { mood: 0, stat: 0, energy: 0, label: "did not show up" } };
   function advance(state, scenario, option, result, observed) {
     if (option.outingRoll) {
       const index = observed && observed.outing === "great" ? 0 : 1;
@@ -2510,22 +2543,23 @@
     const fr = option.kind === "train" && FAIL_RESULT[result];
     if (fr) {
       option = Object.assign({}, option, {
-        statGains: { [option.stat]: fr.stat }, moodDelta: fr.mood, energyDelta: (option.energyDelta || 0) + fr.energy,
+        statGains: { [option.stat]: fr.stat }, moodDelta: fr.mood, energyDelta: result === "slacker" ? (option.recoveryBefore || 0) : (option.energyDelta || 0) + fr.energy,
         firstEvent: null, failed: result, label: option.label + " (" + fr.label + ")"
       });
     }
     const s = JSON.parse(JSON.stringify(state));
     const hook = HOOKS[scenario.hook] || {};
     if (hook.beforeTurn && hook.beforeTurn(s, scenario, option) === false) return state;
+    if ((option.kind === "rest" && isCamp(state.turn, scenario)) || (option.consume && option.consume.cureConditions && (!observed || observed.cured !== false))) Conditions.cure(s);
     // An outing that raises max energy (Light Hello's first: +4) counts before the energy it gives.
     if (option.maxEnergyDelta) s.maxEnergy = (s.maxEnergy || 100) + option.maxEnergyDelta;
     const maxE = s.maxEnergy || 100;
     s.extras = s.extras || {};
     s.energy = clamp(Math.round(s.energy + (option.energyDelta || 0)), 0, maxE);
-    s.mood = clamp(s.mood + (option.moodDelta || 0), 0, 4);
+    s.mood = Conditions.moodAfter(s, option.moodDelta);
     if (option.kind === "train" && scenario.akikawa && !fr) {
       const fac = s.facilities.find((x) => x.stat === option.stat);
-      if (fac && fac.extras && fac.extras.aki) s.extras.akiBond = Math.min(100, (+s.extras.akiBond || 0) + AKI_PER_TRAINING);
+      if (fac && fac.extras && fac.extras.aki) s.extras.akiBond = Math.min(100, (+s.extras.akiBond || 0) + Math.floor(AKI_PER_TRAINING * (Conditions.has(s, "hotTopic") ? 1.4 : 1)));
     }
     if ((option.kind === "train" || option.outing != null) && s.trackStats && option.statGains) {
       s.stats = s.stats || {};
@@ -2537,11 +2571,13 @@
     const evE = (scenario.energyEvents && scenario.energyEvents[state.turn]) || 0;
     const evM = (scenario.moodEvents && scenario.moodEvents[state.turn]) || 0;
     if (evE) s.energy = clamp(s.energy + evE, 0, maxE);
-    if (evM) s.mood = clamp(s.mood + evM, 0, 4);
+    if (evM) s.mood = Conditions.moodAfter(s, evM);
     Object.entries(option.consume || {}).forEach(([k, v]) => {
-      if (k === "badCondition" || k === "practicePoor") s[k] = v;
+      if (k === "cureConditions") { if (!observed || observed.cured !== false) Conditions.cure(s); }
+      else if (k === "badCondition" || k === "practicePoor") s[k] = v;
       else s.extras[k] = typeof v === "function" ? v(s.extras[k]) : v;
     });
+    if (option.kind === "rest" && isCamp(state.turn, scenario)) Conditions.cure(s);
     if (hook.afterTurn && !fr) hook.afterTurn(s, option, scenario);
     if (hook.endOfTurn) hook.endOfTurn(s, scenario, option);
     // Deck bonds: +7 for every card that trained with you this turn.
@@ -2554,7 +2590,7 @@
         const start = sl.bond != null ? sl.bond : (c ? Deck.initialBond(c, Deck.levelFor(c, sl.lb)) : 0);
         const hinted = (fac.hints || []).indexOf(i) !== -1;
         const evBond = option.firstEvent && option.firstEvent.idx === i ? option.firstEvent.bond : 0;
-        sl.bond = Math.min(100, start + (Deck ? Deck.BOND_PER_TRAINING : 7) + (hinted ? (Deck ? Deck.BOND_PER_HINT : 5) : 0) + evBond);
+        sl.bond = Math.min(100, start + (Deck ? Deck.BOND_PER_TRAINING : 7) + (Conditions.has(s, "charming") ? 2 : 0) + (hinted ? (Deck ? Deck.BOND_PER_HINT : 5) : 0) + evBond);
         sl.met = true;
       });
     }
@@ -2884,6 +2920,7 @@
             useOn(v, ctx, "Buy the " + energyOffer.label + " technique (" + costText(energyOffer) + ", no turn used)", (ctx.sc.lives.some((l) => l >= ctx.state.turn) ? 5 * SP_VALUE : 0) - energyOffer.costV,
               "energy " + ctx.E + " → " + e2 + " before training; it counts as a technique lesson toward your next song");
             v.tech = { id: energyOffer.id, type: energyOffer.type };
+            v.recoveryBefore = e2 - ctx.E;
             return v;
           }).sort((a, b) => b.value - a.value);
           if (candidates.length) {
@@ -2907,9 +2944,9 @@
           const after = JSON.parse(JSON.stringify(ctx.state));
           buySong(after, ctx.sc, pk.item.song.id);
           const revised = evaluate(after, ctx.sc, true).options;
+          revised.forEach((o) => { o.song = { id: pk.item.song.id }; o.prefix.unshift("Learn " + pk.item.song.name + " (" + songCost(pk.item.song) + ", no turn used)"); });
           options.splice(0, options.length, ...revised);
           best = options[0];
-          best.prefix.unshift("Learn " + pk.item.song.name + " (" + songCost(pk.item.song) + ", no turn used)");
           best.notes.push((ls.phase === "hold" ? "buy before this concert to activate the valuable bonus sooner" : ls.phase === "stats" ? "the remaining song benefits are worth its Performance cost" : "songs first: the most important song in your shop you can afford") + (pk.item.why.length ? " (" + pk.item.why.join(", ") + ")" : ""));
           best.song = { id: pk.item.song.id };
         } else if (pk && pk.kind === "hold") {
@@ -2923,8 +2960,8 @@
         } else if (ls && !pk && ls.songsOffered) {
           best.notes.push("you can't afford the songs your shop shows yet: keep training for tokens");
         } else if (ls && !best.tech && !best.song && !ls.offered && !ls.songsOffered && ls.ifOffered.length && (ls.phase === "songs" || nearCap || ls.ifOffered.length)) {
-          best.prefix.unshift(ls.phase === "songs" ? "Buy a technique lesson (no turn used)" : "Spend spare tokens on a stat technique (no turn used)");
-          best.notes.push((ls.phase === "songs" ? "songs only show up after technique lessons. " : "") + "Tick what your shop shows under Grand Concert and the coach picks; best if offered: " + ls.ifOffered.map((t) => t.label + " (" + costText(t) + ")").join(", "));
+          if (!ctx.state.gl || ctx.state.gl.focus !== "songs") best.prefix.unshift(ls.phase === "songs" ? "Buy a technique lesson (no turn used)" : "Spend spare tokens on a stat technique (no turn used)");
+          best.notes.push(ctx.state.gl && ctx.state.gl.focus === "songs" ? "The totals below show the priority song budget. Optional lesson recording is under Advanced." : (ls.phase === "songs" ? "songs only show up after technique lessons. " : "") + "Tick what your shop shows under Grand Concert and the coach picks; best if offered: " + ls.ifOffered.map((t) => t.label + " (" + costText(t) + ")").join(", "));
         }
         if (aim && aim.half && aim.half.gap > 0 && ctx.state.turn < aim.half.live) {
           best.notes.push("tokens are short for this half's songs: trainings with more cards, link cards and friendship count for more");
