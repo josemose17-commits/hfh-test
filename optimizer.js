@@ -507,7 +507,7 @@
           earnedTokens: earnedTokens.map((n) => n / R), spentTokens: spentTokens.map((n) => n / R), finalTokens: finalTokens.map((n) => n / R),
           model: "discrete-lessons-v1", helloProcRate: ctx.helloProcRate, helloUnlockRate: ctx.helloUnlockRate,
           eventSuccessRate: ctx.eventSuccessRate, eventSongBoost: ctx.eventSongBoost, eventLevelExposure: eventExposures.reduce((n, x) => n + x, 0) / R,
-          assumptions: "repeat/unlock rates, conditional success and event clocks are assumptions; song levels activate after concerts; per-level boost is experimental (default 0); parsed ordinary events couple rewards and hints, incomplete/special cards retain aggregate rewards; generic career events, guest placements and raw-text conditions remain approximate or omitted"
+          assumptions: "repeat/unlock rates, conditional success and event clocks are assumptions; song levels activate after concerts; base Promo Live collaborator rewards add +10 of every type; conditional link-character Performance rewards are omitted; per-level boost is experimental (default 0); parsed ordinary events couple rewards and hints, incomplete/special cards retain aggregate rewards; generic career events, guest placements and raw-text conditions remain approximate or omitted"
         }) : null,
       calendarAssumptions: ctx.calendar ? {
         requiredRaceResult:"wins assumed; race failure and aptitude feasibility not simulated",

@@ -135,6 +135,8 @@
       // Only the cadence resets; buying a carried song credits one technique.
       s.held = !!(s.shop && s.shop.kind === "song");
       s.period++; s.concerts++; s.periodSongs = 0; s.periodTech = 0; s.techSince = 0; s.cycleSongs = 0;
+      const reward = E.calendarPerformance(turn, sc);
+      if (reward) for (let i = 0; i < 5; i++) add(i, reward.amount);
     }
     function training(turn, stat, level, members, rainbows) {
       if (turn < 5) return [];

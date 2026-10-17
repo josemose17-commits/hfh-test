@@ -108,16 +108,16 @@ test("Songs first favors needed colors over a larger irrelevant token pile", () 
   assert.equal(E.recommend(s, sc).action.stat, "speed", "when every song gap is funded, usable total breaks the tie");
 });
 
-test("Hello's random bonus remains expected and cannot automatically beat a needed-color training", () => {
+test("a training that certainly funds the offered song beats Hello's random chance to finish it", () => {
   const s = state({ deck: { slots: [{ id: 30052, lb: 4, bond: 100, met: true, dates: { unlocked: false, done: 0 } }] } });
   s.facilities.forEach((f) => { f.members = []; }); s.facilities[4].members = [0];
   s.gl.tokens = [14, 100, 100, 0, 14]; s.gl.shop = { "song:runrun": {} }; E.holdSong(s, sc, "runrun");
-  s.facilities[3].extras = { tok: 12, tokType: 3 };
+  s.facilities[3].extras = { tok: 16, tokType: 3 };
   const rec = E.recommend(s, sc), wit = rec.ranked.find((o) => o.stat === "wit");
   assert.equal(wit.performancePriority.hello, 8); assert.equal(wit.performancePriority.training, 10);
   assert.equal(rec.action.stat, "guts");
   const next = E.advance(s, sc, rec.action);
-  assert.deepEqual(next.gl.tokens, [14, 100, 100, 12, 14]);
+  assert.deepEqual(next.gl.tokens, [14, 100, 100, 16, 14]);
 });
 
 test("an unobserved color projection does not displace a much stronger total-points training", () => {

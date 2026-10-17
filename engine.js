@@ -374,7 +374,7 @@
         guess: deck && !bondsStale(state) ? (rb.length ? "yes" : "no") : null,
         guessWhy: rb.length ? rb.map((sl) => sl.card.n).join(", ") + " at 80+" : "no stat card at 80+ in the coach's count"
       }];
-      if (lh && !isYes(a.rainbow)) questions.push({ id: "lh20", type: "yesno", text: "Has Light Hello given her +20 event (Another Day's Hard Work!)?", answer: a.lh20, guess: x.lh20 ? "yes" : null, guessWhy: "you ticked Light Hello +20 event" });
+      if (lh && !isYes(a.rainbow)) questions.push({ id: "lh20", type: "yesno", text: "Has Light Hello given her +20 event (Another Day's Hard Work!)?", answer: a.lh20, guess: x.lh20 ? "yes" : null, guessWhy: "a Light Hello +20 event is recorded for this career" });
       const result = isYes(a.rainbow) || isYes(aL) ? "pass" : isNo(a.rainbow) && (!lh || isNo(aL)) ? "fail" : null;
       return {
         label: "Debut check", kind: "reset", questions, result,
@@ -996,9 +996,9 @@
   // the rest, F the facility level, C the support cards there and L the scenario-link cards.
   // A training gives its main type 60% of the time, its second type 30% and another 10%; a
   // friendship training adds a second type, very likely the one you have least of.
-  // expected: what to expect when you haven't set the type: the 60/30/10 split, plus Light
-  // Hello's repeat event (an explicit 40% modelling estimate; R uses a +10 floor). Done adds
-  // the main type (or what you set) instead.
+  // expected: add Light Hello's repeat expectation (40% estimate; R uses a +10
+  // floor). Untouched types use the visible main-type assumption in "usual"
+  // mode; other callers retain the 60/30/10 expectation. Done never adds a proc.
   function tokenGain(f, state, sc, expected) {
     if (!sc.tokenOf || !sc.tokenOf[f.stat]) return [];
     // No tokens before the lessons open (Grand Concert: turn 5).
@@ -1018,7 +1018,7 @@
     const amount = set(ex.tok) ? +ex.tok : est;
     const main = set(ex.tokType) ? +ex.tokType : pri;
     let out = [{ type: main, amount, est: !set(ex.tok) }];
-    if (expected && !set(ex.tokType)) {
+    if (expected && !set(ex.tokType) && !(state.gl && state.gl.tokenTypes === "usual")) {
       out = [{ type: pri, amount: amount * 0.6, est: true }, { type: sec, amount: amount * 0.3, est: true }];
       [0, 1, 2, 3, 4].filter((i) => i !== pri && i !== sec).forEach((i) => out.push({ type: i, amount: amount * 0.1 / 3, est: true, minor: true }));
     }
@@ -1066,16 +1066,24 @@
     if ((state.gl.helloEvents || []).some((e) => e.key === key)) return null;
     const p = Hello.profile(card, slot.lb);
     const cap = tokenCap(Object.assign({}, state, { turn }), sc);
-    const credited = Math.max(0, Math.min(amount, cap - tokens[type]));
+    // The UI records the event after Done. At a concert, Done has already
+    // applied the later collaborator reward and raised the cap. Recover the
+    // logged post-training balance so that reward cannot steal the event's
+    // old-cap headroom. Only use it while the closing balances still match.
+    const last = (state.log || []).slice(-1)[0];
+    const flow = last && last.diagnostics && last.diagnostics.performance;
+    const beforeCalendar = turn === state.turn - 1 && last && last.turn === turn && calendarPerformance(turn, sc) && flow && flow.after.every((n, i) => n === tokens[i]);
+    const eventBalance = beforeCalendar ? flow.training.balances[type] : tokens[type];
+    const credited = Math.max(0, Math.min(amount, cap - eventBalance));
     state.gl.tokens = tokens.slice();
     state.gl.tokens[type] = tokens[type] + credited;
     slot.bond = Math.min(100, (slot.bond != null ? slot.bond : Deck.initialBond(card, p.level)) + p.repeat.b);
     slot.met = true;
-    if (event.mood) state.mood = Math.min(4, state.mood + 1);
+    if (event.mood) state.mood = Conditions.moodAfter(state, 1);
     if (state.trackStats && state.stats && state.stats.guts > 0) state.stats.guts += p.repeat.s[3];
     state.extras = state.extras || {};
     if (amount === 20) state.extras.lh20 = true;
-    const entry = { key, turn, card: card.id, amount, credited, type, guts: p.repeat.s[3], sp: p.repeat.sp, mood: event.mood ? 1 : 0, bond: p.repeat.b };
+    const entry = { key, turn, card: card.id, amount, credited, type, guts: p.repeat.s[3], sp: p.repeat.sp, mood: event.mood ? 1 : 0, bond: p.repeat.b, beforeCalendar: !!beforeCalendar };
     state.gl.helloEvents = (state.gl.helloEvents || []).concat([entry]);
     return entry;
   }
@@ -1103,6 +1111,23 @@
   // Songs learned since the last live (3 fill the Hype gauge) and the next live turn. Make
   // Debut!, the song you get by itself on turn 5, counts for the 1st live (GameTora).
   const GL_DEBUT_SONG = 5;
+  // New collaborators raise the cap and award ten of every type after each
+  // Promo Live. Conditional link-character rewards are recorded separately.
+  function calendarPerformance(turn, sc) {
+    if (sc.id !== "grandlive") return null;
+    if (turn === GL_DEBUT_SONG - 1) return { amount: 10, cap: 200, source: "Make Debut!" };
+    const p = sc.lives.indexOf(turn);
+    return p >= 0 && p < sc.lives.length - 1 ? { amount: 10, cap: tokenCap({ turn: turn + 1 }, sc), source: "New concert collaborators" } : null;
+  }
+
+  function recordTokenReward(state, sc, amount) {
+    if (sc.id !== "grandlive" || !state.gl || state.turn < 5 || ![5, 10].includes(amount)) return null;
+    const before = (state.gl.tokens || []).slice(), cap = tokenCap(state, sc);
+    if (before.length !== 5) return null;
+    const after = before.map((n) => Math.min(cap, n + amount));
+    state.gl.tokens = after;
+    return { turn: state.turn, amount, before, after, credited: after.map((n, i) => n - before[i]), lostAtCap: after.map((n, i) => amount - n + before[i]) };
+  }
   function hypeStatus(state, sc) {
     if (!sc.songs) return null;
     const learned = (state.gl && state.gl.songs) || {};
@@ -1165,10 +1190,10 @@
         out.push({
           turn: L, label: ["1st", "2nd", "3rd", "4th"][i] + " Promo Live", status: st,
           gain: (i === 0 ? "Great Success (3+ songs so far, Make Debut! counts): all stats +10; fewer songs: +3. Skill points: 5 per technique and 25 per song so far."
-            : "Great Success (3+ songs since the last live): all stats +10; fewer songs: +3. Skill points: 5 per technique and 25 per song since the last live.") + " Token cap +50 (to " + cap + ").",
+            : "Great Success (3+ songs since the last live): all stats +10; fewer songs: +3. Skill points: 5 per technique and 25 per song since the last live.") + " New collaborators: token cap +50 (to " + cap + ") and +10 of every token afterward. Conditional link rewards are separate.",
           sofar: !started ? null : sofar + songs + " song" + (songs === 1 ? "" : "s") + (i === 0 ? " (with Make Debut!)" : "") + " and " + tech + " technique" + (tech === 1 ? "" : "s") + ": " + (great ? "Great Success, all stats +10" : st === "done" ? "all stats +3" : "all stats +3 (" + (3 - songs) + " more song" + (3 - songs === 1 ? "" : "s") + " for +10)") + ", +" + sp + " SP.",
-          stats: great ? 10 : 3, sp,
-          short: (great ? "all stats +10" : "all stats +3 (" + (3 - songs) + " more song" + (3 - songs === 1 ? "" : "s") + " for +10)") + ", +" + sp + " SP so far, token cap to " + cap
+          stats: great ? 10 : 3, sp, tokens: 10,
+          short: (great ? "all stats +10" : "all stats +3 (" + (3 - songs) + " more song" + (3 - songs === 1 ? "" : "s") + " for +10)") + ", +" + sp + " SP so far, +10 of every token afterward; token cap to " + cap
         });
       } else {
         const n = concertGoal(state).count;
@@ -1681,6 +1706,18 @@
     gl.shop = {};
     gl.lastBuy = { id: "song:" + song.id, label: song.name, turn: state.turn, before, after: JSON.stringify(purchaseState(state)), sp: (song.once || {}).sp || 0 };
     return state;
+  }
+  // Record an already-owned song when its rewards/cost are already reflected in
+  // the game's balances. This never invents missing income or charges twice.
+  function recordLearnedSong(state, sc, songId, at) {
+    const song = (sc.songs || []).find((x) => x.id === songId);
+    if (!state.gl || !song || !Number.isInteger(at) || at < song.from || at > Math.min(state.turn, sc.totalTurns) || (state.gl.songs || {})[songId] != null) return false;
+    const gl = state.gl, p = glPeriod(sc, at);
+    if (at === state.turn && !Object.values(gl.songs || {}).some(t => glPeriod(sc, t) === p) && gl.carry && gl.carry.period === p && gl.carry.songs.includes(songId)) gl.carriedPeriods = Object.assign({}, gl.carriedPeriods, { [p]: true });
+    gl.songs = Object.assign({}, gl.songs, { [songId]: at });
+    if (at === state.turn) { gl.shop = {}; delete gl.holdSong; delete gl.carry; }
+    else if (gl.shop) delete gl.shop["song:" + songId];
+    return true;
   }
   const L_RANK = (i) => ["your top", "your 2nd", "your 3rd", "your 4th", "your 5th"][i] || "a";
   // Buying a technique: its tokens (a random-type cost requires the actual shown
@@ -2366,39 +2403,88 @@
   function bestTraining(options) {
     return options.filter((o) => o.kind === "train").sort((a, b) => b.value - a.value)[0];
   }
+  // Discrete training/type and Hello outcomes. Finishing an actual displayed
+  // song must be evaluated per outcome, not by pretending an expected +8 occurs.
+  function performanceOutcomes(f, state, sc) {
+    if (!sc.tokenOf || state.turn < (sc.tokensFrom || 5)) return [{ probability: 1, balances: state.gl.tokens.slice(), credited: [0,0,0,0,0], hello: 0 }];
+    const ex = f.extras || {}, [pri, sec] = sc.tokenOf[f.stat];
+    const entered = ex.tokType != null && ex.tokType !== "";
+    const types = entered ? [[+ex.tokType, 1]] : state.gl && state.gl.tokenTypes === "usual" ? [[pri, 1]]
+      : [[pri, 0.6], [sec, 0.3]].concat([0,1,2,3,4].filter(i => i !== pri && i !== sec).map(i => [i, 0.1 / 3]));
+    const initial = state.gl.tokens, cap = tokenCap(state, sc), out = [];
+    const hello = (f.members || []).map(i => state.deck && state.deck.slots[i]).find(sl => sl && Hello.isHello(Deck.card(sl.id)) && Hello.hasMet(sl));
+    const hp = hello && Hello.profile(Deck.card(hello.id), hello.lb);
+    types.forEach(([type, probability]) => {
+      const after = initial.slice();
+      tokenGain(Object.assign({}, f, { extras: Object.assign({}, ex, { tokType: type }) }), state, sc, false).forEach(g => { after[g.type] = Math.min(cap, after[g.type] + Math.max(0, g.amount)); });
+      const emit = (p, balances, extra) => out.push({ probability: probability * p, balances, credited: balances.map((n,i) => n - initial[i]), hello: extra });
+      if (!hp) { emit(1, after, 0); return; }
+      emit(1 - hp.procRate, after, 0);
+      const lows = after.map((n,i) => n === Math.min(...after) ? i : -1).filter(i => i >= 0);
+      lows.forEach(i => { const balances = after.slice(); balances[i] = Math.min(cap, balances[i] + hp.tokenAmount); emit(hp.procRate / lows.length, balances, balances[i] - after[i]); });
+    });
+    return out;
+  }
+
   function applySongFocus(ctx, options) {
     const state = ctx.state, sc = ctx.sc;
-    if (sc.id !== "grandlive" || !state.gl || state.gl.focus !== "songs" || state.turn < 5 || state.turn > 71 || !concertGoal(state).left) return;
-    const best = options[0];
-    if (!best || best.kind !== "train" || best.firstEvent) return;
-    const recovery = Math.max(-Infinity, ...options.filter((o) => o.kind !== "train").map((o) => o.value));
-    const candidates = options.filter((o) => o.kind === "train" && o.fail <= state.risk && o.value >= recovery).map((o) => {
+    if (sc.id !== "grandlive" || !state.gl || state.gl.focus !== "songs" || state.turn < 5 || state.turn > sc.totalTurns) return;
+    let best = options[0];
+    if (!best || best.firstEvent || best.kind === "race" && best.forced) return;
+    // In Songs first the configured risk limit is a hard eligibility condition.
+    if (best.kind === "train" && best.fail > state.risk) {
+      const safe = options.filter(o => o.kind !== "train" || o.fail <= state.risk);
+      if (safe.length) {
+        options.sort((a,b) => (a.kind === "train" && a.fail > state.risk) - (b.kind === "train" && b.fail > state.risk) || b.value-a.value);
+        best = options[0];
+        best.selectionPolicy = { objective: "respect failure limit", why: "Highest ordinary score among commands within your " + state.risk + "% failure limit", assumptions: "Failure rates follow your entries, or the labeled estimate when blank." };
+        best.notes.unshift("Trainings above your " + state.risk + "% failure limit cannot rank #1 in Songs first.");
+      }
+    }
+    if (best.kind !== "train" || state.turn > 71 || !concertGoal(state).left) return;
+    const recovery = Math.max(-Infinity, ...options.filter(o => o.kind !== "train").map(o => o.value));
+    const candidates = options.filter(o => o.kind === "train" && o.fail <= state.risk && o.value >= recovery).map(o => {
       const before = JSON.parse(JSON.stringify(state));
       if (o.song) buySong(before, sc, o.song.id);
       if (o.tech) buyTechnique(before, sc, o.tech.id, o.tech.type);
-      const room = before.gl.tokens.map((n) => Math.max(0, tokenCap(before, sc) - n));
-      const f = before.facilities.find((f) => f.stat === o.stat);
-      const gains = [0, 0, 0, 0, 0];
-      let tokens = 0, hello = 0;
-      tokenGain(f, before, sc, true).forEach((g) => { const take = Math.min(room[g.type], g.amount); room[g.type] -= take; gains[g.type] += take; tokens += take; if (g.lh) hello += take; });
-      const budget = periodSongBudget(before, sc), success = 1 - o.fail / 100;
-      const progress = budget ? gains.reduce((n, x, i) => n + Math.min(x, budget.short[i]), 0) : 0;
-      o.performancePriority = { usable: tokens * success, towardSongs: progress * success, training: (tokens - hello) * success, hello: hello * success, need: budget ? budget.need : null, short: budget ? budget.short : null };
-      return { o, tokens: tokens * success, progress: progress * success, hello: hello * success, observed: !!(budget && budget.observedSelection) };
+      const f = before.facilities.find(f => f.stat === o.stat), budget = periodSongBudget(before, sc);
+      const held = heldSong(before, sc);
+      const offers = shopSongs(before, sc, tokenPlan(before, sc)).filter(x => x.offered && (!held || x.song.id === held.id));
+      const gap = balances => offers.length ? Math.min(...offers.map(x => x.song.cost.reduce((n,c,i) => n + Math.max(0,c-balances[i]),0))) : 0;
+      // On a concert command every candidate receives the same collaborator
+      // reward. Do not prefer a color that this guaranteed reward already funds.
+      const reward = calendarPerformance(state.turn, sc);
+      const closing = balances => reward ? balances.map(n => Math.min(reward.cap, n + reward.amount)) : balances;
+      const openingGap = gap(closing(before.gl.tokens)), success = 1 - o.fail / 100;
+      let usable = 0, hello = 0, progress = 0, completion = 0, reduction = 0;
+      performanceOutcomes(f, before, sc).forEach(path => {
+        const p = path.probability * success;
+        usable += p * path.credited.reduce((a,n) => a+n,0); hello += p * path.hello;
+        if (budget) progress += p * path.credited.reduce((n,x,i) => n + Math.min(x,budget.short[i]),0);
+        const afterGap = gap(closing(path.balances));
+        if (openingGap > 0 && afterGap === 0) completion += p;
+        reduction += p * Math.max(0,openingGap-afterGap);
+      });
+      const ex = f.extras || {};
+      o.performancePriority = { usable, towardSongs: progress, training: usable-hello, hello, completionProbability: completion, offeredGapReduction: reduction, offeredGap: openingGap, offers: offers.map(x => x.song.name), need: budget && budget.need, short: budget && budget.short, typesAssumed: ex.tokType == null || ex.tokType === "", calendarReward: reward ? reward.amount : 0 };
+      return o;
     });
     if (!candidates.length) return;
-    const totalPick = candidates.slice().sort((a, b) => b.tokens - a.tokens || b.o.value - a.o.value)[0];
-    // Unknown future offers should not displace a much stronger training merely
-    // to chase a projected color. Actual observed selections can guide the full
-    // Songs-first preference; projections have a half-typical-training loss cap.
-    const chosen = candidates.filter((x) => x.observed || x.o.value >= totalPick.o.value - 0.5 * ctx.typ)
-      .sort((a, b) => b.progress - a.progress || b.tokens - a.tokens || b.o.value - a.o.value)[0];
-    chosen.o.notes.unshift("Songs first: ~" + chosen.progress.toFixed(1) + " points fill this period's song/carry color gaps; ~" + chosen.tokens.toFixed(1) + " usable in total after risk/caps" + (chosen.hello ? "; ~" + chosen.hello.toFixed(1) + " of that is Hello's random-event expectation, not a guaranteed reward" : "") + ". Recovery and the first Hello meeting stay protected.");
-    if (chosen.o !== best) {
-      chosen.o.parts.songFocus = Math.max(0, best.value - chosen.o.value) + 0.01 * ctx.typ;
-      chosen.o.value = sumParts(chosen.o.parts);
-      options.sort((a, b) => b.value - a.value);
-    }
+    const actual = candidates.some(o => o.performancePriority.offeredGap > 0);
+    const canFinish = candidates.some(o => o.performancePriority.completionProbability > 0);
+    candidates.sort((a,b) => {
+      const A=a.performancePriority, B=b.performancePriority;
+      // A small partial gap reduction must not discard a large rainbow token
+      // haul when no candidate can finish a song. In that case build supply.
+      return (canFinish ? B.completionProbability-A.completionProbability || B.offeredGapReduction-A.offeredGapReduction : 0) || B.usable-A.usable || (actual ? B.offeredGapReduction-A.offeredGapReduction : 0) || b.value-a.value;
+    });
+    const chosen = candidates[0], p = chosen.performancePriority;
+    const why = canFinish ? Math.round(p.completionProbability*100) + "% chance to fund an offered song by the next command; expected remaining-cost reduction " + p.offeredGapReduction.toFixed(1) + " points"
+      : "highest expected usable Performance among safe trainings worth at least as much as recovery (" + p.usable.toFixed(1) + " points)" + (actual ? "; no eligible training can finish an offered song in one command" : "");
+    chosen.selectionPolicy = { objective: canFinish ? "fund an offered song" : "usable Performance", why, assumptions: state.gl.tokenTypes === "usual" ? "Untouched types use the preselected usual colors; amounts remain estimates." : "Unset types use the 60/30/10 distribution." };
+    chosen.notes.unshift("Songs first: #1 for " + why + (p.hello ? "; Hello contributes " + p.hello.toFixed(1) + " expected points through a separate random outcome" : "") + ". " + chosen.selectionPolicy.assumptions);
+    const remaining = options.filter(o => !candidates.includes(o)).sort((a,b) => (a.kind === "train" && a.fail > state.risk) - (b.kind === "train" && b.fail > state.risk) || b.value-a.value);
+    options.splice(0,options.length,...candidates,...remaining);
   }
 
   function evaluate(state, sc, deferOpening = false) {
@@ -2551,8 +2637,10 @@
       });
       versus = { label: second.label, gap: best.value - second.value, because: PART_LABELS[bigKey] || bigKey };
     }
+    if (best.selectionPolicy && second) versus = { label: second.label, gap: best.value - second.value, because: best.selectionPolicy.objective, policy: best.selectionPolicy.why };
     let confidence = "clear pick";
-    if (versus) {
+    if (best.selectionPolicy) confidence = "under entered assumptions";
+    else if (versus) {
       const rel = versus.gap / Math.max(1, ctx.typ);
       if (rel < 0.08) confidence = "close call";
       else if (rel < 0.25) confidence = "good pick";
@@ -2937,16 +3025,15 @@
         const cap = tokenCap(s, sc);
         tokenGain(f, s, sc).forEach((g) => { s.gl.tokens[g.type] = Math.min(cap, (s.gl.tokens[g.type] || 0) + Math.max(0, g.amount)); });
       },
-      // Fixed rewards at the end of the turn: Make Debut!'s +10 of every token going into turn 5,
-      // and each live's stats (all +10 on a Great Success, +3 otherwise; GIRLS' LEGEND U +10).
+      // Fixed rewards: Make Debut!'s +10 each going into turn 5, collaborators'
+      // +10 each after Promo Lives, and concert stats (+10 Great Success, +3
+      // otherwise; GIRLS' LEGEND U's separate +10).
       // A song or technique in front of the call is bought with Done, even if the training
       // fails (lessons don't use the turn); an Energy technique's energy is already in the turn.
       endOfTurn(s, sc, option) {
         s.gl = s.gl || { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} };
-        if (s.turn === GL_DEBUT_SONG - 1) {
-          const cap = tokenCap(Object.assign({}, s, { turn: GL_DEBUT_SONG }), sc);
-          s.gl.tokens = s.gl.tokens.map((n) => Math.min(cap, (n || 0) + 10));
-        }
+        const performance = calendarPerformance(s.turn, sc);
+        if (performance) s.gl.tokens = s.gl.tokens.map((n) => Math.min(performance.cap, (n || 0) + performance.amount));
         const li = sc.lives.indexOf(s.turn);
         if ((li !== -1 || s.turn === GL_SPECIAL_DEADLINE) && s.trackStats && s.stats) {
           const r = glRewards(s, sc).find((x) => x.turn === s.turn && x.stats);
@@ -3348,7 +3435,7 @@
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, calibSamples, relearnCalib, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, focusWeight, turnsToDebut, applyOpening, NEW_YEAR,
-    songBonuses, hypeStatus, songsLearned, concertGoal, techniquesToSong, concertSongValue, shouldCarrySong, glRewards, songAdvice, songPlan, heldSong, holdSong, periodSongBudget, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, lessonShop, buyTechnique, buySong, shopSongs, undoBuy, recordHelloEvent
+    songBonuses, hypeStatus, songsLearned, concertGoal, calendarPerformance, recordTokenReward, recordLearnedSong, performanceOutcomes, techniquesToSong, concertSongValue, shouldCarrySong, glRewards, songAdvice, songPlan, heldSong, holdSong, periodSongBudget, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, lessonShop, buyTechnique, buySong, shopSongs, undoBuy, recordHelloEvent
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;

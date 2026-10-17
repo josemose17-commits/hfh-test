@@ -2,6 +2,8 @@
 
 Checked 2026-10-17 against a detailed build `20261017e` report covering commands 1–23, with the run paused on turn 24 before Hopeful Stakes and the first Promo Live. The user confirmed that all recorded purchases happened on turn 24 and that **Run n' Run!** was left showing to carry into Classic. This audit does not treat the report as a second-concert failure.
 
+Follow-up: the [second-concert audit](grand-concert-second-concert-audit.md) supersedes this pass's training preference, blank type selector and Hello-control placement. It also fixes the missing collaborator reward, overlapping Bought/Hold controls and stale shop offers after recording an owned song.
+
 ## What the report establishes
 
 The run learned four shop songs: Full Speed Ahead! Umadol Power☆, Here Comes Our Time, Ring Ring Diary and Believe in Miracles! The free Make Debut! makes the displayed total **five**. Run n' Run! was not purchased and is not part of that total.

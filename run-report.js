@@ -3,7 +3,7 @@
 (function (root) {
   const E = root.UmaEngine || (typeof require !== "undefined" ? require("./engine.js") : null);
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
-  const VERSION = "20261017f";
+  const VERSION = "20261017g";
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const vector = (x) => Array.from({ length: 5 }, (_, i) => Number.isFinite((x || [])[i]) ? x[i] : 0);
   const add = (a, b) => a.map((n, i) => n + b[i]);
@@ -19,7 +19,7 @@
     if (state.deck) out.deck = { trainee: state.deck.trainee, slots: (state.deck.slots || []).map((s) => s && { id: s.id, card: D.card(s.id) ? D.card(s.id).n : String(s.id), lb: s.lb, bond: s.bond, met: s.met, dates: s.dates }) };
     if (state.gl) {
       out.gl = {};
-      ["tokens", "songs", "lessons", "focus", "shop", "carry", "holdSong", "carriedPeriods", "hints"].forEach((key) => { if (state.gl[key] !== undefined) out.gl[key] = state.gl[key]; });
+      ["tokens", "songs", "lessons", "focus", "tokenTypes", "shop", "carry", "holdSong", "carriedPeriods", "hints"].forEach((key) => { if (state.gl[key] !== undefined) out.gl[key] = state.gl[key]; });
     }
     return clone(out);
   }
@@ -93,6 +93,7 @@
   function optionInfo(option, state, sc) {
     if (!option) return null;
     const out = { kind: option.kind, stat: option.stat || null, label: option.label, prefix: option.prefix || [], value: option.value, parts: option.parts || {}, fail: option.fail, failEstimated: option.failEst, gainEstimated: option.gainEst, statGains: option.statGains, energyDelta: option.energyDelta, moodDelta: option.moodDelta, outing: option.outing, song: option.song, technique: option.tech, notes: option.notes || [] };
+    if (option.selectionPolicy) out.selectionPolicy = option.selectionPolicy;
     if (option.performancePriority) out.performancePriority = option.performancePriority;
     if (sc.id === "grandlive" && option.kind === "train") {
       const working = afterPurchase(state, sc, option);
@@ -113,11 +114,12 @@
     const training = option.kind === "train" && !failed && f ? income(working, sc, f, false) : { requested: vector(), credited: vector(), lostAtCap: vector(), sources: [], balances: paid };
     let calculated = training.balances.slice();
     const calendar = { requested: vector(), credited: vector(), lostAtCap: vector() };
-    if (before.turn === 4) {
-      const cap = E.tokenCap(Object.assign({}, working, { turn: 5 }), sc);
+    const reward = E.calendarPerformance(before.turn, sc);
+    if (reward) {
+      const cap = reward.cap;
       calculated = calculated.map((n, i) => {
-        const take = Math.max(0, Math.min(10, cap - n));
-        calendar.requested[i] = 10; calendar.credited[i] = take; calendar.lostAtCap[i] = 10 - take;
+        const take = Math.max(0, Math.min(reward.amount, cap - n));
+        calendar.requested[i] = reward.amount; calendar.credited[i] = take; calendar.lostAtCap[i] = reward.amount - take;
         return n + take;
       });
     }
@@ -155,7 +157,7 @@
       return Object.assign({ index, turn: l.turn, label: l.label, kind: l.kind, stat: l.stat, failed: l.failed || null, coverage: d ? "detailed" : "legacy", inputs: before ? inputs(before) : null, progressBeforeCommand: before ? progress(before, sc) : null }, d || { recommended: null, chosen: null, options: [], after: null, performance: null, concert: null });
     });
     events.push(...clone(state.runPending || []).map((e) => Object.assign({ pending: true }, e)));
-    const totals = { recordedTrainingIncome: vector(), trainingLostAtCap: vector(), calendarIncome: vector(), calendarLostAtCap: vector(), netPurchaseSpend: vector(), balanceCorrections: vector(), helloIncome: vector(), helloLostAtCap: vector(), unreconciled: vector() };
+    const totals = { recordedTrainingIncome: vector(), trainingLostAtCap: vector(), calendarIncome: vector(), calendarLostAtCap: vector(), observedRewardIncome: vector(), observedRewardLostAtCap: vector(), netPurchaseSpend: vector(), balanceCorrections: vector(), helloIncome: vector(), helloLostAtCap: vector(), unreconciled: vector() };
     turns.forEach((t) => {
       const p = t.performance; if (!p) return;
       totals.recordedTrainingIncome = add(totals.recordedTrainingIncome, p.training.credited);
@@ -169,6 +171,10 @@
       if (e.spent) totals.netPurchaseSpend = add(totals.netPurchaseSpend, e.spent);
       if (e.kind === "balanceCorrection") totals.balanceCorrections = add(totals.balanceCorrections, e.delta);
       if (e.kind === "helloEvent") { totals.helloIncome[e.type] += e.credited; totals.helloLostAtCap[e.type] += e.amount - e.credited; }
+      if (e.kind === "observedTokenReward") {
+        totals.observedRewardIncome = add(totals.observedRewardIncome, e.credited);
+        totals.observedRewardLostAtCap = add(totals.observedRewardLostAtCap, e.lostAtCap);
+      }
     });
     const sources = turns.flatMap((t) => t.performance && t.performance.training ? t.performance.training.sources || [] : []);
     const observations = sc.id === "grandlive" ? {
@@ -176,6 +182,7 @@
       enteredAmounts: sources.filter((s) => !s.amountEstimated).length,
       enteredTypes: sources.filter((s) => !s.typeAssumed).length,
       helloEventsLogged: events.filter((e) => e.kind === "helloEvent").length,
+      helloTypesAssumed: events.filter((e) => e.kind === "helloEvent" && e.typeAssumed).length,
       helloCheckWithoutEvent: !!((state.extras || {}).lh20 || turns.some((t) => t.inputs && (t.inputs.extras || {}).lh20)) && !events.some((e) => e.kind === "helloEvent")
     } : null;
     return {
@@ -188,7 +195,7 @@
         const logged = turns.filter((t) => t.turn === turn).slice(-1)[0];
         return { turn, recorded: !!logged, beforeCommand: logged ? logged.progressBeforeCommand : null, afterCommand: logged ? logged.concert : null };
       }),
-      limits: ["Only inputs and actions recorded in this browser are included. Unticked offers and unrecorded purchases are unknown.", "Recorded training income can use formula amounts or assumed types; inspect each source. Expected Hello rewards never count as recorded income.", "Legacy entries preserve saved inputs. Their original recommendation, command outcome and between-command purchases are unavailable.", "Net purchase spend excludes backfilled songs and unrecorded purchases; entered balance corrections remain separate."]
+      limits: ["Only inputs and actions recorded in this browser are included. Unticked offers and unrecorded purchases are unknown.", "Recorded training income can use formula amounts or assumed types; inspect each source. Preselected usual types are assumptions until edited. Expected Hello rewards never count as recorded income.", "Songs first ranks the entered one-command candidates by its exported criterion; unknown future shops, event outcomes and token types prevent a proof of the best whole career.", "Legacy entries preserve saved inputs. Their original recommendation, command outcome and between-command purchases are unavailable.", "Net purchase spend excludes backfilled songs and unrecorded purchases; entered balance corrections and observed token rewards remain separate."]
     };
   }
 
@@ -205,10 +212,11 @@
       report.currentProgress ? "Songs: " + report.currentProgress.total + " total; " + report.currentProgress.hype.since + " this concert period." + (report.currentProgress.paid != null ? " Shop purchases: " + report.currentProgress.paid + " total; " + report.currentProgress.periodPaid + "/" + report.currentProgress.periodGuideTarget + " this period's guide target (free/held songs excluded)." : "") : ""];
     if (sc.tokens) {
       const counts = (values) => sc.tokens.map((name, i) => name + " " + Math.round(values[i] * 100) / 100).join(", ");
-      lines.push("Recorded training income (entered or estimated): " + counts(report.totals.recordedTrainingIncome), "Training income lost at cap: " + counts(report.totals.trainingLostAtCap), "Net recorded purchase spend: " + counts(report.totals.netPurchaseSpend), "Entered balance corrections: " + counts(report.totals.balanceCorrections));
+      lines.push("Recorded training income (entered or estimated): " + counts(report.totals.recordedTrainingIncome), "Training income lost at cap: " + counts(report.totals.trainingLostAtCap), "Automatic calendar income: " + counts(report.totals.calendarIncome), "Observed all-token rewards: " + counts(report.totals.observedRewardIncome), "Net recorded purchase spend: " + counts(report.totals.netPurchaseSpend), "Entered balance corrections: " + counts(report.totals.balanceCorrections));
       if (report.observations) {
         const o = report.observations;
         lines.push("Training observations: " + o.enteredAmounts + "/" + o.trainingSources + " amounts entered; " + o.enteredTypes + "/" + o.trainingSources + " types entered. Actual Hello events logged: " + o.helloEventsLogged + ".");
+        if (o.helloTypesAssumed) lines.push(o.helloTypesAssumed + " Hello event type(s) used the first tied-lowest color; amounts were recorded, colors remain assumed.");
         if (o.helloCheckWithoutEvent) lines.push("Hello's prior +20 is checked, but no actual Hello token event was logged. Balance corrections cannot identify its timing or type.");
       }
     }

@@ -14,7 +14,7 @@
   const APT = ["Turf", "Dirt", "Sprint", "Mile", "Medium", "Long", "Front", "Pace", "Late", "End"];
   const FX_SHORT = { 1: "Friendship", 8: "Training", 2: "Mood", 15: "Race", 19: "Specialty", 14: "Init. bond", 30: "SP bonus", 3: "Spd bonus", 4: "Sta bonus", 5: "Pow bonus", 6: "Gut bonus", 7: "Wit bonus", 27: "Fail prot.", 28: "Energy cut", 31: "Wit recovery", 41: "All stats", 18: "Hint rate", 17: "Hint Lv" };
   const blankFacility = (stat) => ({ stat, gain: null, cards: 0, rainbows: 0, unbonded: 0, hint: false, fail: null, extras: {}, members: [], hints: [], extra: 0 });
-  const blankGl = () => ({ songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {}, focus: "songs" });
+  const blankGl = () => ({ songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {}, focus: "songs", tokenTypes: "usual" });
   const GAUGE = [["Blue", 40, "g-blue"], ["Green", 60, "g-green"], ["Orange", 80, "g-orange"], ["Max", 100, "g-max"]];
   const blankDeck = () => ({ trainee: null, slots: [null, null, null, null, null, null], globalOnly: true });
   const resetBonds = (d) => Object.assign({}, d, { slots: d.slots.map((sl) => (sl ? { id: sl.id, lb: sl.lb, bond: null, dates: { unlocked: false, done: 0 } } : null)) });
@@ -89,6 +89,7 @@
         s.facilities.forEach((f) => { f.members = f.members || []; f.hints = f.hints || []; f.extra = f.extra || 0; });
         s.gl = s.gl || blankGl();
         if (!s.gl.focus) s.gl.focus = "songs";
+        if (!s.gl.tokenTypes) s.gl.tokenTypes = "usual";
         // Older saves carried max energy from career to career (100 → 104 → 108...): once, set
         // it back to 100 plus what this career's outings added.
         // Older saves learned the scenario multiplier against gains that weren't halved past
@@ -110,6 +111,7 @@
   }
 
   let state = load();
+  let songBalanceFix = null;
 
   // ---- Cards you own: { card id: limit break }, kept apart from careers ----
   const OWN_KEY = "uma-owned-v1";
@@ -233,6 +235,7 @@
           </div>
           <div class="facilities" id="facilities"></div>
           <p class="mini" id="facHelp"></p>
+          <section class="panel quick-events" id="quickEvents" aria-label="Event shortcuts"></section>
 
           <details class="panel stats" id="statsPanel">
             <summary><h2>Stats and caps</h2><span class="mini">Optional. Lets the coach stop pushing stats that are capped or already enough.</span></summary>
@@ -320,6 +323,37 @@
     $("#goalToggle").addEventListener("click", toggleGoal);
     $("#strip").addEventListener("click", (e) => { const c = e.target.closest("[data-turn]"); if (c) setTurn(+c.dataset.turn); });
     $("#clearFacs").addEventListener("click", () => { state.facilities = E.STATS.map(blankFacility); commit(true); });
+    $("#quickEvents").addEventListener("click", (e) => {
+      if (e.target.closest("#lh20Add, #lh20Undo")) { handleHelloReward(e); return; }
+      const b = e.target.closest("[data-training-bond]");
+      if (b) {
+        const sl = state.deck.slots[+b.dataset.trainingBond]; if (!sl) return;
+        const before = slotBond(sl); sl.bond = Math.min(100, before + +b.dataset.add);
+        R.event(state, "bondAdjustment", { slot: +b.dataset.trainingBond, before, after: sl.bond });
+        commit(true); return;
+      }
+      const all = e.target.closest("[data-token-all]");
+      if (all) {
+        const reward = E.recordTokenReward(state, scenario(), +all.dataset.tokenAll); if (!reward) return;
+        const key = state.turn + ":" + (state.gl.tokenRewardCount || 0);
+        state.gl.tokenRewardCount = (state.gl.tokenRewardCount || 0) + 1;
+        R.event(state, "observedTokenReward", Object.assign({ rewardKey: key }, reward));
+        state.gl.tokenRewardUndo = Object.assign({ key }, reward);
+        commit(true); flash("Recorded +" + reward.amount + " of every token. Future Promo Live collaborator rewards are added by Done automatically."); return;
+      }
+      if (e.target.closest("[data-token-reward-undo]")) {
+        const u = state.gl.tokenRewardUndo;
+        if (!u || u.turn !== state.turn || !u.after.every((n, i) => state.gl.tokens[i] === n)) { flash("Tokens changed: undo later actions first."); return; }
+        state.gl.tokens = u.before;
+        state.runPending = (state.runPending || []).filter((x) => x.rewardKey !== u.key);
+        delete state.gl.tokenRewardUndo; commit(true);
+      }
+    });
+    $("#quickEvents").addEventListener("change", (e) => {
+      if (e.target.dataset.quickUnlock == null) return;
+      const sl = state.deck.slots[+e.target.dataset.quickUnlock];
+      if (sl) { sl.dates = Object.assign({ done: 0 }, sl.dates, { unlocked: e.target.checked }); commit(true); }
+    });
     $("#dockDone").addEventListener("click", () => done(rec && rec.action));
 
     // Turn-level scenario inputs.
@@ -333,12 +367,6 @@
 
     // Training cards: pips, toggles and number boxes.
     $("#facilities").addEventListener("click", (e) => {
-      const bondButton = e.target.closest("[data-training-bond]");
-      if (bondButton) {
-        const sl = state.deck.slots[+bondButton.dataset.trainingBond]; if (!sl) return;
-        sl.bond = Math.min(100, slotBond(sl) + +bondButton.dataset.add);
-        commit(true); flash(D.card(sl.id).n + " bond: " + sl.bond); return;
-      }
       const mc = e.target.closest("[data-member]");
       if (mc) {
         // A card shows up on one training per turn, so tapping it here removes it elsewhere.
@@ -539,7 +567,7 @@
         const song = scenario().songs.find((x) => x.id === e.target.value);
         const at = +$("#songAddTurn").value;
         if (!Number.isInteger(at) || at < song.from || at > state.turn) { flash("Choose the actual learned turn, from " + song.from + " through " + state.turn + "."); e.target.value = ""; return; }
-        state.gl.songs[song.id] = at;
+        if (!E.recordLearnedSong(state, scenario(), song.id, at)) return;
         R.event(state, "songBackfill", { id: song.id, label: song.name, learnedTurn: at, paid: false });
         commit(true);
         flash("Added " + song.name + " to your songs");
@@ -555,39 +583,6 @@
         R.event(state, hold ? "songHold" : "songHoldRelease", { id });
         commit(true); flash(hold ? "Selection held for after the concert; keep it unchanged in game." : "Released the hold; purchase advice is active again."); return;
       }
-      if (e.target.closest("#lh20Add")) {
-        const sc = scenario(), tokens = state.gl.tokens, selected = $("#lh20Type").value;
-        const low = Math.min(...tokens), tied = tokens.map((n,i) => n === low ? i : -1).filter(i => i >= 0);
-        if (selected === "" && tied.length !== 1) { flash("Choose the actual awarded type: lowest balances are tied."); return; }
-        const type = selected === "" ? tied[0] : +selected;
-        delete state.gl.lh20Undo;
-        // The event does not change the turn log. Keeping the full log inside
-        // every event backup makes subsequent turn snapshots grow recursively.
-        const before = JSON.stringify(Object.assign({}, state, { log: undefined }));
-        const amount = +$("#lhAmount").value;
-        const last = (state.log || []).slice(-1)[0];
-        const turn = last && last.kind === "train" && last.turn === state.turn - 1 ? last.turn : state.turn;
-        const recorded = E.recordHelloEvent(state, sc, { amount, type, mood: $("#lhMood").checked, turn });
-        if (!recorded) { flash("No eligible Light Hello event, or it was already recorded for that turn."); return; }
-        R.event(state, "helloEvent", recorded, recorded.turn);
-        const entry = { v: 2, before, after: "" }; state.gl.lh20Undo = entry;
-        commit(true);
-        // Rendering normalizes a few saved fields. Compare Undo against the
-        // resulting state, rather than the pre-render object.
-        const current = Object.assign({}, state, { log: undefined, gl: Object.assign({}, state.gl) }); delete current.gl.lh20Undo;
-        entry.after = JSON.stringify(current); save();
-        flash("Light Hello: +" + recorded.credited + " " + sc.tokens[type] + ", Guts +" + recorded.guts + ", +7 bond; " + recorded.sp + " SP in game"); return;
-      }
-      if (e.target.closest("#lh20Undo")) {
-        const entry = state.gl.lh20Undo; if (!entry) return;
-        const current = Object.assign({}, state, {gl: Object.assign({}, state.gl)}); delete current.gl.lh20Undo;
-        if (entry.v === 2) delete current.log;
-        if (JSON.stringify(current) !== entry.after) { flash("Run changed since event: undo later actions first or correct balances manually."); return; }
-        const log = state.log;
-        state = JSON.parse(entry.before);
-        if (entry.v === 2) state.log = log;
-        commit(true); flash("Undid Light Hello event"); return;
-      }
       const buy = e.target.closest("[data-tech-buy]");
       if (buy) {
         e.preventDefault();
@@ -596,6 +591,7 @@
         const previous = state.gl.lastBuy;
         E.buyTechnique(state, scenario(), id, offer ? offer.type : null);
         if (state.gl.lastBuy === previous) { flash("Purchase not recorded: check your Performance balance and choose the type shown in the shop."); return; }
+        songBalanceFix = null;
         R.purchase(state, state.gl.lastBuy);
         commit(true);
         flash("Bought " + state.gl.lastBuy.label + (state.gl.lastBuy.sp ? "; +" + state.gl.lastBuy.sp + " SP in game" : "") + ": tick your shop's new offers");
@@ -606,11 +602,19 @@
         e.preventDefault();
         const previous = state.gl.lastBuy;
         E.buySong(state, scenario(), sbuy.dataset.songBuy);
-        if (state.gl.lastBuy === previous) { flash("Purchase not recorded: check your Performance balance and whether you already learned this song."); return; }
+        if (state.gl.lastBuy === previous) { songBalanceFix = sbuy.dataset.songBuy; renderShop(); flash("The coach balance is short. Update it, or record a song already bought in game below. Holding never locks Bought."); return; }
+        songBalanceFix = null;
         R.purchase(state, state.gl.lastBuy);
         commit(true);
         flash("Learned " + state.gl.lastBuy.label + (state.gl.lastBuy.sp ? "; +" + state.gl.lastBuy.sp + " SP in game" : "") + ": tick your shop's new offers");
         return;
+      }
+      const owned = e.target.closest("[data-song-owned]");
+      if (owned) {
+        const id = owned.dataset.songOwned;
+        if (!E.recordLearnedSong(state, scenario(), id, state.turn)) return;
+        R.event(state, "songBackfill", { id, label: scenario().songs.find((x) => x.id === id).name, learnedTurn: state.turn, paid: false, source: "alreadyBoughtBalanceMismatch" });
+        songBalanceFix = null; commit(true); flash("Recorded owned song. Tokens and stats unchanged; match the game's current balances."); return;
       }
       const rm = e.target.closest("[data-song-rm]");
       if (rm) {
@@ -901,6 +905,43 @@
     flash("New career started at turn 1");
   }
 
+  function handleHelloReward(e) {
+      if (e.target.closest("#lh20Add")) {
+        const sc = scenario(), tokens = state.gl.tokens, selected = $("#lh20Type").value;
+        const low = Math.min(...tokens), tied = tokens.map((n,i) => n === low ? i : -1).filter(i => i >= 0);
+        const type = selected === "" ? tied[0] : +selected;
+        // The event does not change the turn log. Keeping the full log inside
+        // every event backup makes subsequent turn snapshots grow recursively.
+        const backup = Object.assign({}, state, { log: undefined, gl: Object.assign({}, state.gl) });
+        delete backup.gl.lh20Undo;
+        const before = JSON.stringify(backup);
+        const amount = +$("#lhAmount").value;
+        const last = (state.log || []).slice(-1)[0];
+        const turn = last && last.kind === "train" && last.turn === state.turn - 1 ? last.turn : state.turn;
+        const recorded = E.recordHelloEvent(state, sc, { amount, type, mood: $("#lhMood").checked, turn });
+        if (!recorded) { flash("No eligible Light Hello event, or it was already recorded for that turn."); return; }
+        if (selected === "" && tied.length > 1) recorded.typeAssumed = true;
+        R.event(state, "helloEvent", recorded, recorded.turn);
+        const entry = { v: 2, before, after: "" }; state.gl.lh20Undo = entry;
+        commit(true);
+        // Rendering normalizes a few saved fields. Compare Undo against the
+        // resulting state, rather than the pre-render object.
+        const current = Object.assign({}, state, { log: undefined, gl: Object.assign({}, state.gl) }); delete current.gl.lh20Undo;
+        entry.after = JSON.stringify(current); save();
+        flash("Light Hello: +" + recorded.credited + " " + sc.tokens[type] + ", Guts +" + recorded.guts + ", +7 bond; " + recorded.sp + " SP in game"); return;
+      }
+      if (e.target.closest("#lh20Undo")) {
+        const entry = state.gl.lh20Undo; if (!entry) return;
+        const current = Object.assign({}, state, {gl: Object.assign({}, state.gl)}); delete current.gl.lh20Undo;
+        if (entry.v === 2) delete current.log;
+        if (JSON.stringify(current) !== entry.after) { flash("Run changed since event: undo later actions first or correct balances manually."); return; }
+        const log = state.log;
+        state = JSON.parse(entry.before);
+        if (entry.v === 2) state.log = log;
+        commit(true); flash("Undid Light Hello event"); return;
+      }
+  }
+
   let flashTimer = null;
   function flash(msg) {
     let el = $("#toast");
@@ -952,6 +993,19 @@
     return h + `<b class="pip-n">${v}</b></span></div>`;
   }
 
+  function renderQuickEvents() {
+    const box = $("#quickEvents"); if (!box) return;
+    const sc = scenario(), slots = (state.deck && state.deck.slots) || [];
+    const hello = slots.findIndex((s) => s && H.isHello(D.card(s.id)));
+    const hp = hello >= 0 ? H.profile(D.card(slots[hello].id), slots[hello].lb) : null;
+    box.hidden = !slots.some(Boolean) && sc.id !== "grandlive";
+    const gl = state.gl || {};
+    box.innerHTML = `<h3>Event shortcuts</h3>
+      ${sc.id === "grandlive" && state.turn >= 5 ? `<div class="row-wrap"><b>Performance</b><button type="button" class="btn ghost small" data-token-all="10">All tokens +10</button><button type="button" class="btn ghost small" data-token-all="5">Link reward +5 all</button>${gl.tokenRewardUndo && gl.tokenRewardUndo.turn === state.turn ? '<button type="button" class="btn ghost small" data-token-reward-undo>Undo token reward</button>' : ""}</div><p class="mini">For rewards actually received. New collaborators' +10 each is automatic after Promo Lives from this version onward; do not add it twice.</p>` : ""}
+      ${sc.id === "grandlive" && state.turn >= 5 && hp ? `<div class="row-wrap hello-actual"><button type="button" class="btn" id="lh20Add">Hello +20 lowest</button><select id="lh20Type" aria-label="Awarded token type"><option value="">Lowest (auto)</option>${sc.tokens.map((n,i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select>${hp.card.r === 1 ? '<select id="lhAmount" aria-label="Observed Light Hello tokens"><option value="20">+20</option><option value="10">+10</option></select>' : '<input id="lhAmount" type="hidden" value="20">'}<label class="chk"><input type="checkbox" id="lhMood">Mood +1 too</label>${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo Hello event</button>' : ""}</div><p class="mini">Tap after Done for an actual event. Also records its Guts and bond. If lowest colors tie, auto uses the first; select the awarded color to override.</p><label class="chk"><input type="checkbox" data-quick-unlock="${hello}" ${slots[hello].dates && slots[hello].dates.unlocked ? "checked" : ""}> Hello outings unlocked</label>` : ""}
+      ${slots.some(Boolean) ? `<div class="event-bond-list">${slots.map((sl,i) => { const c = sl && D.card(sl.id); return !c ? "" : `<div class="row-wrap"><span>${esc(shortName(c))}: <b>${Math.round(slotBond(sl))}</b> bond</span>${[5,10].map(n => `<button type="button" class="btn ghost small" data-training-bond="${i}" data-add="${n}" aria-label="+${n} bond for ${esc(c.n)}" ${slotBond(sl) >= 100 ? "disabled" : ""}>+${n} bond</button>`).join("")}</div>`; }).join("")}</div>` : ""}`;
+  }
+
   function facilityHTML(f, idx) {
     const sc = scenario();
     const facInputs = sc.inputs.filter((i) => i.scope === "facility");
@@ -979,13 +1033,15 @@
     const g = E.tokenGain(f, state, sc);
     if (!g.length) return "";
     const ex = f.extras || {};
+    const unset = key => ex[key] == null || ex[key] === "";
+    const help = [g.some((x, i) => unset(i ? "tokType2" : "tokType")) ? "Usual type preselected" : "", g.some((x, i) => unset(i ? "tok2" : "tok")) ? "blank amounts use the formula estimate" : ""].filter(Boolean).join("; ");
     // The picker's left edge takes the token's colour (no separate badge, so it fits narrow columns).
-    const sel = (key, cur) => `<select class="t${cur}" data-gltok="${key}" aria-label="Token type"><option value="" ${ex[key] == null || ex[key] === "" ? "selected" : ""}>Type shown?</option>${sc.tokens.map((n, i) => `<option value="${i}" ${ex[key] != null && ex[key] !== "" && +ex[key] === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
+    const sel = (key, cur) => `<select class="t${cur}" data-gltok="${key}" aria-label="Token type">${sc.tokens.map((n, i) => `<option value="${i}" ${cur === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
     const row = (x, k) => `<div class="tokpick">${sel(k ? "tokType2" : "tokType", x.type)}<input type="number" inputmode="numeric" min="0" max="99" data-gltok="${k ? "tok2" : "tok"}" value="${ex[k ? "tok2" : "tok"] != null ? ex[k ? "tok2" : "tok"] : ""}" placeholder="~${x.amount}" aria-label="Token amount"></div>`;
     return `<div class="tokrow" title="Tokens this training gives. Set the type and amount your screen shows; Done adds them to your tokens.">
       <span class="pip-label">Tokens${g.length > 1 ? " (friendship: 2 types)" : ""}</span>
       ${g.map((x, i) => row(x, i)).join("")}
-      ${g.some((x, i) => ex[i ? "tokType2" : "tokType"] == null || ex[i ? "tokType2" : "tokType"] === "" || ex[i ? "tok2" : "tok"] == null || ex[i ? "tok2" : "tok"] === "") ? '<span class="mini">Estimated until you enter the displayed type and amount.</span>' : ""}
+      ${help ? `<span class="mini">${help}; change if different.</span>` : ""}
     </div>`;
   }
 
@@ -1094,12 +1150,12 @@
     $("#songSummary").textContent = learnedN + " of 22 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
     $("#songsBody").innerHTML = `
       <div id="glShop"></div>
-      <label class="field"><span>Grand Concert priority</span><select id="grandFocus"><option value="songs" ${gl.focus !== "balanced" ? "selected" : ""}>Songs first · colors for songs and carry</option><option value="balanced" ${gl.focus === "balanced" ? "selected" : ""}>Balance stats and songs</option></select></label>
+      <label class="field"><span>Grand Concert priority</span><select id="grandFocus"><option value="songs" ${gl.focus !== "balanced" ? "selected" : ""}>Songs first · fund offered songs, then tokens</option><option value="balanced" ${gl.focus === "balanced" ? "selected" : ""}>Balance stats and songs</option></select></label>
       <div class="gl-status">${status}</div>
-      <p class="mini">The free Make Debut! counts toward Hype and the 18-song total, but not the purchased-song guide target. Enter the displayed Performance types/amounts on trainings; blank inputs use estimates.</p>
+      <p class="mini">The free Make Debut! counts toward Hype and the 18-song total, but not the purchased-song guide target. Usual token types are preselected; change them if the game shows a different type.</p>
       ${nextR ? `<div class="gl-next"><b>Next: ${esc(nextR.label)}</b>, turn ${nextR.turn}: ${esc(nextR.short || nextR.gain)}</div>` : ""}
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="${E.tokenCap(state, sc)}" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
-      ${state.turn >= (sc.tokensFrom || 5) && hp ? `<div class="row-wrap hello-actual"><button type="button" class="btn ghost small" id="lh20Add">Record actual Hello +20</button><select id="lhAmount" aria-label="Observed Light Hello tokens"><option value="20">+20 tokens</option>${hp.card.r === 1 ? '<option value="10">+10 tokens</option>' : ""}</select><select id="lh20Type" aria-label="Awarded token type"><option value="">Lowest held (auto)</option>${sc.tokens.map((n,i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select><label class="chk"><input type="checkbox" id="lhMood">Also gave mood +1</label>${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo token event</button>' : ""}</div><p class="mini">Record an actual event after Done adds training points. The debut-check checkbox alone does not add points.</p>` : ""}
+
       ${state.turn >= (sc.tokensFrom || 5) && hp ? `<details data-keep="hello"${open("hello", false)}><summary>Light Hello · ${D.RARITY[hp.card.r]} LB${helloSlot.lb} · events and value</summary>
         <p class="mini">Training Effectiveness ${hp.effects[8] || 0}%; normal energy reduction ${hp.effects[28] || 0}%${hp.card.r === 3 ? "; +30 percentage points when she joins a friendship training" : "; no SSR friendship-energy unique"}. Failure Protection ${hp.effects[27]}% reduces the current risk proportionally; it does not remove that many percentage points.</p>
         <p class="mini">First training: Speed +${hp.first.s[0]}, Guts +${hp.first.s[3]}, mood +1, +10 event bond. Outings still require their separate unlock event. Later token events are random: the coach uses a 40% estimate (published estimates 36–45%)${hp.card.r === 1 ? " and a conservative +10 for R because its +10/+20 mixture is unverified" : ", for +8 expected points"}. Expected points are never added by Done.</p>
@@ -1193,11 +1249,13 @@
       : t.offered ? `<span class="tok-any">${t.any}</span><select class="tech-type${t.type != null ? " t" + t.type : ""}" data-tech-type="${t.id}" aria-label="Token type the shop shows"><option value="">type?</option>${sc.tokens.map((n, i) => `<option value="${i}" ${t.type === i ? "selected" : ""}>${n}</option>`).join("")}</select>`
         : `<span class="tok-any">${t.any} any</span>`;
     const tag = (id) => { const pl = ls.songPlan; return !pl ? "" : pl.focus.indexOf(id) !== -1 ? ' <span class="pill c-clear-pick">pick</span>' : pl.avoid.indexOf(id) !== -1 ? ' <span class="pill c-close-call">skip</span>' : ""; };
-    const songRow = (x) => `<div class="shop-row${getSong && getSong.id === x.id ? " best" : ""}${hold && hold.id === x.id ? " held" : ""}${x.offered ? " on" : ""}${x.afford ? "" : " cant"}">
+    const songRow = (x) => `<div class="shop-row song-row${getSong && getSong.id === x.id ? " best" : ""}${hold && hold.id === x.id ? " held" : ""}${x.offered ? " on" : ""}${x.afford ? "" : " cant"}">
         <label class="tech-pick"><input type="checkbox" data-tech-offer="${x.id}" ${x.offered ? "checked" : ""}><span class="tech-name">${esc(x.song.name)}${tag(x.song.id)}</span></label>
         <span class="tech-cost">${chips(x.song.cost)}</span>
-        <button type="button" class="btn ghost small" data-song-buy="${x.song.id}" ${x.afford ? "" : "disabled"}>Bought</button>
+        <div class="song-actions">
+        <button type="button" class="btn ghost small" data-song-buy="${x.song.id}">Bought</button>
         ${ls.songPlan && !ls.songPlan.last ? E.heldSong(state, sc) && E.heldSong(state, sc).id === x.song.id ? '<button type="button" class="btn ghost small" data-song-release>Release hold</button>' : `<button type="button" class="btn ghost small" data-song-hold="${x.song.id}" ${x.offered ? "" : "disabled"}>Hold after concert</button>` : ""}
+        </div>
       </div>`;
     const techRow = (t) => `<div class="shop-row${getTech && getTech.id === t.id ? " best" : ""}${t.offered ? " on" : ""}${t.afford ? "" : " cant"}">
         <label class="tech-pick"><input type="checkbox" data-tech-offer="${t.id}" ${t.offered ? "checked" : ""}><span class="tech-name">${esc(t.label)}</span></label>
@@ -1220,6 +1278,7 @@
     else get = `Tick what your shop shows.${ls.ifOffered.length ? ` If it has them: <b>${ls.ifOffered.map((t) => esc(t.label)).join("</b>, <b>")}</b>.` : ""}`;
     $("#songSummary").textContent = getSong ? "Get: " + getSong.song.name : hold ? "Hold " + hold.song.name + (getTech ? " · get " + getTech.label : "") : getTech ? "Get: " + getTech.label : E.songsLearned(state) + " of 22 songs";
     box.innerHTML = `
+      ${songBalanceFix && !state.gl.songs[songBalanceFix] ? `<div class="purchase-fix mini warn">The coach's balance cannot pay this song. Holding only changes advice. Match the five balances to the game before recording a purchase, or if you already bought it: <button type="button" class="btn ghost small" data-song-owned="${songBalanceFix}">Already bought in game · record owned</button><p>This records the current learned turn, clears the old selection and leaves tokens/stats unchanged.</p></div>` : ""}
       <div class="tech-get">${get}${lb ? ` <button type="button" class="btn ghost small" data-tech-undo>Undo ${esc(lb.label)}</button>` : ""}</div>
       <div class="shop">
         <div class="tech-head"><b>Your shop</b> <span class="mini">tick what it shows, tap Bought when you buy</span></div>
@@ -1274,12 +1333,8 @@
       // Every chip keeps the same size from turn to turn: name (cut short if needed), then the bond.
       return `<button type="button" class="mchip ty-${c.ty}${on ? " on" : ""}${rb ? " rb" : ""}${hint ? " hint" : ""}" data-member="${si}" aria-pressed="${on}" title="${esc(D.label(c))} · bond ${Math.round(bond)}${rb ? " · friendship here" : ""} · tap again to mark a hint (!)">${hint ? '<b class="bang">!</b>' : ""}<span class="mname">${esc(shortName(c))}</span><small class="${bond >= 80 ? "full" : ""}">${Math.round(bond)}</small></button>`;
     }).join("");
-    const quickBond = (f.members || []).map(si => {
-      const sl = state.deck.slots[si]; if (!sl) return ""; const c = D.card(sl.id);
-      return `<div class="row-wrap"><span class="mini">${esc(shortName(c))} bond ${Math.round(slotBond(sl))}</span>${[5,10].map(n => `<button type="button" class="btn ghost small" data-training-bond="${si}" data-add="${n}">+${n} bond</button>`).join("")}</div>`;
-    }).join("");
     const rbNow = rainbowCount(f);
-    return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>${quickBond}
+    return `<div class="mchips" role="group" aria-label="Your cards on this training">${chips}</div>
       ${pipsHTML("extra", f.extra || 0, "Others (not in deck)", "c")}
       ${(f.members || []).length ? pipsHTML("rbmark", rbNow, "Rainbow (as in game)", "r") : ""}`;
   }
@@ -1669,13 +1724,14 @@
     renderConditions();
     $("#trackStats").checked = !!state.trackStats;
 
-    const turnInputs = sc.inputs.filter((i) => i.scope === "turn");
+    const turnInputs = sc.inputs.filter((i) => i.scope === "turn" && i.id !== "lh20");
     // Trackblazer's Grade Point box shows the coach's running count.
     const gp = sc.gradePoints ? E.gradePlan(state, sc) : null;
     const bag = gp ? Object.assign({}, state.extras, { gpNeed: gp.need }) : state.extras;
     $("#turnExtras").innerHTML = turnInputs.length ? `<div class="extras-head">${esc(sc.name)}</div>` + turnInputs.map((i) => extraField(i, bag)).join("") : "";
     $("#turnExtras").hidden = !turnInputs.length;
     renderFacilities();
+    renderQuickEvents();
     renderDeck();
     renderSongs();
 
@@ -1854,7 +1910,10 @@
     const kind = a.kind;
     $("#call").className = "panel call k-" + kind + (a.stat ? " s-" + a.stat : "");
     const runBox = runBoxHTML(E.runCheck(state, sc));
-    const vs = rec.versus ? `<div class="versus">Beats <b>${esc(rec.versus.label)}</b> by ${score(rec.versus.gap)} points, mostly on ${esc(rec.versus.because)}.</div>` : "";
+    const runner = rec.ranked[1];
+    const vs = rec.versus ? rec.versus.policy
+      ? `<div class="versus">Compared with <b>${esc(rec.versus.label)}</b>: ${runner && runner.performancePriority ? performanceSummary(runner.performancePriority) : "ordinary score " + score(runner.value)}. The ordering follows ${esc(a.selectionPolicy.objective)}; the ordinary score stays separate.</div>`
+      : `<div class="versus">Beats <b>${esc(rec.versus.label)}</b> by ${score(rec.versus.gap)} points, mostly on ${esc(rec.versus.because)}.</div>` : "";
     const outcome = a.outingRoll && a.outingRoll[outingPick === "great" ? 0 : 1];
     const afterEnergy = outcome ? Math.min((state.maxEnergy || 100) + (outcome.me || 0), state.energy + (outcome.e || 0)) : rec.after.energy;
     const afterMood = outcome ? C.moodAfter(state, outcome.mo, outcome.cure || (a.consume && a.consume.cureConditions)) : rec.after.mood;
@@ -1865,7 +1924,8 @@
     $("#call").innerHTML = `
       <div class="eyebrow">${esc(rec.turn.text)} · ${esc(rec.phase.name)}</div>
       <div class="headline">${a.prefix.map((p) => `<span class="pre">${esc(p)} →</span>`).join(" ")}<span>${esc(a.label)}</span></div>
-      <div class="pill-row"><span class="pill c-${rec.confidence.replace(" ", "-")}">${esc(rec.confidence)}</span>${a.kind === "train" ? `<span class="pill">score ${score(a.value)}</span>` : ""}</div>
+      <div class="pill-row"><span class="pill c-${rec.confidence.replaceAll(" ", "-")}">${esc(rec.confidence)}</span>${a.kind === "train" ? `<span class="pill">${a.selectionPolicy ? "ordinary score" : "score"} ${score(a.value)}</span>` : ""}</div>
+      ${a.selectionPolicy ? `<div class="rank-reason"><b>#1 · ${esc(a.selectionPolicy.objective)}</b><p class="mini">${esc(a.selectionPolicy.why)}. ${esc(a.selectionPolicy.assumptions)}</p></div>` : ""}
       ${songProgress}
       ${runBox}
       ${rec.reasons.length ? `<p class="mini">${esc(rec.reasons[0])}</p>` : ""}
@@ -1908,9 +1968,15 @@
 
   const PART_NAMES = { stats: "Stats", sp: "Skill points", bond: "Bonds", hint: "Hint", scenario: "Scenario", tokens: "Song tokens", songFocus: "Songs first preference", energy: "Energy", mood: "Mood", risk: "Failure risk", condition: "Condition", fans: "Fans", item: "Item / buff", goal: "Goal race", opening: "Opening plan" };
 
+  function performanceSummary(p) {
+    return (p.offeredGap > 0 ? Math.round(p.completionProbability * 100) + "% to fund an offered song · " + p.offeredGapReduction.toFixed(1) + " cost gap closed · " : "") + p.usable.toFixed(1) + " expected usable tokens" + (p.hello ? " (" + p.hello.toFixed(1) + " from random Hello events)" : "");
+  }
+
   function renderOptions() {
     const top = Math.max(1, ...rec.ranked.filter((o) => o.value < 1e4).map((o) => o.value));
-    $("#options").innerHTML = `<h2>All options</h2><p class="mini">Tap a row for its breakdown. If you picked something else, press <b>I did this</b> on it.</p><ol class="ranked">${rec.ranked.map((o, i) => {
+    const policy = rec.action.selectionPolicy;
+    const riskOnly = policy && policy.objective === "respect failure limit";
+    $("#options").innerHTML = `<h2>All options</h2><p class="mini">${riskOnly ? "Commands within your failure limit rank first, by ordinary score. " : policy ? "Songs first: among trainings within your failure limit and worth at least as much as recovery, prefer the chance to fund an offered song, then its remaining cost reduction, then usable tokens. If no candidate can finish an offered song, prefer usable tokens, then partial cost reduction. Ordinary score breaks ties. " : ""}Tap a row for its breakdown. If you picked something else, press <b>I did this</b> on it.</p><ol class="ranked">${rec.ranked.map((o, i) => {
       const pct = o.value >= 1e4 ? 100 : Math.max(0, Math.round((o.value / top) * 100));
       const open = openRow === i;
       const parts = Object.entries(o.parts).filter(([, v]) => Math.abs(v) >= 0.05 && Math.abs(v) < 1e4);
@@ -1922,8 +1988,8 @@
         </div>` : "";
       return `<li class="${i === 0 ? "first" : ""} k-${o.kind}${o.stat ? " s-" + o.stat : ""}">
         <button type="button" class="opt" data-row="${i}" aria-expanded="${open}">
-          <span class="opt-top"><span>${esc((o.prefix.length ? o.prefix.join(" → ") + " → " : "") + o.label)}</span><span class="num">${score(o.value)}</span></span>
-          <span class="bar"><i style="width:${pct}%"></i></span>
+          <span class="opt-top"><span><span class="opt-rank">#${i + 1}</span> ${esc((o.prefix.length ? o.prefix.join(" → ") + " → " : "") + o.label)}</span><span class="num">${policy ? "score " : ""}${score(o.value)}</span></span>
+          ${policy ? `<span class="opt-metrics">${o.performancePriority ? esc(performanceSummary(o.performancePriority)) : o.kind === "train" ? o.fail > state.risk ? "Above your failure limit" : riskOnly ? "Within your failure limit" : "Ordinary value below recovery" : "Recovery / other command"}</span>` : `<span class="bar"><i style="width:${pct}%"></i></span>`}
         </button>${detail}
       </li>`;
     }).join("")}</ol>`;
@@ -2564,7 +2630,7 @@
       ${ready ? `<p class="mini">These counts come from the returned simulation. Available turns can be used for training, rest or optional racing; they are not guaranteed trainings.</p>` : `<p class="mini short">Do not infer a correct calendar from the predicted stats alone. This optimizer has not supplied the calendar diagnostics; it may be an older build or a scenario without this instrumentation.</p>`}
       ${cal ? `<p class="mini">Model assumptions: ${[cal.requiredRaceResult, cal.randomGoalStats, cal.choiceAndFanGoals, cal.rewards].filter(Boolean).map(esc).join("; ")}.</p>` : ""}
       ${est.eventModel ? `<details><summary>Event-skill source coverage</summary><p class="mini">Conditional success estimate: ${Math.round(est.eventModel.successRate * 100)}%. Song-level relative chain-rate assumption: +${Math.round(est.eventModel.songBoost * 100)}% per level. Exposure: ${count(est.grandConcert && est.grandConcert.eventLevelExposure)} average active levels across the career. Completion priors: SSR 80%, SR 65%, R 50%; these are assumptions. Known branches are exclusive; unresolved skill sources keep a Lv1 availability prior. Hint levels accumulate to Lv5; hint-pool sampling remains approximate and free skill grants are not fully modeled. Raw-text eligibility and event timing still need calibration; the support-event rewards section shows coupled cards and aggregate fallbacks.</p><ul class="mini">${est.eventModel.coverage.filter((x) => x.unresolved.length || x.conditionalNotes.length).map((x) => `<li><b>${esc(D.card(x.card).n)}</b>: ${x.unresolved.length} unresolved event-skill source(s); ${x.conditionalNotes.length} raw condition note(s).</li>`).join("") || "<li>No missing event-result sources for these ordinary supports.</li>"}</ul></details>` : ""}
-      ${est.grandConcert ? `<p class="mini"><b>Grand Concert / Light Hello:</b> ${count(est.grandConcert.songs)} songs, ${count(est.grandConcert.techniques)} techniques, ${count(est.grandConcert.greatConcerts)} Great Success concerts. Extra Hello Performance: ${count(est.grandConcert.helloTokens)}; energy saved on training: ${count(est.grandConcert.helloEnergySaved)}; outing energy actually recovered: ${count(est.grandConcert.helloEnergyRecovered)} (${count(est.grandConcert.helloEnergyWasted)} lost at the cap). Fifth outing completed in ${Math.round(est.grandConcert.helloCompletions * 100)}% of runs; 18-song deadline reached in ${Math.round(est.grandConcert.special * 100)}%.</p><p class="mini">Event rate used: ${Math.round(est.grandConcert.helloProcRate * 100)}%. Outing unlock assumption: ${Math.round(est.grandConcert.helloUnlockRate * 100)}% per eligible turn. Shop and policy estimates can change deck rankings. Guest placements and random mood drops are still omitted. Song event levels are tracked; their numeric effect is an explicit experimental assumption.</p>` : ""}
+      ${est.grandConcert ? `<p class="mini"><b>Grand Concert / Light Hello:</b> ${count(est.grandConcert.songs)} songs, ${count(est.grandConcert.techniques)} techniques, ${count(est.grandConcert.greatConcerts)} Great Success concerts. Extra Hello Performance: ${count(est.grandConcert.helloTokens)}; energy saved on training: ${count(est.grandConcert.helloEnergySaved)}; outing energy actually recovered: ${count(est.grandConcert.helloEnergyRecovered)} (${count(est.grandConcert.helloEnergyWasted)} lost at the cap). Fifth outing completed in ${Math.round(est.grandConcert.helloCompletions * 100)}% of runs; 18-song deadline reached in ${Math.round(est.grandConcert.special * 100)}%.</p><p class="mini">Event rate used: ${Math.round(est.grandConcert.helloProcRate * 100)}%. Outing unlock assumption: ${Math.round(est.grandConcert.helloUnlockRate * 100)}% per eligible turn. Shop and policy estimates can change deck rankings. Promo Live collaborators' +10 of each token is included; conditional link-character Performance rewards are omitted. Guest placements and random mood drops are still omitted. Song event levels are tracked; their numeric effect is an explicit experimental assumption.</p>` : ""}
     </details>`;
   }
 
@@ -3043,6 +3109,7 @@
   }
 
   function renderOutputs() {
+    renderQuickEvents();
     syncLight();
     renderCall();
     renderOptions();

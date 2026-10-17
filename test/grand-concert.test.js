@@ -172,7 +172,7 @@ test("a carried technique keeps its old tier and price after a concert", () => {
   assert.equal(offer.gain.speed, 5); assert.deepEqual(offer.cost, [10, 0, 0, 0, 0]);
   E.buyTechnique(next, sc, "stat:speed");
   assert.equal(next.stats.speed, 308, "normal first concert +3, then the held +5 technique");
-  assert.equal(next.gl.tokens[0], 90);
+  assert.equal(next.gl.tokens[0], 100, "100 opening +10 collaborators -10 carried price");
 });
 
 test("the simulator preserves a held technique across its concert reset", () => {
@@ -181,7 +181,9 @@ test("the simulator preserves a held technique across its concert reset", () => 
   economy.state.shop = offer;
   economy.end(24, () => {});
   assert.equal(economy.state.shop, offer);
-  economy.add(0, 10);
+  assert.deepEqual(economy.state.tokens, [10, 10, 10, 10, 10]);
+  // Isolate the old held lesson price: leave only its ten Dance available.
+  economy.state.tokens = [10, 0, 0, 0, 0];
   const events = []; economy.shop(25, 100, 100, (e) => events.push(e));
   assert.ok(events.some((e) => e.s && e.s[0] === 5));
   assert.equal(economy.state.spent[0], 10);
