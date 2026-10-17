@@ -8,6 +8,7 @@
 // Must-have skills (opts.must) come first: the deck covers every one some usable card gives.
 (function (root) {
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
+  const SkillEvents = root.UmaSkillEvents || (typeof require !== "undefined" ? require("./skill-events.js") : null);
   const EU = root.Euophrys || (typeof require !== "undefined" ? require("./vendor/euophrys.js") : null);
   const cardsData = () => root.EuophrysCards || (typeof require !== "undefined" ? require("./data/euophrys-cards.js") : null);
   const eventsData = () => root.UmaCardEvents || (typeof require !== "undefined" ? require("./data/card-events.js") : null);
@@ -24,7 +25,6 @@
   const SPEED_PER_L = 60;
   const HINT_CHANCE = 0.075; // per turn trained with the card, before its hint frequency
   const TRAIN_SHARE = { type: 0.3, friend: 0.22 }; // share of training turns spent with the card
-  const EVENT_SKILL_CHANCE = { 3: 0.8, 2: 0.65, 1: 0.5 };
   // Must-have skills: covering one (a card in the deck can hint it or give it through an event)
   // outweighs any card's score, so the builder covers each one it can. Past that, a better
   // chance to actually be offered it counts a little (MUST_P for a sure thing).
@@ -96,12 +96,8 @@
       const hints = days * share * HINT_CHANCE * (eu ? eu.hint_rate : 1 + (fx[18] || 0) / 100);
       const lv = 1 + (fx[17] || 0);
       const hs = card.hs || [];
-      const add = (id, prob, hlv, kind) => offers.add(id, prob, hlv, card.id, kind);
-      hs.forEach((id) => add(id, 1 - Math.exp(-hints / Math.max(1, hs.length)), lv, "training"));
-      const late = ctx.it ? lateChainSkills(card) : null;
-      // Maverick requires declining Light Hello's outings. It cannot be credited
-      // together with the outings and her fifth-outing skill in an ace deck.
-      (card.es || []).filter((id) => !(card.n === "Light Hello" && +id === 200272)).forEach((id) => add(id, (EVENT_SKILL_CHANCE[card.r] || 0.5) * (late && late.has(String(id)) ? IT_LATE_CHAIN : 1), 1));
+      hs.forEach((id) => offers.trainingHints(id, hints / Math.max(1, hs.length), lv, card.id));
+      SkillEvents.add(offers, card, ctx, { success: ctx.eventSuccessRate, independent: ctx.it });
     });
     const list = [];
     const probabilities = offers.values();
@@ -140,6 +136,7 @@
       known: new Set((t ? [].concat(t.us || [], t.is || [], t.as || []) : []).map(String)),
       traineeChar: t ? t.cid : null,
       it: !!opts.independent,
+      eventSuccessRate: opts.eventSuccessRate == null ? 0.5 : opts.eventSuccessRate,
     };
     // A must-have the trainee already has needs no card.
     ctx.must = (opts.must || []).map(String).filter((id) => !ctx.known.has(id));
@@ -245,14 +242,16 @@
   // next-best card for its slot (scores leave out the must-have bonus; gives lists the
   // must-haves the card brings), the deck's best skills and its must-have coverage.
   function describeDeck(opts, deck, pool, borrowPool) {
+    const requiredCoverage = deckSkills(opts, deck).must.filter((x) => x.p > 0).map((x) => x.id);
     const cards = deck.map((c, i) => {
       const rest = deck.filter((_, j) => j !== i);
       const own = rank(opts, D.card(c.id).ty, rest, [c])[0] || { score: 0, base: 0, skill: 0, must: 0, skills: [], gives: [] };
       const from = (c.borrowed ? borrowPool : pool).filter((x) => x.id !== c.id && D.card(x.id).ty === D.card(c.id).ty);
       const alt = from.length ? rank(opts, D.card(c.id).ty, rest, from)[0] : null;
+      const altCoverage = alt ? deckSkills(opts, rest.concat([alt])).must.filter((x) => x.p > 0).map((x) => x.id) : [];
       return {
         id: c.id, lb: c.lb, borrowed: !!c.borrowed, score: own.score - own.must, base: own.base, skill: own.skill, skills: own.skills, gives: own.gives,
-        alt: alt ? { id: alt.id, lb: alt.lb, score: alt.score - alt.must, losesMust: own.must - alt.must >= MUST_COVER } : null
+        alt: alt ? { id: alt.id, lb: alt.lb, score: alt.score - alt.must, losesMust: requiredCoverage.some((id) => !altCoverage.includes(id)) } : null
       };
     });
     const ctx = makeCtx(opts);

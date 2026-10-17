@@ -1833,7 +1833,7 @@
     const shown = skills.filter((s) => s.eventP != null && s.trainingP != null);
     if (!shown.length) return "";
     const pct = (n) => Math.round(n * 100) + "%";
-    return `<details class="pred-help"><summary>Event skills and training hints</summary><p class="mini">Estimated opportunities for this race. Training hints share a card's hint pool; high Hint Frequency raises their chance. Event skills use separate completion assumptions. The sources can overlap, so their percentages do not add. Hint discounts follow their actual modeled likelihood, rather than assuming the highest hint level always happens.</p><div class="table-wrap"><table><thead><tr><th>Skill</th><th>Event</th><th>Training hint</th><th>Either</th></tr></thead><tbody>${shown.map((s) => `<tr><th>${esc(debuffOrSkillName(s.id))}</th><td>${pct(s.eventP)}</td><td>${pct(s.trainingP)}</td><td>${pct(s.p)}</td></tr>`).join("")}</tbody></table></div><p class="mini">These are model estimates. Grand Concert support-event-frequency song effects are not yet calibrated into the deck search.</p></details>`;
+    return `<details class="pred-help"><summary>Event skills and training hints</summary><p class="mini">Estimated opportunities for this race. Training hints share a card's hint pool; high Hint Frequency raises their chance. Event skills use separate completion assumptions. The sources can overlap, so their percentages do not add. Hint discounts follow their actual modeled likelihood, rather than assuming the highest hint level always happens.</p><div class="table-wrap"><table><thead><tr><th>Skill</th><th>Event</th><th>Training hint</th><th>Either</th></tr></thead><tbody>${shown.map((s) => `<tr><th>${esc(debuffOrSkillName(s.id))}</th><td>${pct(s.eventP)}</td><td>${pct(s.trainingP)}</td><td>${pct(s.p)}</td></tr>`).join("")}</tbody></table></div><p class="mini">These are model estimates. Known event choices and success/failure branches are modeled separately. Missing event results retain availability priors. Conditional success is assumed; raw-text conditions and hint-pool sampling remain approximations.</p></details>`;
   }
 
   function renderCall() {
@@ -1934,6 +1934,7 @@
   const svCache = {}; // preset id -> { style: [[id, median x100, mean x100]] }, or "loading" / "missing" / "error"
   let optRun = null; // the search in progress: { worker, f }
   let optResult = null; // last result, with the settings it was found for
+  let sensitivityJob = null;
   let wish = null; // cards worth getting for optResult
   let skillLimit = 60;
 
@@ -1959,7 +1960,7 @@
   function cm() {
     if (!state.cm) state.cm = {};
     const c = state.cm;
-    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, sq: "", sfilter: "all", globalSkills: true, helloProcRate: "0.4", helloUnlockRate: "0.15" };
+    const defaults = { goal: "race", statsW: "0.1", comp: {}, style: defaultStyle(), ownedOnly: true, borrow: true, skillW: "1", runs: "10", locked: [], must: [], targets: {}, independent: false, sq: "", sfilter: "all", globalSkills: true, helloProcRate: "0.4", helloUnlockRate: "0.15", eventSuccessRate: "0.5", eventSongBoost: "0" };
     Object.keys(defaults).forEach((k) => { if (c[k] == null) c[k] = defaults[k]; });
     if (!presetById(c.preset)) c.preset = defaultPreset().id;
     return c;
@@ -2043,7 +2044,7 @@
   const euOver = () => eu().over[euScen()] || (eu().over[euScen()] = { general: {}, tabs: {} });
   function euOpts(c, p) {
     const sv = skillMap(p.id, c.style);
-    const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: !!c.independent };
+    const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: !!c.independent, eventSuccessRate: +c.eventSuccessRate };
     if (c.goal === "ace" || c.goal === "debuff") {
       o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, (id) => skillInfo(id)[2]), statsWeight: +c.statsW };
     }
@@ -2104,7 +2105,7 @@
 
   function optKey() {
     const c = cm();
-    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.helloProcRate, c.helloUnlockRate, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer() {
@@ -2127,10 +2128,11 @@
       if (!est) {
         try {
           const sv = skillMap(p.id, c.style);
-          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare, runs: 16, skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate });
+          const ctx = OPT.buildCtx({ scenario: scenario(), build: p.build, trainee: state.deck.trainee, caps: E.capsFor(state, scenario()), raceShare, runs: 16, skills: sv.map, costs: sv.costs, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent });
           est = OPT.simulate(ctx, r.cards.map((x) => ({ card: D.card(x.id), lb: x.lb })));
         } catch (err) { est = null; }
       }
+      if (scenario().id === "grandlive" && c.goal === "race" && est) r.skills = est.skills.filter((s) => s.surplus > 0 && s.p >= 0.15).slice(0, 10);
       optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       wish = null;
       optRun = null;
@@ -2147,10 +2149,10 @@
         if (link && link.borrow) bp = [link.borrow];
         const opts = Object.assign(euOpts(c, p), { borrow: c.borrow, locked, comp: Object.assign({}, c.comp) });
         const r = T.buildDeck(opts, pool, bp);
-        if (!tg) { done(r, opts, null); return; }
+        if (!tg && !(state.scenario === "grandlive" && c.goal === "race")) { done(r, opts, null); return; }
         // Target stats: start from Euophrys' pick and swap cards toward the targets, a slot at
         // a time so the page can show progress.
-        const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate };
+        const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: tg, caps: E.capsFor(state, scenario()), raceShare, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, must: c.must, independent: !!c.independent };
         const search = OPT.targetSearch(opts, sim, r.cards, pool, bp);
         const tick = () => {
           try {
@@ -2196,6 +2198,47 @@
   }
 
   // Cards you don't have (or have below LB4) that would beat a card in the deck, for its slot.
+  function comparisonDecks(r, c) {
+    const key = (cards) => cards.map((x) => x.id + ":" + x.lb + ":" + !!x.borrowed).sort().join(",");
+    const candidates = [{ name: "Suggested deck", cards: r.cards }];
+    const seen = new Set([key(r.cards)]);
+    r.cards.map((card, i) => ({ card, i })).filter(({ card }) => card.alt && !card.alt.losesMust && !c.locked.includes(card.id)).sort((a, b) => (a.card.score - a.card.alt.score) - (b.card.score - b.card.alt.score)).slice(0, 2).forEach(({ card, i }) => {
+      const cards = r.cards.map((x, j) => j === i ? { id: card.alt.id, lb: card.alt.lb, borrowed: card.borrowed } : x);
+      if (!seen.has(key(cards))) { seen.add(key(cards)); candidates.push({ name: D.card(card.id).n + " → " + D.card(card.alt.id).n, cards }); }
+    });
+    if (r.fit && r.fit.startCards && !seen.has(key(r.fit.startCards))) candidates.push({ name: "Initial Euophrys deck", cards: r.fit.startCards });
+    return candidates;
+  }
+
+  function runSensitivity() {
+    const r = optResult, c = cm();
+    if (!r || r.key !== optKey() || sensitivityJob) return;
+    const candidates = comparisonDecks(r, c);
+    if (candidates.length < 2) { flash("No eligible alternative: the current slots may be locked."); return; }
+    const p = presetById(r.preset), sv = skillMap(p.id, c.style);
+    const sim = { scenario: scenario(), build: p.build, trainee: state.deck.trainee, target: cmTargets(c) || undefined, caps: E.capsFor(state, scenario()), skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: c.must, helloProcRate: +c.helloProcRate, helloUnlockRate: +c.helloUnlockRate, eventSuccessRate: +c.eventSuccessRate, eventSongBoost: +c.eventSongBoost, independent: !!c.independent, raceShare: c.independent ? 0.25 : undefined };
+    const job = OPT.sensitivity(sim, candidates);
+    sensitivityJob = job; renderCM();
+    const tick = () => {
+      if (optResult !== r || r.key !== optKey()) { sensitivityJob = null; if (state.tab === "cm") renderCM(); return; }
+      try {
+        const more = job.next();
+        const progress = $("#sensitivityProgress"); if (progress) progress.textContent = Math.round(job.progress() * 100) + "%";
+        if (more) { setTimeout(tick, 0); return; }
+        r.sensitivity = job.result(); sensitivityJob = null;
+        if (state.tab === "cm") renderCM();
+      } catch (err) { sensitivityJob = null; flash(err.message || String(err)); if (state.tab === "cm") renderCM(); }
+    };
+    setTimeout(tick, 0);
+  }
+
+  function sensitivityHTML(r) {
+    if (!r.sensitivity) return "";
+    const s = r.sensitivity, anyLoss = s.comparisons.some((x) => x.minDelta < -1e-6);
+    const number = (n) => (n > 0 ? "+" : "") + n.toFixed(1);
+    return `<details class="pred-help" open id="sensitivityResult"><summary>Deck sensitivity check</summary><p class="mini${anyLoss ? " warn" : ""}">${anyLoss ? "The lead changes in at least one check. Compare these decks as close or assumption-dependent options." : "The suggested deck keeps its lead or ties in these checks."} This covers the listed alternatives only. Ranges are model sensitivity, not confidence intervals or proof of the best deck.</p><p class="mini">${s.seeds.length} held-out seeds; ${s.runsPerSeed} careers per deck per seed. Positive gaps favor the suggested deck. Scores use target fit, skill points and modeled skill value.</p><div class="table-wrap"><table><thead><tr><th>Alternative</th><th>Assumptions</th><th>Mean gap</th><th>Seed range</th><th>Leads</th></tr></thead><tbody>${s.comparisons.map((x) => `<tr><td>${esc(x.candidate)}</td><td>${esc(x.profile)}</td><td>${number(x.meanDelta)}</td><td>${number(x.minDelta)} to ${number(x.maxDelta)}</td><td>${x.wins}/${s.seeds.length}${x.ties ? " · " + x.ties + " tied" : ""}</td></tr>`).join("")}</tbody></table></div></details>`;
+  }
+
   function runWishlist() {
     if (!optResult || !euReady()) return;
     const c = cm();
@@ -2276,6 +2319,7 @@
       </div>
       ${c.independent ? `<p class="mini it-note"><b>Independent Training:</b> a card's 3rd chain event rarely fires there, so skills only it gives count at ${Math.round(T.IT_LATE_CHAIN * 100)}% of their usual chance. Race Bonus counts for a G1-heavy agenda (${T.IT_RACES[0]} G1, ${T.IT_RACES[1]} G2/G3; change it in the Euophrys settings), and the predicted stats race about 1 turn in 4. Races there are won on distance and surface aptitude alone, so stats only matter for sparks and rating.${IT_LINK[euScen()] ? ` ${IT_LINK[euScen()]} goes in, since uma.guide calls the scenario's link card mandatory there.` : ""}${goal !== "race" ? " Parent decks with target stats may take up to 2 Friend and 2 Group cards (players report they add a lot of skill points toward an SS rating)." : ""}</p>` : ""}
       ${compHTML(c)}
+      ${state.scenario === "grandlive" ? `<details class="pred-help"><summary>Event-skill assumptions</summary><div class="row-wrap"><label class="field"><span>Conditional event success estimate</span><select data-cm="eventSuccessRate">${[["0.25", "25%"], ["0.5", "50% (default assumption)"], ["0.75", "75%"]].map(([v, l]) => `<option value="${v}" ${c.eventSuccessRate === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><label class="field"><span>Experimental chain-rate boost per song level</span><select data-cm="eventSongBoost">${[["0", "0% (magnitude uncalibrated)"], ["0.05", "+5% relative rate (assumed)"], ["0.1", "+10% relative rate (assumed)"]].map(([v, l]) => `<option value="${v}" ${c.eventSongBoost === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div><p class="mini">Song event levels activate after concerts. Their numerical effect has not been verified; these boosts are sensitivity assumptions. Known event branches and chain-ending choices are separate. Grand Concert race decks receive career refinement using your targets, or the build defaults when blank.</p></details>` : ""}
       ${targetsHTML(p, c)}
       ${euSettingsHTML("speed")}
       <div class="row-wrap">
@@ -2286,8 +2330,8 @@
       ${mustHTML(c)}
       ${c.ownedOnly && n < 6 ? `<p class="mini warn">You've marked ${n} owned card${n === 1 ? "" : "s"}. Mark yours in the <button type="button" class="linkish" data-goto-tab="cards">Support cards</button> tab, or untick “Only cards I own” to search every Global SSR and SR at max limit break.</p>` : ""}
       <div class="row-wrap run-row">
-        <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? (cmTargets(c) ? "Simulating careers…" : "Building…") : "Find my best deck"}</button>
-        ${running && cmTargets(c) ? `<span class="progress" id="cmProg"><i style="width:${Math.round((optRun.f || 0) * 100)}%"></i></span>` : ""}
+        <button type="button" class="btn" id="cmRun" ${running ? "disabled" : ""}>${running ? (cmTargets(c) || state.scenario === "grandlive" && goal === "race" ? "Simulating careers…" : "Building…") : "Find my best deck"}</button>
+        ${running && (cmTargets(c) || state.scenario === "grandlive" && goal === "race") ? `<span class="progress" id="cmProg"><i style="width:${Math.round((optRun.f || 0) * 100)}%"></i></span>` : ""}
       </div>
       <div id="cmOut">${optResult ? optResultHTML(optResult, c) : ""}</div>
     </section>`;
@@ -2357,7 +2401,7 @@
     const w = wish;
     const total = r.cards.reduce((a, x) => a + x.score, 0);
     return `<div class="opt-result">
-      <h4>${r.goal === "ace" ? "Best ace parent deck" : r.goal === "debuff" ? "Best debuffer parent deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
+      <h4>${r.goal === "ace" ? "Best ace parent deck" : r.goal === "debuff" ? "Best debuffer parent deck" : r.simulationMeta && r.simulationMeta.scenario === "grandlive" ? "Suggested deck" : "Best deck"} for ${esc(p.name)} · ${STYLE_LABEL[r.style]} · ${esc(T.SCENARIOS.find((x) => x[0] === r.scen)[1])} weights</h4>
       ${stale ? `<p class="mini warn">Settings or cards changed since this search. Press <b>Find my best deck</b> again to update it.</p>` : ""}
       <div class="opt-cards">${r.cards.map((x) => {
         const card = D.card(x.id);
@@ -2374,13 +2418,16 @@
       ${mustResultHTML(r, c)}
       ${predictedHTML(r)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>
+      ${r.simulationMeta && r.simulationMeta.scenario === "grandlive" && r.goal === "race" ? '<p class="mini">The final suggestion also considers simulated careers. A lower static total can still finish closer to your targets or offer better modeled skills.</p>' : ""}
       ${r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
         <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${esc(debuffOrSkillName(x.id))} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${esc(skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
       ${skillSourcesHTML(r.skills || [])}
       <div class="row-wrap">
         <button type="button" class="btn" data-use-opt="1">Use this deck in the coach</button>
         <button type="button" class="btn ghost" id="cmWish">Which cards would improve it?</button>
+        ${r.simulationMeta && r.simulationMeta.scenario === "grandlive" && r.goal === "race" ? `<button type="button" class="btn ghost" id="cmSensitivity" ${stale || sensitivityJob || comparisonDecks(r, c).length < 2 ? "disabled" : ""}>${sensitivityJob ? "Checking…" : "Check ranking sensitivity"}</button>${sensitivityJob ? '<span class="mini" id="sensitivityProgress">0%</span>' : ""}` : ""}
       </div>
+      ${sensitivityHTML(r)}
       ${Array.isArray(w) ? (w.length ? `<div class="wish"><h4>Cards worth getting</h4><ol>${w.map((x) => {
         const cd = D.card(x.id);
         const have = owned[x.id] != null;
@@ -2415,7 +2462,8 @@
       </ul>
       ${ready ? `<p class="mini">These counts come from the returned simulation. Available turns can be used for training, rest or optional racing; they are not guaranteed trainings.</p>` : `<p class="mini short">Do not infer a correct calendar from the predicted stats alone. This optimizer has not supplied the calendar diagnostics; it may be an older build or a scenario without this instrumentation.</p>`}
       ${cal ? `<p class="mini">Model assumptions: ${[cal.requiredRaceResult, cal.randomGoalStats, cal.choiceAndFanGoals, cal.rewards].filter(Boolean).map(esc).join("; ")}.</p>` : ""}
-      ${est.grandConcert ? `<p class="mini"><b>Grand Concert / Light Hello:</b> ${count(est.grandConcert.songs)} songs, ${count(est.grandConcert.techniques)} techniques, ${count(est.grandConcert.greatConcerts)} Great Success concerts. Extra Hello Performance: ${count(est.grandConcert.helloTokens)}; energy saved on training: ${count(est.grandConcert.helloEnergySaved)}; outing energy actually recovered: ${count(est.grandConcert.helloEnergyRecovered)} (${count(est.grandConcert.helloEnergyWasted)} lost at the cap). Fifth outing completed in ${Math.round(est.grandConcert.helloCompletions * 100)}% of runs; 18-song deadline reached in ${Math.round(est.grandConcert.special * 100)}%.</p><p class="mini">Event rate used: ${Math.round(est.grandConcert.helloProcRate * 100)}%. Outing unlock assumption: ${Math.round(est.grandConcert.helloUnlockRate * 100)}% per eligible turn. Shop and policy estimates can change deck rankings. Guest placements, support-event-frequency song effects and random mood drops are still omitted.</p>` : ""}
+      ${est.eventModel ? `<details><summary>Event-skill source coverage</summary><p class="mini">Conditional success estimate: ${Math.round(est.eventModel.successRate * 100)}%. Song-level relative chain-rate assumption: +${Math.round(est.eventModel.songBoost * 100)}% per level. Exposure: ${count(est.grandConcert && est.grandConcert.eventLevelExposure)} average active levels across the career. Completion priors: SSR 80%, SR 65%, R 50%; these are assumptions. Known branches are exclusive; unresolved skill sources keep a Lv1 availability prior. Hint levels accumulate to Lv5; hint-pool sampling remains approximate and free skill grants are not fully modeled. Raw-text eligibility and event stat rewards still need calibration.</p><ul class="mini">${est.eventModel.coverage.filter((x) => x.unresolved.length || x.conditionalNotes.length).map((x) => `<li><b>${esc(D.card(x.card).n)}</b>: ${x.unresolved.length} unresolved event-skill source(s); ${x.conditionalNotes.length} raw condition note(s).</li>`).join("") || "<li>No missing event-result sources for these ordinary supports.</li>"}</ul></details>` : ""}
+      ${est.grandConcert ? `<p class="mini"><b>Grand Concert / Light Hello:</b> ${count(est.grandConcert.songs)} songs, ${count(est.grandConcert.techniques)} techniques, ${count(est.grandConcert.greatConcerts)} Great Success concerts. Extra Hello Performance: ${count(est.grandConcert.helloTokens)}; energy saved on training: ${count(est.grandConcert.helloEnergySaved)}; outing energy actually recovered: ${count(est.grandConcert.helloEnergyRecovered)} (${count(est.grandConcert.helloEnergyWasted)} lost at the cap). Fifth outing completed in ${Math.round(est.grandConcert.helloCompletions * 100)}% of runs; 18-song deadline reached in ${Math.round(est.grandConcert.special * 100)}%.</p><p class="mini">Event rate used: ${Math.round(est.grandConcert.helloProcRate * 100)}%. Outing unlock assumption: ${Math.round(est.grandConcert.helloUnlockRate * 100)}% per eligible turn. Shop and policy estimates can change deck rankings. Guest placements and random mood drops are still omitted. Song event levels are tracked; their numeric effect is an explicit experimental assumption.</p>` : ""}
     </details>`;
   }
 
@@ -2442,7 +2490,7 @@
       ${simulationDiagnosticsHTML(r)}
       <details class="pred-help"><summary>What the predicted stats include</summary>
         <p class="mini"><b>Included:</b> your trainee's starting stats and growth bonuses (100 each without a trainee); every training turn up to the finale, with your cards dealt onto trainings by their specialty priority and the best training picked for your targets each turn (rest when energy runs low, failures by energy); the game's training formula with friendship at bond 80+, training effectiveness, stat bonuses, mood effect and unique effects; facility levels (+1 per 4 trainings, level 5 at summer camp); bonds (+7 per training, +5 per hint, plus card events); each card's event stats, skill points and energy; about 120 per stat from random events; ${r.est.calendarAssumptions ? "scheduled goal and URA races with winning rewards and Race Bonus; optional races: " + (typeof r.est.races === "number" ? Math.round(r.est.races * 100) / 100 : "not reported") + " per career" : "optional races on " + (r.independent ? "about 1 turn in 4 (a G1-heavy Independent Training agenda)" : "about 1 turn in 10 after the debut (more in Trackblazer)") + " with your race bonus"}; half gains past 1200; your stat caps with sparks; ${r.est.grandConcert ? "Grand Concert Performance, sampled lesson shops, song mastery gains, delayed friendship/specialty buffs, concerts, and Light Hello's first/repeat/unlock events, five outings, max energy and completion-dependent ending" : "a flat multiplier for the scenario's own bonuses"}.</p>
-        <p class="mini"><b>Not included, so add these yourself:</b> inheritance (the two inspiration events from your parents' sparks), ${r.est.calendarAssumptions ? "separate career-end and secret-event rewards" : "goal and finale race rewards"}, ${r.est.grandConcert ? "other Friend/Group outings, guest placements, support-event-frequency song effects, hint-event stats and random mood drops (Grand Concert starts at Normal mood and uses Recreation/Hello to raise it)" : "friend card outings, New Year events, hint-event stats, scenario mechanics beyond the flat multiplier, and mood drops (it assumes Great all career)"}. These are simplified estimates, not guaranteed results. Missing mechanics can change both the predicted stats and how decks compare.</p>
+        <p class="mini"><b>Not included, so add these yourself:</b> inheritance (the two inspiration events from your parents' sparks), ${r.est.calendarAssumptions ? "separate career-end and secret-event rewards" : "goal and finale race rewards"}, ${r.est.grandConcert ? "other Friend/Group outings, guest placements, uncalibrated event-frequency magnitude, hint-event stats and random mood drops (Grand Concert starts at Normal mood and uses Recreation/Hello to raise it)" : "friend card outings, New Year events, hint-event stats, scenario mechanics beyond the flat multiplier, and mood drops (it assumes Great all career)"}. These are simplified estimates, not guaranteed results. Missing mechanics can change both the predicted stats and how decks compare.</p>
       </details>
     </div>`;
   }
@@ -2558,6 +2606,7 @@
       return true;
     }
     if (t.closest("#cmWish")) { runWishlist(); return true; }
+    if (t.closest("#cmSensitivity")) { runSensitivity(); return true; }
     if (t.closest("[data-goto-tab]")) { state.tab = t.closest("[data-goto-tab]").dataset.gotoTab; save(); renderTab(); return true; }
     if (t.closest("#cmLockAdd")) {
       const card = cardByLabel.get($("#cmLock").value.trim());
