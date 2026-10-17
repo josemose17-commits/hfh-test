@@ -19,6 +19,8 @@ This pass starts from merged PR #39. It targets a career that reached only two t
 
 ## Songs first policy
 
+Follow-up: the [first-concert audit](grand-concert-first-concert-audit.md) replaces the raw-total override described below with typed song/carry progress, adds explicit holding and separates observed token inputs from estimates. This section records the earlier pass.
+
 New and existing app saves default to **Songs first** unless they already record a preference. The alternate **Balance stats and songs** setting retains the prior weighted policy. Direct engine callers that omit a preference retain that prior policy.
 
 Songs first operates from turn 5 through the end of turn 71 while the 18-song guarantee is incomplete. It does not replace a required race, a baseline recovery call, or the initial Hello meeting rule. If the baseline call is a training, candidates must be within the entered failure limit and must score at least as well as the recovery alternatives. Among those candidates it prefers the largest expected Performance that fits below the current caps, accounting for failure risk. Equal Performance retains the higher ordinary score.
