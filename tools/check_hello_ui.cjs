@@ -259,6 +259,9 @@ function load(state, owned) {
     assert.match(result, /Event skills and training hints/);
     assert.ok(ui.doc.querySelector("#skillBudget"), "Grand Concert displays the affordable purchase model");
     assert.match(ui.doc.querySelector("#skillBudget").textContent, /no extra raw-SP bonus/);
+    assert.ok(ui.doc.querySelector("#supportEventRewards"), "coupled event coverage is displayed");
+    assert.match(ui.doc.querySelector("#supportEventRewards").textContent, /same chosen outcome/);
+    assert.match(ui.doc.querySelector("#supportEventRewards").textContent, /Hello lifecycle/);
   } finally { ui.w.close(); }
 
   const compare = fixture(30052, 5); compare.tab = "cm";
@@ -290,6 +293,13 @@ function load(state, owned) {
       assert.equal(total, tierSum); displayedCost += total;
     });
     assert.equal(displayedCost, +totals[2]);
+    const ledger = ui.doc.querySelector("#supportEventExample");
+    assert.ok(ledger.querySelectorAll("tbody tr").length > 0);
+    assert.match(ledger.textContent, /Events occur after that turn's command/);
+    assert.match(ui.doc.querySelector("#supportEventRewards").textContent, /Coupled parsed rewards/);
+    const shownEvents = [...ledger.querySelectorAll("tbody tr")].filter((row) => row.querySelectorAll("td").length === 4);
+    assert.ok(shownEvents.length > 0, "ledger contains actual selected outcomes");
+    shownEvents.forEach((row) => { const turn = +row.querySelector("td").textContent; assert.ok(turn >= 1 && turn <= 78); });
     const raceRows = [...ui.doc.querySelectorAll("#cmSkillTable tbody tr")];
     assert.ok(raceRows.some((row) => row.classList.contains("sk-gold")), "race table includes gold prices");
     raceRows.forEach((row) => {
@@ -317,5 +327,5 @@ function load(state, owned) {
     assert.equal(ui.doc.querySelector("#cmSensitivity").disabled, true);
     assert.equal(ui.doc.querySelector("#cmWish").disabled, true);
   } finally { ui.w.close(); }
-  console.log("Coach DOM integration: coach controls, run exports, event assumptions, affordable purchase examples, Grand Concert refinement, paired sensitivity and budget-aware upgrades passed.");
+  console.log("Coach DOM integration: coach controls, run exports, coupled event coverage/ledger, affordable purchases, Grand Concert refinement, paired sensitivity and upgrade comparisons passed.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

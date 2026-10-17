@@ -119,9 +119,9 @@ test("event-song levels queue until the concert and count exposure only on subse
   live.start(25, () => {}); assert.equal(live.state.eventLevelTurns, 1);
 });
 
-test("simulation applies optional song exposure to chain skills without changing recorded hints or stats", () => {
+test("legacy aggregate mode applies optional song exposure only to skill opportunities", () => {
   const simCards = cards.map((x) => ({ card: D.card(x.id), lb: x.lb }));
-  const base = { scenario: sc, build: "medium", runs: 4, skills: { 200581: 2 } };
+  const base = { scenario: sc, build: "medium", runs: 4, skills: { 200581: 2 }, coupledEvents: false };
   const a = O.simulate(O.buildCtx(base), simCards);
   const b = O.simulate(O.buildCtx(Object.assign({}, base, { eventSongBoost: 0.1 })), simCards);
   assert.ok(a.grandConcert.eventLevelExposure > 0);
@@ -155,7 +155,8 @@ test("paired sensitivity is reproducible, uses held-out seeds and treats identic
   const before = JSON.stringify({ sim, candidates, config });
   const run = () => { const job = O.sensitivity(sim, candidates, config); assert.throws(() => job.result(), /still running/); while (job.next()) {} return job.result(); };
   const a = run(), b = run(); assert.deepEqual(a, b);
-  assert.equal(a.profiles.length, 7);
+  assert.equal(a.profiles.length, 8);
+  assert.ok(a.profiles.some((p) => p.coupledEvents === false));
   assert.deepEqual(a.seeds, config.seeds);
   a.comparisons.forEach((c) => { close(c.meanDelta, 0); assert.equal(c.ties, 2); assert.equal(c.wins, 0); });
   assert.equal(JSON.stringify({ sim, candidates, config }), before);

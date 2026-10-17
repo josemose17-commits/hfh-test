@@ -1792,6 +1792,7 @@
     if (ch.unlock) bits.push("unlocks outings");
     if (ch.ok) bits.push("on success: " + (eventText(ch.ok, lb) || "nothing"));
     if (ch.ng) bits.push("on failure: " + (eventText(ch.ng, lb) || "nothing"));
+    (ch.when || []).forEach((r) => bits.push("if choice " + r.choice + " was selected in chain event " + r.stage + ": " + eventText(r, lb)));
     return bits.join(", ");
   }
 
