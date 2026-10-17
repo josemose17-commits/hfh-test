@@ -87,6 +87,51 @@ function load(state, owned) {
     assert.equal(ui.saved().gl.songs.runrun, 25); assert.equal(ui.saved().gl.carriedPeriods[1], true);
   } finally { ui.w.close(); }
 
+  const camp = fixture(30052, 0); camp.turn = 38; camp.energy = 37; camp.mood = 4; camp.risk = 17;
+  camp.calib = Array(12).fill(0.57); camp.fcal = [0.79, 0.78];
+  camp.deck.slots = [30052,30101,20033,30078,30111,30054].map(id => ({ id, lb: id === 30111 ? 2 : 4, bond: 90, met: true, dates: { unlocked: id === 30052, done: 0 } }));
+  camp.facilities.forEach(f => { f.fail = null; }); camp.facilities[0].members = [0,1,5,2]; camp.facilities[0].fail = 28;
+  camp.facilities[4].extra = 2;
+  camp.gl.songs = { zensoku: 24, seishun: 24, ringring: 24, kiseki: 24, tachiichi: 27, gothisway: 34, runrun: 37 };
+  ui = load(camp);
+  try {
+    const comparison = ui.doc.querySelector("#recoveryTradeoff");
+    assert.equal(comparison.closest("details"), null, "camp recovery remains visible with the explanation folded");
+    assert.match(comparison.textContent, /Wit leaves 42 energy; Rest leaves 77/);
+    assert.match(comparison.textContent, /2 camp turn/);
+    assert.match(comparison.textContent, /estimated; enter the game's value/);
+    assert.match(comparison.textContent, /Energy lesson/);
+    ui.doc.querySelector("#reportCopy").click();
+    const report = JSON.parse(ui.doc.querySelector("#reportOut").value.split("\n").slice(1).join("\n"));
+    assert.equal(report.coachBuild, "20261017h");
+    assert.equal(report.recoveryComparison.wit.energyAfter, 42);
+    assert.equal(report.options.find(o => o.label === "Train Wit").failEstimated, true);
+    assert.equal(report.options.find(o => o.label === "Train Wit").energyDelta, 5);
+  } finally { ui.w.close(); }
+
+  const engine = require("../engine.js"), grand = require("../scenarios.js").SCENARIOS.find(s => s.id === "grandlive");
+  let legacyStrength = fixture(30052, 5); legacyStrength.turn = 25; legacyStrength.energy = 100;
+  legacyStrength.deck.slots = [{ id: 20033, lb: 4, bond: 90 }]; legacyStrength.calib = [];
+  for (let i = 0; i < 3; i++) {
+    legacyStrength.facilities[2].members = [0];
+    legacyStrength = engine.advance(legacyStrength, grand, { kind: "rest", label: "Rest", energyDelta: 0, prefix: [], notes: [] });
+  }
+  legacyStrength.calib = [0.5,0.5,0.5]; legacyStrength.fcal = [0.8,0.9];
+  const expectedStrength = engine.relearnStrength(legacyStrength, grand);
+  ui = load(legacyStrength);
+  try {
+    const el = ui.doc.querySelector("#energy"); el.dispatchEvent(new ui.w.Event("input", { bubbles: true }));
+    assert.deepEqual(ui.saved().calib, expectedStrength);
+    assert.equal(ui.saved().strengthFix, 1);
+    assert.deepEqual(ui.saved().gl.tokens, legacyStrength.gl.tokens);
+    assert.deepEqual(ui.saved().stats, legacyStrength.stats);
+    assert.deepEqual(ui.saved().fcal, legacyStrength.fcal);
+    assert.deepEqual(ui.saved().log.map(l => l.snapshot), legacyStrength.log.map(l => l.snapshot));
+    ui.doc.querySelector("#undoBtn").click();
+    assert.equal(ui.saved().strengthFix, 1, "Undo to a pre-fix snapshot repairs the active calibration again");
+    assert.deepEqual(ui.saved().calib, engine.relearnStrength(ui.saved(), grand));
+  } finally { ui.w.close(); }
+
   const migraineOuting = fixture(); migraineOuting.conditions = { migraine: true };
   ui = load(migraineOuting);
   try {
