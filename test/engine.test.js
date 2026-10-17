@@ -284,7 +284,7 @@ test("Grand Concert song plan: 5 songs and a carry-over in year one, 3 + carry a
   const five = { kiseki: 6, tachiichi: 8, gothisway: 12, runrun: 16, zensoku: 20 };
   assert.strictEqual(at(22, { kiseki: 6, tachiichi: 8 }, {}).step, "song", "2 of 5 bought: songs still wanted");
   assert.strictEqual(at(22, five, {}).step, "hold", "5 bought: hold the next one for after the live, whatever the technique count says");
-  assert.match(at(22, five, {}).text, /hold it/);
+  assert.match(at(22, five, {}).text, /hold the selection.*from turn 25/);
   const y2 = at(25, five, {});
   assert.strictEqual(y2.target, 3);
   assert.doesNotMatch(y2.text, /carried over first/, "a carry is only credited when actually recorded");
@@ -624,7 +624,7 @@ test("Grand Concert: trainings count the tokens they give toward the songs you s
   const st = (tokens) => base({ turn: 40, gl: { songs: {}, tokens, lessons: {} }, facilities: facs({ guts: { cards: 2 } }) });
   const guts = (s) => E.evaluate(s, gl).options.find((o) => o.stat === "guts");
   const none = guts(st([0, 0, 0, 0, 0]));
-  assert.ok(none.notes.some((n) => /~\d+ tokens \(.*(Visual|Dance).*\) toward .+ \((your next song|song \d+ in your token aim)\)/.test(n)), none.notes.join(" | "));
+  assert.ok(none.notes.some((n) => /~\d+ training points \(.*(Visual|Dance).*\) toward .+ \((your next song|song \d+ in your token aim)\)/.test(n)), none.notes.join(" | "));
   assert.ok(none.parts.tokens > 0, "tokens are their own part of the breakdown");
   const full = guts(st([200, 200, 200, 200, 200]));
   assert.ok(none.value > full.value, "tokens you don't need add nothing");
@@ -1114,13 +1114,14 @@ test("Grand Concert plan counts technique lessons: songs only show up after them
   assert.strictEqual(p.half.techLeft, 16);
   assert.strictEqual(p.half.techTokens, 160);
   assert.strictEqual(p.half.songsLeft, 5);
-  assert.ok(p.half.need > 350 && p.half.need < 400, "about 375 tokens in year one: " + p.half.need);
+  assert.ok(p.half.need - p.half.carryTokens > 350 && p.half.need - p.half.carryTokens < 400, "about 375 tokens before funding the carried song: " + p.half.need);
+  assert.ok(p.half.carryTokens > 0, "the half-period budget also reserves the next song's purchase cost");
   const later = E.tokenPlan(st({ turn: 30 }), gl);
   assert.strictEqual(later.tech.cost, 16, "techniques cost more after the 1st live");
   assert.strictEqual(E.songPlan(st({ gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: { 0: 3 } } }), gl).techLeft, 13);
 });
 
-test("Grand Concert songs first: techniques keep the next song's tokens; stat techniques only from spare tokens (turn 24 run)", () => {
+test("Grand Concert songs first: techniques protect song reserves and an observed carry keeps its selection", () => {
   const gl = sc("grandlive");
   const st = (tokens, o) => base(Object.assign({ turn: 18, energy: 80, gl: { songs: {}, tokens, lessons: {} }, facilities: facs({ speed: { cards: 2 } }) }, o));
   const r = pick(st([60, 50, 30, 9, 100]), "grandlive");
@@ -1133,12 +1134,12 @@ test("Grand Concert songs first: techniques keep the next song's tokens; stat te
   const ls = E.lessonShop(st([35, 50, 30, 9, 100], { gl: { songs: {}, tokens: [35, 50, 30, 9, 100], lessons: {}, shop } }), gl);
   assert.strictEqual(ls.pick.kind, "tech");
   assert.strictEqual(ls.pick.item.id, "stat:wit", "Speed +5 would spend the Dance Full Speed Ahead! needs");
-  // Year one's 5 songs bought: hold the 6th, and spare tokens go to the best stat technique.
+  // Year one's 5 songs bought: hold the 6th without refreshing it through a stat purchase.
   const five = { kiseki: 6, tachiichi: 8, gothisway: 12, runrun: 16, seishun: 17 };
   const done = E.lessonShop(st([60, 50, 60, 40, 100], { turn: 20, gl: { songs: five, tokens: [60, 50, 60, 40, 100], lessons: {}, shop: { "song:zensoku": {}, "stat:speed": {}, "stat:stamina": {} } } }), gl);
   assert.strictEqual(done.phase, "hold");
   assert.strictEqual(done.pick.kind, "hold");
-  assert.strictEqual(done.pick.tech.id, "stat:speed", "stats: Speed over Stamina for a sprinter");
+  assert.strictEqual(done.pick.tech, undefined, "even an affordable spare-token technique would replace the held song");
 });
 
 test("Grand Concert: an Energy technique in the shop beats resting, counts as a lesson and takes its tokens", () => {
@@ -1216,12 +1217,13 @@ test("Grand Concert technique shop: buying applies tokens, a lesson and stats; u
   assert.strictEqual(sp.gl.tokens[4], 90, "a random-type cost comes off the type you set");
   // The call names the technique to get and Done buys it.
   const r = pick(st(), "grandlive");
-  assert.match(r.headline, /^Buy the Speed \+5 technique \(10 Dance, no turn used\)/, r.headline);
+  assert.match(r.headline, /^Buy the Skill Points \+5 technique \(10 Mental, no turn used\)/, r.headline);
   const after = E.advance(st(), gl, r.action);
   assert.strictEqual(after.gl.lessons[0], 1);
   const dance = E.tokenGain(st().facilities.find((f) => f.stat === "speed"), st(), gl).filter((g) => g.type === 0).reduce((a, g) => a + g.amount, 0);
-  assert.strictEqual(after.gl.tokens[0], 60 + dance - 10, "10 Dance off, the training's Dance on");
-  assert.ok(after.stats.speed >= 305, "the +5 lands with the training's gains");
+  assert.strictEqual(after.gl.tokens[0], 60 + dance, "the sequence reserve protects Dance; training Dance is still added");
+  assert.strictEqual(after.gl.tokens[4], 90, "the selected SP lesson costs 10 Mental instead");
+  assert.ok(after.stats.speed > 300, "training gains still land after the SP lesson");
 });
 
 test("Grand Concert year one: tokens count enough that a friendship Speed beats Wit at 31 energy (turn 24 run)", () => {

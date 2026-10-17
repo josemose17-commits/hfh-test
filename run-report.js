@@ -3,7 +3,7 @@
 (function (root) {
   const E = root.UmaEngine || (typeof require !== "undefined" ? require("./engine.js") : null);
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
-  const VERSION = "20261017e";
+  const VERSION = "20261017f";
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const vector = (x) => Array.from({ length: 5 }, (_, i) => Number.isFinite((x || [])[i]) ? x[i] : 0);
   const add = (a, b) => a.map((n, i) => n + b[i]);
@@ -19,7 +19,7 @@
     if (state.deck) out.deck = { trainee: state.deck.trainee, slots: (state.deck.slots || []).map((s) => s && { id: s.id, card: D.card(s.id) ? D.card(s.id).n : String(s.id), lb: s.lb, bond: s.bond, met: s.met, dates: s.dates }) };
     if (state.gl) {
       out.gl = {};
-      ["tokens", "songs", "lessons", "focus", "shop", "carry", "carriedPeriods", "hints"].forEach((key) => { if (state.gl[key] !== undefined) out.gl[key] = state.gl[key]; });
+      ["tokens", "songs", "lessons", "focus", "shop", "carry", "holdSong", "carriedPeriods", "hints"].forEach((key) => { if (state.gl[key] !== undefined) out.gl[key] = state.gl[key]; });
     }
     return clone(out);
   }
@@ -27,7 +27,8 @@
   function progress(state, sc, turn = state.turn) {
     if (sc.id !== "grandlive") return null;
     const s = Object.assign({}, state, { turn });
-    return { total: E.songsLearned(s), hype: E.hypeStatus(s, sc), deadline: E.concertGoal(s) };
+    const plan = E.songPlan(s, sc), held = E.heldSong(s, sc);
+    return { total: E.songsLearned(s), paid: Object.entries((s.gl || {}).songs || {}).filter(([id, at]) => sc.songs.some((x) => x.id === id) && at <= turn).length, periodPaid: plan ? plan.bought : 0, periodGuideTarget: plan ? plan.target : null, held: held ? held.id : null, hype: E.hypeStatus(s, sc), deadline: E.concertGoal(s) };
   }
 
   function checkpoint(state, sc) {
@@ -92,6 +93,7 @@
   function optionInfo(option, state, sc) {
     if (!option) return null;
     const out = { kind: option.kind, stat: option.stat || null, label: option.label, prefix: option.prefix || [], value: option.value, parts: option.parts || {}, fail: option.fail, failEstimated: option.failEst, gainEstimated: option.gainEst, statGains: option.statGains, energyDelta: option.energyDelta, moodDelta: option.moodDelta, outing: option.outing, song: option.song, technique: option.tech, notes: option.notes || [] };
+    if (option.performancePriority) out.performancePriority = option.performancePriority;
     if (sc.id === "grandlive" && option.kind === "train") {
       const working = afterPurchase(state, sc, option);
       const f = (working.facilities || []).find((x) => x.stat === option.stat);
@@ -168,11 +170,20 @@
       if (e.kind === "balanceCorrection") totals.balanceCorrections = add(totals.balanceCorrections, e.delta);
       if (e.kind === "helloEvent") { totals.helloIncome[e.type] += e.credited; totals.helloLostAtCap[e.type] += e.amount - e.credited; }
     });
+    const sources = turns.flatMap((t) => t.performance && t.performance.training ? t.performance.training.sources || [] : []);
+    const observations = sc.id === "grandlive" ? {
+      trainingSources: sources.length,
+      enteredAmounts: sources.filter((s) => !s.amountEstimated).length,
+      enteredTypes: sources.filter((s) => !s.typeAssumed).length,
+      helloEventsLogged: events.filter((e) => e.kind === "helloEvent").length,
+      helloCheckWithoutEvent: !!((state.extras || {}).lh20 || turns.some((t) => t.inputs && (t.inputs.extras || {}).lh20)) && !events.some((e) => e.kind === "helloEvent")
+    } : null;
     return {
       v: 2, kind: "run", build: VERSION, why: (why || "").trim(), scenario: sc.id,
       coverage: { loggedTurns: turns.length, detailedTurns: turns.filter((t) => t.coverage === "detailed").length, legacyTurns: turns.filter((t) => t.coverage === "legacy").length, unreadableSnapshots: errors, firstLoggedTurn: turns.length ? turns[0].turn : null, startsAfterTurnOne: turns.length ? turns[0].turn > 1 : state.turn > 1, gaps, currentTurn: state.turn, endsBeforeCurrentTurn: prior != null && prior !== state.turn - 1 && !(prior === state.turn && state.turn === sc.totalTurns), unreconciledTurns: turns.filter((t) => t.performance && t.performance.unreconciled.some((n) => Math.abs(n) > 1e-9)).map((t) => t.turn) },
       current: inputs(state), currentProgress: progress(state, sc), currentRecommendation: optionInfo(recommendation && recommendation.action, state, sc), currentOptions: ((recommendation && recommendation.ranked) || []).map((o) => optionInfo(o, state, sc)), runChecks: clone(state.runChecks || {}), checks: clone(E.runCheck(state, sc)),
-      tokens: sc.tokens || [], totals, turns, events,
+      tokens: sc.tokens || [], totals, turns, events, observations,
+      currentPeriodBudget: sc.id === "grandlive" ? E.periodSongBudget(state, sc) : null,
       concerts: (sc.lives || []).filter((turn) => turn < state.turn || turns.some((t) => t.turn === turn)).map((turn) => {
         const logged = turns.filter((t) => t.turn === turn).slice(-1)[0];
         return { turn, recorded: !!logged, beforeCommand: logged ? logged.progressBeforeCommand : null, afterCommand: logged ? logged.concert : null };
@@ -191,10 +202,15 @@
       "Checks: " + (report.checks ? report.checks.items.map((c) => c.label + " " + c.status).join("; ") : "none"),
       "History: " + c.detailedTurns + " detailed turns, " + c.legacyTurns + " legacy turns.",
       c.startsAfterTurnOne || c.gaps.length || c.endsBeforeCurrentTurn || c.unreadableSnapshots.length ? "History has missing turns or inputs; see coverage." : "",
-      report.currentProgress ? "Songs: " + report.currentProgress.total + " total; " + report.currentProgress.hype.since + " this concert period." : ""];
+      report.currentProgress ? "Songs: " + report.currentProgress.total + " total; " + report.currentProgress.hype.since + " this concert period." + (report.currentProgress.paid != null ? " Shop purchases: " + report.currentProgress.paid + " total; " + report.currentProgress.periodPaid + "/" + report.currentProgress.periodGuideTarget + " this period's guide target (free/held songs excluded)." : "") : ""];
     if (sc.tokens) {
       const counts = (values) => sc.tokens.map((name, i) => name + " " + Math.round(values[i] * 100) / 100).join(", ");
       lines.push("Recorded training income (entered or estimated): " + counts(report.totals.recordedTrainingIncome), "Training income lost at cap: " + counts(report.totals.trainingLostAtCap), "Net recorded purchase spend: " + counts(report.totals.netPurchaseSpend), "Entered balance corrections: " + counts(report.totals.balanceCorrections));
+      if (report.observations) {
+        const o = report.observations;
+        lines.push("Training observations: " + o.enteredAmounts + "/" + o.trainingSources + " amounts entered; " + o.enteredTypes + "/" + o.trainingSources + " types entered. Actual Hello events logged: " + o.helloEventsLogged + ".");
+        if (o.helloCheckWithoutEvent) lines.push("Hello's prior +20 is checked, but no actual Hello token event was logged. Balance corrections cannot identify its timing or type.");
+      }
     }
     report.concerts.forEach((c) => lines.push("Concert turn " + c.turn + ": " + (c.afterCommand ? c.afterCommand.total + " total songs; " + c.afterCommand.hype.since + " this period; " + c.afterCommand.hype.need + " short of full Hype" : "end-of-command progress unavailable")));
     lines.push("Details include available inputs, recommendations, chosen commands, offers, purchases and token accounting. Missing observations stay unknown.");

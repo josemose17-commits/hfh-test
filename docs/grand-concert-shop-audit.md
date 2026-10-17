@@ -2,6 +2,8 @@
 
 Checked 2026-10-16, continuing the Light Hello work in PR #38. This pass audits the coach's recorded career as well as the sampled career estimator. It improves the inputs to competitive deck comparisons; it does not establish that the resulting deck order is calibrated against real careers.
 
+Follow-up: the [first-concert run audit](grand-concert-first-concert-audit.md) examines the subsequently supplied real report, adds sequence/carry reserves and explicit holding, and fixes the remaining carry-refresh and turn-wording problems. The historical omissions and validation limits below describe this earlier pass.
+
 ## Corrected behavior
 
 | Area | Previous behavior | Current behavior |

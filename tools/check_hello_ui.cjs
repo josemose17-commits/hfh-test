@@ -61,6 +61,31 @@ function load(state, owned) {
     assert.equal(ui.saved().deck.slots[0].dates.done, 4);
   } finally { ui.w.close(); }
 
+  const carryRun = fixture(); carryRun.turn = 24; carryRun.deck.trainee = 106101;
+  carryRun.deck.slots[0].dates = { unlocked: false, done: 0 };
+  carryRun.gl = { songs: { zensoku: 24, seishun: 24, ringring: 24, kiseki: 24 }, lessons: { 0: 14 }, tokens: [8, 2, 3, 7, 2], shop: { "song:runrun": { turn: 24 } }, focus: "songs" };
+  ui = load(carryRun);
+  try {
+    assert.equal(ui.doc.querySelector("#lh20Add").closest('details[data-keep="hello"]'), null, "actual Hello points stay outside the collapsed Hello explanation");
+    assert.equal(ui.doc.querySelector('[data-gltok="tokType"]').value, "", "unknown types are visibly unentered");
+    ui.doc.querySelector('[data-song-hold="runrun"]').click();
+    assert.equal(ui.saved().gl.holdSong.id, "runrun");
+    assert.match(ui.doc.querySelector("#glShop").textContent, /Keep this selection unchanged/);
+    assert.match(ui.doc.querySelector("#glCurrentBudget").textContent, /4 of the guide's 5 purchased songs/);
+    const rows = [...ui.doc.querySelectorAll("#glCurrentBudget tbody tr")];
+    assert.deepEqual(rows.map((r) => +r.querySelector("td:last-child").textContent), [6, 0, 0, 9, 12]);
+    ui.doc.querySelector("[data-song-release]").click(); assert.equal(ui.saved().gl.holdSong, undefined);
+    ui.doc.querySelector('[data-song-hold="runrun"]').click();
+    ui.doc.querySelector("#doneBtn").click();
+    assert.equal(ui.saved().turn, 25); assert.equal(ui.saved().gl.holdSong, undefined);
+    assert.deepEqual(ui.saved().gl.carry.songs, ["runrun"]);
+    for (const [type, value] of [[0, 14], [3, 16], [4, 14]]) {
+      const el = ui.doc.querySelector(`[data-tok="${type}"]`); el.value = String(value); el.dispatchEvent(new ui.w.Event("input", { bubbles: true }));
+    }
+    ui.doc.querySelector('[data-song-buy="runrun"]').click();
+    assert.equal(ui.saved().gl.songs.runrun, 25); assert.equal(ui.saved().gl.carriedPeriods[1], true);
+  } finally { ui.w.close(); }
+
   const migraineOuting = fixture(); migraineOuting.conditions = { migraine: true };
   ui = load(migraineOuting);
   try {
@@ -327,5 +352,5 @@ function load(state, owned) {
     assert.equal(ui.doc.querySelector("#cmSensitivity").disabled, true);
     assert.equal(ui.doc.querySelector("#cmWish").disabled, true);
   } finally { ui.w.close(); }
-  console.log("Coach DOM integration: coach controls, run exports, coupled event coverage/ledger, affordable purchases, Grand Concert refinement, paired sensitivity and upgrade comparisons passed.");
+  console.log("Coach DOM integration: explicit carry/reserve controls, observed-token inputs, coach controls, run exports, coupled event coverage/ledger, affordable purchases, Grand Concert refinement, paired sensitivity and upgrade comparisons passed.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

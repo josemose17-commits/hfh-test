@@ -529,7 +529,7 @@
       // Your shop: tick what it shows (and the type an any-type cost asks for).
       if (d.techOffer || d.techType) {
         state.gl.shop = state.gl.shop || {};
-        if (d.techOffer) { if (e.target.checked) state.gl.shop[d.techOffer] = state.gl.shop[d.techOffer] || { turn: state.turn }; else delete state.gl.shop[d.techOffer]; }
+        if (d.techOffer) { if (e.target.checked) state.gl.shop[d.techOffer] = state.gl.shop[d.techOffer] || { turn: state.turn }; else { delete state.gl.shop[d.techOffer]; if (state.gl.holdSong && d.techOffer === "song:" + state.gl.holdSong.id) delete state.gl.holdSong; } }
         if (d.techType) state.gl.shop[d.techType] = Object.assign({ turn: state.turn }, state.gl.shop[d.techType], { type: e.target.value === "" ? null : +e.target.value });
         commit(true);
         return;
@@ -546,6 +546,15 @@
       }
     });
     $("#songsBody").addEventListener("click", (e) => {
+      const hold = e.target.closest("[data-song-hold]"), release = e.target.closest("[data-song-release]");
+      if (hold || release) {
+        e.preventDefault();
+        const id = hold ? hold.dataset.songHold : state.gl.holdSong && state.gl.holdSong.id;
+        if (hold && !E.holdSong(state, scenario(), id)) { flash("Mark this song as actually offered before holding it."); return; }
+        if (release) delete state.gl.holdSong;
+        R.event(state, hold ? "songHold" : "songHoldRelease", { id });
+        commit(true); flash(hold ? "Selection held for after the concert; keep it unchanged in game." : "Released the hold; purchase advice is active again."); return;
+      }
       if (e.target.closest("#lh20Add")) {
         const sc = scenario(), tokens = state.gl.tokens, selected = $("#lh20Type").value;
         const low = Math.min(...tokens), tied = tokens.map((n,i) => n === low ? i : -1).filter(i => i >= 0);
@@ -971,11 +980,12 @@
     if (!g.length) return "";
     const ex = f.extras || {};
     // The picker's left edge takes the token's colour (no separate badge, so it fits narrow columns).
-    const sel = (key, cur) => `<select class="t${cur}" data-gltok="${key}" aria-label="Token type">${sc.tokens.map((n, i) => `<option value="${i}" ${cur === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
+    const sel = (key, cur) => `<select class="t${cur}" data-gltok="${key}" aria-label="Token type"><option value="" ${ex[key] == null || ex[key] === "" ? "selected" : ""}>Type shown?</option>${sc.tokens.map((n, i) => `<option value="${i}" ${ex[key] != null && ex[key] !== "" && +ex[key] === i ? "selected" : ""}>${n}</option>`).join("")}</select>`;
     const row = (x, k) => `<div class="tokpick">${sel(k ? "tokType2" : "tokType", x.type)}<input type="number" inputmode="numeric" min="0" max="99" data-gltok="${k ? "tok2" : "tok"}" value="${ex[k ? "tok2" : "tok"] != null ? ex[k ? "tok2" : "tok"] : ""}" placeholder="~${x.amount}" aria-label="Token amount"></div>`;
     return `<div class="tokrow" title="Tokens this training gives. Set the type and amount your screen shows; Done adds them to your tokens.">
       <span class="pip-label">Tokens${g.length > 1 ? " (friendship: 2 types)" : ""}</span>
       ${g.map((x, i) => row(x, i)).join("")}
+      ${g.some((x, i) => ex[i ? "tokType2" : "tokType"] == null || ex[i ? "tokType2" : "tokType"] === "" || ex[i ? "tok2" : "tok"] == null || ex[i ? "tok2" : "tok"] === "") ? '<span class="mini">Estimated until you enter the displayed type and amount.</span>' : ""}
     </div>`;
   }
 
@@ -1044,20 +1054,17 @@
   // (songs first, then techniques), the songs you have, and More (plan, token plan, token aim,
   // every scenario reward). The shop part fills in after the call (it follows the call's pick).
   function currentSongBudgetHTML(sc) {
-    const p = E.tokenPlan(state, sc);
+    const p = E.periodSongBudget(state, sc);
     const plan = E.songPlan(state, sc);
     if (!p || !plan) return "";
-    const left = Math.max(0, plan.target - plan.bought);
-    const selected = p.queue.filter(x => x.now).slice(0, left);
-    const need = [0, 0, 0, 0, 0];
-    selected.forEach(x => x.song.cost.forEach((n, i) => need[i] += n));
-    const rows = sc.tokens.map((name, i) => `<tr><th>${esc(name)}</th><td>${need[i]}</td><td>${p.have[i] || 0}</td><td>${Math.max(0, need[i] - (p.have[i] || 0))}</td></tr>`).join("");
-    return `<div class="token-plan"><h3>Tokens for this period's priority songs</h3>
-      <div class="table-wrap"><table class="tp"><thead><tr><th>Token</th><th>Songs cost</th><th>You have</th><th>Still needed</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <p class="mini">${selected.length} selected unlocked songs, of ${left} remaining in this period's plan. Unlocked does not mean currently offered in your shop. These totals use the existing priority ranking, not a new optimization model.</p>
-      ${selected.length < left ? '<p class="mini warn">Not enough unlocked songs in the current priority queue: this is a partial budget.</p>' : ""}
-      <details><summary>Which songs are included?</summary><ul>${selected.map(x => `<li>${esc(x.song.name)} — ${x.song.cost.map((n,i) => n ? `${n} ${esc(sc.tokens[i])}` : "").filter(Boolean).join(", ")}</li>`).join("") || '<li>No additional songs selected for this period.</li>'}</ul></details>
-      <details><summary>Additional cost to unlock songs</summary><p class="mini">Approximately ${plan.techLeft * plan.techCost} tokens for ${plan.techLeft} technique lessons. Actual types and costs depend on shop offers. This is additional to the song totals above.</p></details>
+    const rows = sc.tokens.map((name, i) => `<tr><th>${esc(name)}</th><td>${p.purchaseNeed[i]}</td><td>${p.carry ? p.carry.cost[i] : 0}</td><td>${p.have[i]}</td><td>${p.short[i]}</td></tr>`).join("");
+    return `<div class="token-plan"><h3>Song purchases and carry reserve</h3>
+      <div class="table-wrap"><table class="tp"><thead><tr><th>Token</th><th>Period songs</th><th>Carry reserve</th><th>You have</th><th>Still needed</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="mini">${p.songs.length} projected period purchases. ${p.carry ? `${p.carryObserved ? "Observed" : "Projected"} carry: <b>${esc(p.carry.name)}</b>; buy from turn ${p.buyCarryFrom}.` : "No carry planned."} Reserve both columns before spending spare points. A held selection can cross the concert even if you still need points to buy it.</p>
+      <p class="mini">Mark the actual shop offers: later selections are unknown, so projected songs can change. Learn useful training-bonus songs during the run; friendship bonuses activate after the concert.</p>
+      ${p.manualHold && plan.bought < plan.target ? `<p class="mini warn">Your chosen carry stops purchases at ${plan.bought} of the guide's ${plan.target} purchased songs. It does not count as learned yet.</p>` : ""}
+      <details><summary>Which songs are included?</summary><ul>${p.songs.map(song => `<li>${esc(song.name)} — ${song.cost.map((n,i) => n ? `${n} ${esc(sc.tokens[i])}` : "").filter(Boolean).join(", ")}</li>`).join("") || '<li>No additional current-period purchases planned.</li>'}</ul></details>
+      <details><summary>Additional cost to unlock songs</summary><p class="mini">Approximately ${p.techTokens} points for ${p.techLeft} technique lessons, in addition to both song columns. Actual types and costs depend on shop offers.</p></details>
     </div>`;
   }
 
@@ -1075,7 +1082,7 @@
     const extras = Object.entries(bon.extra).filter(([, v]) => v).map(([k, v]) => "+" + v + " " + (k === "sp" ? "SP" : E.STAT_LABELS[k])).join(", ");
     const open = (k, def) => (glOpen[k] != null ? glOpen[k] : def) ? " open" : "";
     const status = [
-      plan ? `This half: <b>${plan.bought} of ${plan.target}</b> songs` : "",
+      plan ? `This half: <b>${plan.bought} of ${plan.target}</b> purchased songs (guide target)` : "",
       hype && hype.next != null ? (hype.need ? `<b>${hype.since}/3</b> songs for the live on turn ${hype.next}` : `Hype full for the live on turn ${hype.next} ✓`) : "",
       `<b>${goal.count} of 18</b> ${goal.closed ? "by turn 71" : "for the special concert · deadline turn 71"}`
     ].filter(Boolean).join(" · ");
@@ -1087,15 +1094,16 @@
     $("#songSummary").textContent = learnedN + " of 22 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
     $("#songsBody").innerHTML = `
       <div id="glShop"></div>
-      <label class="field"><span>Grand Concert priority</span><select id="grandFocus"><option value="songs" ${gl.focus !== "balanced" ? "selected" : ""}>Songs first · usable Performance</option><option value="balanced" ${gl.focus === "balanced" ? "selected" : ""}>Balance stats and songs</option></select></label>
+      <label class="field"><span>Grand Concert priority</span><select id="grandFocus"><option value="songs" ${gl.focus !== "balanced" ? "selected" : ""}>Songs first · colors for songs and carry</option><option value="balanced" ${gl.focus === "balanced" ? "selected" : ""}>Balance stats and songs</option></select></label>
       <div class="gl-status">${status}</div>
+      <p class="mini">The free Make Debut! counts toward Hype and the 18-song total, but not the purchased-song guide target. Enter the displayed Performance types/amounts on trainings; blank inputs use estimates.</p>
       ${nextR ? `<div class="gl-next"><b>Next: ${esc(nextR.label)}</b>, turn ${nextR.turn}: ${esc(nextR.short || nextR.gain)}</div>` : ""}
       <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="${E.tokenCap(state, sc)}" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
+      ${state.turn >= (sc.tokensFrom || 5) && hp ? `<div class="row-wrap hello-actual"><button type="button" class="btn ghost small" id="lh20Add">Record actual Hello +20</button><select id="lhAmount" aria-label="Observed Light Hello tokens"><option value="20">+20 tokens</option>${hp.card.r === 1 ? '<option value="10">+10 tokens</option>' : ""}</select><select id="lh20Type" aria-label="Awarded token type"><option value="">Lowest held (auto)</option>${sc.tokens.map((n,i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select><label class="chk"><input type="checkbox" id="lhMood">Also gave mood +1</label>${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo token event</button>' : ""}</div><p class="mini">Record an actual event after Done adds training points. The debut-check checkbox alone does not add points.</p>` : ""}
       ${state.turn >= (sc.tokensFrom || 5) && hp ? `<details data-keep="hello"${open("hello", false)}><summary>Light Hello · ${D.RARITY[hp.card.r]} LB${helloSlot.lb} · events and value</summary>
         <p class="mini">Training Effectiveness ${hp.effects[8] || 0}%; normal energy reduction ${hp.effects[28] || 0}%${hp.card.r === 3 ? "; +30 percentage points when she joins a friendship training" : "; no SSR friendship-energy unique"}. Failure Protection ${hp.effects[27]}% reduces the current risk proportionally; it does not remove that many percentage points.</p>
         <p class="mini">First training: Speed +${hp.first.s[0]}, Guts +${hp.first.s[3]}, mood +1, +10 event bond. Outings still require their separate unlock event. Later token events are random: the coach uses a 40% estimate (published estimates 36–45%)${hp.card.r === 1 ? " and a conservative +10 for R because its +10/+20 mixture is unverified" : ", for +8 expected points"}. Expected points are never added by Done.</p>
         <label class="chk"><input type="checkbox" data-hello-met="${state.deck.slots.indexOf(helloSlot)}" ${H.hasMet(helloSlot) ? "checked" : ""}> Already had her first-training event</label>
-        <div class="row-wrap"><button type="button" class="btn ghost small" id="lh20Add">Record actual token event</button><select id="lhAmount" aria-label="Observed Light Hello tokens"><option value="20">+20 tokens</option>${hp.card.r === 1 ? '<option value="10">+10 tokens</option>' : ""}</select><select id="lh20Type" aria-label="Awarded token type"><option value="">Lowest held (auto)</option>${sc.tokens.map((n,i) => `<option value="${i}">${esc(n)}</option>`).join("")}</select><label class="chk"><input type="checkbox" id="lhMood">Also gave mood +1</label>${gl.lh20Undo ? '<button type="button" class="btn ghost small" id="lh20Undo">Undo token event</button>' : ""}</div>
         <p class="mini">Record after Done has added the training tokens. Adds Guts +${hp.repeat.s[3]} with stat tracking and +7 event bond; the game also gives ${hp.repeat.sp} SP. Do not add that bond twice. Select the actual token type when balances are tied or have changed. Recorded events: ${(gl.helloEvents || []).length}.</p>
       </details>` : ""}
       <p class="mini">Done adds training Performance; Bought pays a song's cost without using a turn. After buying an unrecorded unlock lesson in game, match these balances to the game before recording your next song. Cap ${E.tokenCap(state, sc)}.</p>
@@ -1132,7 +1140,7 @@
     const plan = E.songPlan(state, sc);
     if (!plan) return `<div class="song-plan mini">Song plan starts on turn 5, when lessons open. Year one: 5 songs, then carry the 6th over to after the 1st Promo Live.</div>`;
     return `<div class="song-plan">
-      <div><b>Song plan to the ${plan.last ? "Grand Live" : "live on turn " + plan.live}:</b> ${plan.target} song${plan.target > 1 ? "s" : ""}${plan.last ? "" : ", then carry 1 over"} · bought: <b>${plan.bought}</b></div>
+      <div><b>Guide target to the ${plan.last ? "Grand Live" : "live on turn " + plan.live}:</b> ${plan.target} purchased songs${plan.last ? "" : ", then carry 1 over"} · bought: <b>${plan.bought}</b></div>
       <div class="plan-next">${esc(plan.text)}</div>
       ${plan.period > 0 && !plan.carried && state.turn <= 71 ? '<div class="mini">No carried song recorded for this period: technique budgets use the normal lesson pattern.</div>' : ""}
       ${budgetHTML(sc)}
@@ -1146,7 +1154,7 @@
     const h = p && p.half;
     if (!h || h.need <= 0) return "";
     const short = h.gap > 0;
-    return `<div class="plan-budget${short ? " short" : ""}">Tokens this half: ~${Math.round(h.need)} for ${h.songsLeft} song${h.songsLeft === 1 ? "" : "s"} and the techniques before them · you have ${Math.round(h.have)} · training should bring ~${Math.round(h.supply)} by turn ${h.live}${short ? ` · <b>short by ~${Math.round(h.gap)}</b>` : " · on track"}</div>`;
+    return `<div class="plan-budget${short ? " short" : ""}">Points to fund this period's purchases, unlock lessons and carry: ~${Math.round(h.need)}${h.carryTokens ? ` (including ${h.carryTokens} reserved for the carried song)` : ""} · you have ${Math.round(h.have)} · estimated training supply ~${Math.round(h.supply)} by turn ${h.live}${short ? ` · <b>total shortfall ~${Math.round(h.gap)}</b>` : ""}. Check the color budget too; total points alone do not establish affordability.</div>`;
   }
 
   function planTag(id) {
@@ -1189,6 +1197,7 @@
         <label class="tech-pick"><input type="checkbox" data-tech-offer="${x.id}" ${x.offered ? "checked" : ""}><span class="tech-name">${esc(x.song.name)}${tag(x.song.id)}</span></label>
         <span class="tech-cost">${chips(x.song.cost)}</span>
         <button type="button" class="btn ghost small" data-song-buy="${x.song.id}" ${x.afford ? "" : "disabled"}>Bought</button>
+        ${ls.songPlan && !ls.songPlan.last ? E.heldSong(state, sc) && E.heldSong(state, sc).id === x.song.id ? '<button type="button" class="btn ghost small" data-song-release>Release hold</button>' : `<button type="button" class="btn ghost small" data-song-hold="${x.song.id}" ${x.offered ? "" : "disabled"}>Hold after concert</button>` : ""}
       </div>`;
     const techRow = (t) => `<div class="shop-row${getTech && getTech.id === t.id ? " best" : ""}${t.offered ? " on" : ""}${t.afford ? "" : " cant"}">
         <label class="tech-pick"><input type="checkbox" data-tech-offer="${t.id}" ${t.offered ? "checked" : ""}><span class="tech-name">${esc(t.label)}</span></label>
@@ -1203,11 +1212,11 @@
         : "Song plan done: spare tokens go to stat techniques.";
     let get;
     if (getSong) get = `<b>Get: ${esc(getSong.song.name)}</b> (${esc(costText(getSong.song.cost))})${getSong.why.length ? ": " + esc(getSong.why.join(", ")) : ""}.`;
-    else if (hold) get = `<b>Hold ${esc(hold.song.name)}</b>: buy it on turn ${ls.songPlan.live + 1}, after the live.${getTech ? ` Meanwhile get <b>${esc(getTech.label)}</b> (${esc(tCost(getTech))}).` : ""}`;
+    else if (hold) get = `<b>Hold ${esc(hold.song.name)}</b>: buy from turn ${ls.songPlan.live + 1}, after the live. Keep this selection unchanged; buying another lesson replaces it.`;
     else if (getTech) get = `<b>Get: ${esc(getTech.label)}</b> (${esc(tCost(getTech))})${callTech ? ", with this turn's call" : ""}${getTech.why.length ? ": " + esc(getTech.why.join(", ")) : ""}.`;
     else if (ls.items.some((t) => t.needsType)) get = "Select the Performance type shown for your checked technique before the coach can price it.";
     else if (ls.offered || ls.songsOffered) get = "No purchase recommended right now: keep training for useful Performance.";
-    else if (state.gl.focus === "songs") get = "Song costs and shortfalls are below. Mark the songs offered when your shop reaches a song selection.";
+    else if (state.gl.focus === "songs") get = "Use lessons during the run: techniques unlock songs without spending a turn. Mark actual offers for advice, buy useful training-bonus songs early, and keep the song/carry reserve below. Record techniques under Advanced when needed.";
     else get = `Tick what your shop shows.${ls.ifOffered.length ? ` If it has them: <b>${ls.ifOffered.map((t) => esc(t.label)).join("</b>, <b>")}</b>.` : ""}`;
     $("#songSummary").textContent = getSong ? "Get: " + getSong.song.name : hold ? "Hold " + hold.song.name + (getTech ? " · get " + getTech.label : "") : getTech ? "Get: " + getTech.label : E.songsLearned(state) + " of 22 songs";
     box.innerHTML = `
@@ -1851,7 +1860,8 @@
     const afterMood = outcome ? C.moodAfter(state, outcome.mo, outcome.cure || (a.consume && a.consume.cureConditions)) : rec.after.mood;
     const after = a.forced ? "" : `<div class="after">After this: energy about <b>${afterEnergy}</b>, mood <b>${E.MOODS[afterMood]}</b>.</div>`;
     const hype = sc.id === "grandlive" && state.turn >= 5 && state.turn <= 71 ? E.hypeStatus(state, sc) : null;
-    const songProgress = hype ? `<div class="song-progress${hype.need && hype.turnsToLive <= 4 ? " warn" : ""}"><b>Songs: ${E.songsLearned(state)} total</b> · ${hype.since} this concert period${hype.need ? ` · <b>${hype.need} more before the concert on turn ${hype.next}</b>` : " · Hype full"}. Buy songs and refresh the in-game shop as often as you can before training; Bought does not advance the turn.</div>` : "";
+    const songPlan = hype && E.songPlan(state, sc), held = hype && E.heldSong(state, sc);
+    const songProgress = hype ? `<div class="song-progress${hype.need && hype.turnsToLive <= 4 ? " warn" : ""}"><b>Songs: ${E.songsLearned(state)} total</b> · ${hype.since} this concert period${hype.need ? ` · <b>${hype.need} more before the concert on turn ${hype.next}</b>` : " · Hype full"}${songPlan ? ` · ${songPlan.bought}/${songPlan.target} shop purchases (guide target; free song excluded)` : ""}. ${held ? `Holding ${esc(held.name)}: keep the lesson selection unchanged until after the concert.` : "Open lessons during the run; learn useful training-bonus songs early. Bought does not advance the turn."}</div>` : "";
     $("#call").innerHTML = `
       <div class="eyebrow">${esc(rec.turn.text)} · ${esc(rec.phase.name)}</div>
       <div class="headline">${a.prefix.map((p) => `<span class="pre">${esc(p)} →</span>`).join(" ")}<span>${esc(a.label)}</span></div>
