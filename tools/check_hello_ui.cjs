@@ -257,14 +257,17 @@ function load(state, owned) {
     assert.doesNotMatch(result, /metadata missing/);
     assert.match(result, /Fifth outing completed/);
     assert.match(result, /Event skills and training hints/);
+    assert.ok(ui.doc.querySelector("#skillBudget"), "Grand Concert displays the affordable purchase model");
+    assert.match(ui.doc.querySelector("#skillBudget").textContent, /no extra raw-SP bonus/);
   } finally { ui.w.close(); }
 
   const compare = fixture(30052, 5); compare.tab = "cm";
+  compare.deck.trainee = 100101;
   compare.cm = { goal: "race", ownedOnly: true, borrow: false, targets: {}, locked: ids.filter((id) => id !== 30078), comp: { speed: 2, stamina: 2, wit: 1, friend: 1 } };
   ui = load(compare, Object.fromEntries(ids.concat([30028]).map((id) => [id, 4])));
   try {
     const original = ui.w.UmaOptimizer.sensitivity;
-    ui.w.UmaOptimizer.sensitivity = (sim, candidates) => original(sim, candidates, { runs: 2, seeds: [857563, 962293], profiles: [{ name: "Selected assumptions" }, { name: "Assumed boost 10%", eventSongBoost: 0.1 }] });
+    ui.w.UmaOptimizer.sensitivity = (sim, candidates, settings) => original(sim, candidates, settings || { runs: 2, seeds: [857563, 962293], profiles: [{ name: "Selected assumptions" }, { name: "Assumed boost 10%", eventSongBoost: 0.1 }] });
     assert.equal(ui.doc.querySelector('[data-cm="eventSuccessRate"]').value, "0.5");
     assert.equal(ui.doc.querySelector('[data-cm="eventSongBoost"]').value, "0");
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -273,17 +276,46 @@ function load(state, owned) {
     assert.ok(ui.doc.querySelector(".opt-result"), "Grand Concert refinement with blank target inputs completes");
     assert.match(ui.doc.querySelector("#cmOut").textContent, /Predicted stats vs your targets/);
     assert.match(ui.doc.querySelector("#cmOut").textContent, /Event-skill source coverage/);
+    assert.ok(ui.doc.querySelector("#skillBudget"));
+    const example = ui.doc.querySelector("#skillBudgetExample");
+    const totals = example.textContent.match(/One simulated career: (\d+) SP, (\d+) spent, (\d+) left/);
+    assert.ok(totals, "purchase example reports a complete SP budget");
+    assert.equal(+totals[1], +totals[2] + +totals[3]);
+    let displayedCost = 0;
+    example.querySelectorAll("tbody tr").forEach((row) => {
+      const cells = row.querySelectorAll("td");
+      if (cells.length !== 2) return;
+      const total = +cells[0].textContent;
+      const tierSum = [...cells[1].textContent.matchAll(/(\d+) SP \(hint Lv\d\)/g)].reduce((n, m) => n + +m[1], 0);
+      assert.equal(total, tierSum); displayedCost += total;
+    });
+    assert.equal(displayedCost, +totals[2]);
+    const raceRows = [...ui.doc.querySelectorAll("#cmSkillTable tbody tr")];
+    assert.ok(raceRows.some((row) => row.classList.contains("sk-gold")), "race table includes gold prices");
+    raceRows.forEach((row) => {
+      const id = row.querySelector("[data-must]").dataset.must;
+      const cells = row.querySelectorAll("td"), fullPrice = ui.w.UmaSkillBudget.baseCost(id);
+      assert.equal(cells[3].textContent, fullPrice == null ? "Unknown" : String(fullPrice));
+      if (fullPrice) assert.equal(cells[4].textContent, (+cells[1].textContent / fullPrice * 100).toFixed(2));
+    });
     assert.equal(ui.doc.querySelector("#cmSensitivity").disabled, false, ui.doc.querySelector("#cmOut").textContent.slice(0, 350));
     ui.doc.querySelector("#cmSensitivity").click();
     for (let i = 0; i < 1000 && !ui.doc.querySelector("#sensitivityResult"); i++) await new Promise((resolve) => setTimeout(resolve, 50));
     assert.ok(ui.doc.querySelector("#sensitivityResult"));
     assert.match(ui.doc.querySelector("#sensitivityResult").textContent, /held-out seeds/);
     assert.match(ui.doc.querySelector("#sensitivityResult").textContent, /not confidence intervals/);
+    assert.match(ui.doc.querySelector("#sensitivityResult").textContent, /SP contributes through the skills it can buy/);
+    ui.doc.querySelector("#cmWish").click();
+    for (let i = 0; i < 1000 && !ui.doc.querySelector("#wishlistMethod"); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(ui.doc.querySelector("#wishlistMethod"));
+    assert.match(ui.doc.querySelector("#wishlistMethod").textContent, /target fit and affordable skills/);
+    assert.match(ui.doc.querySelector("#wishlistMethod").textContent, /8 careers per deck on paired seed 857563/);
     const boost = ui.doc.querySelector('[data-cm="eventSongBoost"]'); boost.value = "0.1";
     boost.dispatchEvent(new ui.w.Event("input", { bubbles: true }));
     assert.equal(ui.saved().cm.eventSongBoost, "0.1");
     assert.match(ui.doc.querySelector("#cmOut").textContent, /Settings or cards changed/);
     assert.equal(ui.doc.querySelector("#cmSensitivity").disabled, true);
+    assert.equal(ui.doc.querySelector("#cmWish").disabled, true);
   } finally { ui.w.close(); }
-  console.log("Coach DOM integration: coach controls, run exports, event assumptions, automatic Grand Concert refinement and paired deck sensitivity passed.");
+  console.log("Coach DOM integration: coach controls, run exports, event assumptions, affordable purchase examples, Grand Concert refinement, paired sensitivity and budget-aware upgrades passed.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

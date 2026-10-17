@@ -38,7 +38,7 @@ The default **0%** setting adds no assumed rate boost. The optional **+5% / +10%
 
 Static Euophrys/tier skill scoring uses the baseline event priors because it has no sampled purchase calendar. Grand Concert career refinement uses the simulated exposure and selected assumption. Song-buying policy still uses its existing heuristic and is not optimized jointly with the new event-acquisition model. Extra event-stat rewards from faster completion remain omitted.
 
-The skill score is still an expected-value heuristic with the existing limited-skill weighting. It is not a complete SP-budget, upgrade/prerequisite or skill-purchase optimizer. Those limits can affect a close deck comparison even when event availability is modeled correctly.
+Follow-up: Grand Concert race comparisons now use [per-career affordable purchase selection](grand-concert-skill-budget.md), including upgrade/prerequisite costs and replacement gains. Static tier screening and parent objectives retain their earlier heuristic. The purchase audit documents remaining chart, event-route and source limitations.
 
 ## Deck refinement and comparisons
 
@@ -46,7 +46,7 @@ Grand Concert race decks now receive the target-stat refinement step even when c
 
 The optional **Check ranking sensitivity** action compares the suggestion with up to two eligible next-best same-type replacements and the initial Euophrys deck if it differs. It preserves locked slots, borrowing status and must-have coverage when constructing replacements. Must-have losses are checked from covered skill IDs rather than a score threshold, so improving one probability cannot hide the loss of another skill. It does not test every possible deck.
 
-Each default comparison uses three held-out seeds and eight careers per deck per seed. Decks within a check use the same seed and assumptions. Profiles vary Hello repeat/unlock assumptions, conditional event success and the uncalibrated song-level boost; duplicate parameter sets are omitted. The 0%, 5% and 10% song-rate assumptions remain covered even when the user changes the selected setting. The objective combines target fit, SP and modeled skill value. A positive gap favors the suggested deck. Results report mean gaps, seed ranges and leading/tied checks. These are sensitivity diagnostics, not confidence intervals or win probabilities. Changed settings mark the result stale and disable rechecking until a new deck search completes.
+Each default comparison uses three held-out seeds and eight careers per deck per seed. Decks within a check use the same seed and assumptions. Profiles vary Hello repeat/unlock assumptions, conditional event success and the uncalibrated song-level boost; duplicate parameter sets are omitted. The 0%, 5% and 10% song-rate assumptions remain covered even when the user changes the selected setting. For Grand Concert racing, the follow-up objective combines target fit and affordable skill value; SP contributes through the skills it buys. A positive gap favors the suggested deck. Results report mean gaps, seed ranges and leading/tied checks. These are sensitivity diagnostics, not confidence intervals or win probabilities. Changed settings mark the result stale and disable rechecking until a new deck search completes.
 
 ## Validation
 

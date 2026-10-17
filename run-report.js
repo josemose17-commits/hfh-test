@@ -3,7 +3,7 @@
 (function (root) {
   const E = root.UmaEngine || (typeof require !== "undefined" ? require("./engine.js") : null);
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
-  const VERSION = "20261017c";
+  const VERSION = "20261017d";
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const vector = (x) => Array.from({ length: 5 }, (_, i) => Number.isFinite((x || [])[i]) ? x[i] : 0);
   const add = (a, b) => a.map((n, i) => n + b[i]);

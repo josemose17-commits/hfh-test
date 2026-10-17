@@ -41,13 +41,13 @@
     const multiplier = Math.max(0, options.multiplier == null ? 1 : options.multiplier);
     const ce = (data.cards || {})[card.id] || {};
     const known = ctx.known || new Set(), must = new Set((ctx.must || []).map(String));
-    const utility = (levels) => Object.entries(levels).reduce((n, [id, lv]) => {
+    const utility = (levels) => ctx.eventUtility ? ctx.eventUtility(levels) + Object.keys(levels).filter((id) => must.has(id) && !known.has(id)).length * 10000 : Object.entries(levels).reduce((n, [id, lv]) => {
       if (known.has(id)) return n;
       const value = Math.max(0, (ctx.skills || {})[id] || 0);
       return n + (must.has(id) ? 10000 : 0) + (value ? Math.max(0, value * 60 - (ctx.costs && ctx.costs[id] || D.skillCost(id) || 150) * (1 - DISCOUNT[lv]) * 0.35) : 0);
     }, 0);
     const fingerprint = [...allowed].map((id) => [id, (ctx.skills || {})[id] || 0, (ctx.costs || {})[id] || D.skillCost(id) || 150, known.has(id), must.has(id)]);
-    const key = JSON.stringify([card.id, completion, success, multiplier, !!options.independent, fingerprint]);
+    const key = JSON.stringify([card.id, completion, success, multiplier, !!options.independent, fingerprint, ctx.eventUtilityKey || null]);
     if (cache.has(key)) return cache.get(key);
     const parsed = new Set(), routes = [], groups = [];
     const special = card.ty === "friend" || card.ty === "group";
