@@ -66,8 +66,9 @@ function load(state, owned) {
   carryRun.gl = { songs: { zensoku: 24, seishun: 24, ringring: 24, kiseki: 24 }, lessons: { 0: 14 }, tokens: [8, 2, 3, 7, 2], shop: { "song:runrun": { turn: 24 } }, focus: "songs" };
   ui = load(carryRun);
   try {
-    assert.equal(ui.doc.querySelector("#lh20Add").closest('details[data-keep="hello"]'), null, "actual Hello points stay outside the collapsed Hello explanation");
-    assert.equal(ui.doc.querySelector('[data-gltok="tokType"]').value, "", "unknown types are visibly unentered");
+    assert.equal(ui.doc.querySelector("#lh20Add").closest("details"), null, "actual Hello points stay outside every collapsed section");
+    assert.equal(ui.doc.querySelector('[data-gltok="tokType"]').value, "0", "the usual type is preselected for fast input");
+    assert.equal(ui.doc.querySelector('[data-extra="lh20"]'), null, "the old past-event checkbox is removed");
     ui.doc.querySelector('[data-song-hold="runrun"]').click();
     assert.equal(ui.saved().gl.holdSong.id, "runrun");
     assert.match(ui.doc.querySelector("#glShop").textContent, /Keep this selection unchanged/);
@@ -128,13 +129,85 @@ function load(state, owned) {
   unknown.gl.shop = { "energy:20": {} };
   ui = load(unknown);
   try {
-    assert.equal(ui.doc.querySelector('[data-song-buy="zensoku"]').disabled, true);
+    assert.equal(ui.doc.querySelector('[data-song-buy="zensoku"]').disabled, false);
+    ui.doc.querySelector('[data-song-buy="zensoku"]').click();
+    assert.equal(ui.saved().gl.songs.zensoku, undefined, "an underfunded click never invents a purchase");
+    assert.ok(ui.doc.querySelector('[data-song-owned="zensoku"]'), "actual owned songs can still be recorded");
     assert.equal(ui.doc.querySelector('[data-tech-buy="energy:20"]').disabled, true);
     const type = ui.doc.querySelector('[data-tech-type="energy:20"]'); type.value = "4";
     type.dispatchEvent(new ui.w.Event("change", { bubbles: true }));
     assert.equal(ui.doc.querySelector('[data-tech-buy="energy:20"]').disabled, false);
     ui.doc.querySelector('[data-tech-buy="energy:20"]').click();
     assert.equal(ui.saved().energy, 40); assert.equal(ui.saved().gl.tokens[4], 75);
+  } finally { ui.w.close(); }
+
+  const ownedSong = fixture(); ownedSong.turn = 30;
+  ownedSong.gl = { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {}, focus: "songs", shop: { "song:runrun": {} } };
+  ui = load(ownedSong);
+  try {
+    const buy = ui.doc.querySelector('[data-song-buy="runrun"]');
+    const hold = ui.doc.querySelector('[data-song-hold="runrun"]');
+    assert.equal(buy.parentElement, hold.parentElement);
+    assert.ok(buy.parentElement.classList.contains("song-actions"), "Bought/Hold have separate rows within an action group, not the same grid area");
+    hold.click(); ui.doc.querySelector('[data-song-buy="runrun"]').click();
+    const tokens = ui.saved().gl.tokens, stats = ui.saved().stats;
+    ui.doc.querySelector('[data-song-owned="runrun"]').click();
+    assert.equal(ui.saved().gl.songs.runrun, 30);
+    assert.deepEqual(ui.saved().gl.tokens, tokens); assert.deepEqual(ui.saved().stats, stats);
+    assert.deepEqual(ui.saved().gl.shop, {}); assert.equal(ui.saved().gl.holdSong, undefined);
+    assert.match(ui.saved().runPending.slice(-1)[0].source, /alreadyBought/);
+  } finally { ui.w.close(); }
+
+  const persistent = fixture(30052, 5); persistent.energy = 100;
+  persistent.deck.slots = [30052, 30101, 20033, 30078, 30111, 30054].map(id => ({ id, lb: 4, bond: 40, met: true, dates: { unlocked: false, done: id === 30052 ? 5 : 0 } }));
+  persistent.facilities[0].members = [1];
+  ui = load(persistent);
+  try {
+    assert.equal(ui.doc.querySelectorAll("#quickEvents [data-training-bond]").length, 12);
+    assert.equal(ui.doc.querySelectorAll("#facilities [data-training-bond]").length, 0);
+    ui.doc.querySelector('[data-training-bond="2"][data-add="5"]').click();
+    assert.equal(ui.saved().deck.slots[2].bond, 45);
+    ui.doc.querySelector("#doneBtn").click();
+    assert.ok(ui.saved().facilities.every(f => f.members.length === 0));
+    ui.doc.querySelector('[data-training-bond="2"][data-add="10"]').click();
+    assert.equal(ui.saved().deck.slots[2].bond, 55, "bond controls survive Done and cleared placements");
+    const before = ui.saved().gl.tokens;
+    ui.doc.querySelector('[data-token-all="10"]').click();
+    assert.deepEqual(ui.saved().gl.tokens, before.map(n => n + 10));
+    ui.doc.querySelector('[data-token-reward-undo]').click();
+    assert.deepEqual(ui.saved().gl.tokens, before);
+    assert.equal((ui.saved().runPending || []).filter(e => e.kind === "observedTokenReward").length, 0);
+    ui.doc.querySelector('[data-token-all="5"]').click();
+    assert.deepEqual(ui.saved().gl.tokens, before.map(n => n + 5));
+    const unlock = ui.doc.querySelector('[data-quick-unlock="0"]'); unlock.checked = true;
+    unlock.dispatchEvent(new ui.w.Event("change", { bubbles: true }));
+    assert.equal(ui.saved().deck.slots[0].dates.unlocked, true);
+  } finally { ui.w.close(); }
+
+  const policy = fixture(30052, 5); policy.energy = 100; policy.mood = 4; policy.risk = 17;
+  policy.gl = { songs: {}, tokens: [13, 21, 13, 35, 61], lessons: {}, focus: "songs", shop: { "song:runrun": {}, "song:gothisway": {} } };
+  policy.facilities.forEach(f => { f.gain = 40; f.extras = { tok: 11 }; });
+  policy.facilities[2].gain = 120; policy.facilities[2].fail = 13;
+  ui = load(policy);
+  try {
+    assert.match(ui.doc.querySelector("#call .headline").textContent, /Train Speed/);
+    assert.match(ui.doc.querySelector("#call .rank-reason").textContent, /#1.*fund an offered song/);
+    assert.match(ui.doc.querySelector("#call .pill-row").textContent, /ordinary score/);
+    assert.match(ui.doc.querySelector("#options .opt-metrics").textContent, /100%/);
+    assert.equal(ui.doc.querySelectorAll("#options .bar").length, 0, "score bars do not imply the preference order is a weighted-score win");
+    assert.doesNotMatch(ui.doc.querySelector("#call").textContent, /Beats .* by -/);
+  } finally { ui.w.close(); }
+
+  const tiedHello = fixture(); tiedHello.gl.tokens = [0, 0, 0, 0, 0];
+  ui = load(tiedHello);
+  try {
+    ui.doc.querySelector("#lh20Add").click();
+    assert.deepEqual(ui.saved().gl.tokens, [20, 0, 0, 0, 0]);
+    assert.equal(ui.saved().runPending[0].typeAssumed, true);
+    ui.doc.querySelector("#lh20Add").click();
+    assert.ok(ui.saved().gl.lh20Undo, "rejecting a duplicate event preserves the first event's Undo");
+    ui.doc.querySelector("#lh20Undo").click();
+    assert.deepEqual(ui.saved().gl.tokens, [0, 0, 0, 0, 0]);
   } finally { ui.w.close(); }
 
   const carried = fixture(); carried.turn = 25; carried.gl.tokens = [100, 100, 100, 100, 100];

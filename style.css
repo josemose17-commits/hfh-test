@@ -136,6 +136,13 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 .extras .nf input { width: 72px; }
 
 .fac-head { display: flex; justify-content: space-between; align-items: center; }
+.quick-events h3 { margin-top: 0; }
+.quick-events .row-wrap { gap: 6px; align-items: center; }
+.quick-events .hello-actual select { padding: 6px; min-width: 0; }
+.event-bond-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 6px 12px; }
+.event-bond-list > .row-wrap { padding-block: 6px; border-top: 1px solid var(--line); }
+.event-bond-list > .row-wrap > span { flex: 1 1 100px; font-size: .8rem; overflow-wrap: anywhere; }
+.quick-events .btn { min-height: 36px; }
 .facilities { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 10px; }
 .fac { min-inline-size: 0; margin: 0; background: var(--surface); border: 1px solid var(--line); border-top: 5px solid var(--c, var(--accent)); border-radius: var(--r); padding: 8px 8px 10px; display: grid; gap: 7px; min-width: 0; }
 .fac legend { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; text-transform: uppercase; color: var(--c); padding: 0 4px; }
@@ -182,6 +189,10 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-width: 0; }
 .pill.c-close-call { border-color: var(--warn); color: var(--warn); }
 .why { margin: 0; padding-left: 18px; }
 .versus, .after { font-size: .9rem; }
+.rank-reason { padding: 8px 10px; background: var(--surface-2); border-radius: 8px; }
+.rank-reason b { color: var(--accent); }
+.opt-rank { color: var(--muted); font-family: var(--font-mono); font-size: .75rem; }
+.opt-metrics { display: block; color: var(--muted); font-size: .78rem; line-height: 1.5; }
 .phase { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; font-size: .88rem; }
 .events { display: grid; gap: 6px; }
 /* Reset advice: the run's verdict, the checks with their questions, then reset or continue. */
@@ -595,6 +606,11 @@ table.pred .over { color: var(--accent); }
 .shop-row .tech-pick { grid-area: pick; }
 .shop-row .tech-cost { grid-area: cost; justify-content: flex-start; padding-left: 22px; }
 .shop-row > .btn { grid-area: buy; }
+.shop-row.song-row { grid-template-areas: "pick actions" "cost actions"; }
+.song-actions { grid-area: actions; display: grid; gap: 5px; align-content: center; max-width: 128px; }
+.song-actions .btn { min-height: 36px; }
+.purchase-fix { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--warn); border-radius: 8px; }
+.purchase-fix p { margin: 0; }
 .shop-row.on { border-color: var(--accent); }
 .shop-row.best { border-color: var(--accent); border-left-width: 4px; box-shadow: 0 0 0 1px var(--accent) inset; }
 .shop-row.held { border-color: var(--gold); border-left-width: 4px; }
