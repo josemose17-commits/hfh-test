@@ -2,6 +2,8 @@
 
 Checked 2026-10-17 against the user's build `20261017f` report, with commands 1–36 recorded and the career on turn 37. This follows the [first-concert audit](grand-concert-first-concert-audit.md). Build `20261017g` addresses the specific failures below. The original report stays outside the public repository; regressions use focused reconstructed states.
 
+Follow-up: the [turn-38 recovery audit](grand-concert-recovery-audit.md) fixes a separate first-facility-only strength-calibration bug and adds a visible Wit/Rest energy comparison. The results below describe the earlier `20261017g` pass.
+
 ## What the report establishes
 
 | Measure | Recorded result | Interpretation |

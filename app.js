@@ -31,6 +31,7 @@
       maxEnergy: 100,
       meFix: 1,
       fcalFix: 1,
+      strengthFix: 1,
       resetMode: k.resetMode || "ace",
       trackStats: k.trackStats != null ? k.trackStats : true,
       calib: k.calib || [],
@@ -104,10 +105,19 @@
           if ((s.maxEnergy || 100) > me) { s.maxEnergy = me; s.energy = Math.min(s.energy, me); }
           s.meFix = 1;
         }
+        repairStrength(s);
         return s;
       }
     } catch (e) { /* storage unavailable */ }
     return exampleState();
+  }
+
+  function repairStrength(s) {
+    if (s.strengthFix) return;
+    const sc = SCENARIOS.find(x => x.id === s.scenario);
+    const rebuilt = sc && E.relearnStrength(s, sc);
+    if (rebuilt && rebuilt.length) s.calib = rebuilt;
+    s.strengthFix = 1;
   }
 
   let state = load();
@@ -881,6 +891,7 @@
     if (!(state.log || []).length) return;
     const tab = state.tab;
     state = E.undo(state);
+    repairStrength(state);
     state.tab = tab;
     commit(true);
     flash("Undid turn " + state.turn);
@@ -1880,7 +1891,7 @@
     const r2 = (x) => Math.round((x / typ) * 100) / 100;
     const name = (si) => { const sl = state.deck.slots[si]; const c = sl && D.card(sl.id); return c ? c.n + " [" + c.t + "]" : "slot " + si; };
     const rep = {
-      v: 1, why: (why || "").trim(), scenario: sc.id, turn: state.turn, when: rec.turn.text, build: state.build,
+      v: 1, coachBuild: R.VERSION, why: (why || "").trim(), scenario: sc.id, turn: state.turn, when: rec.turn.text, build: state.build,
       energy: state.energy + "/" + (state.maxEnergy || 100), mood: E.MOODS[state.mood], risk: state.risk,
       stats: state.stats, targets: state.targets || {}, priority: state.priority, caps: state.caps, extras: state.extras, fans: state.fans,
       badCondition: !!state.badCondition, practicePoor: !!state.practicePoor, conditions: state.conditions || {},
@@ -1889,7 +1900,8 @@
       deck: (state.deck.slots || []).map((sl) => sl && sl.id ? { card: name(state.deck.slots.indexOf(sl)), id: sl.id, lb: sl.lb, bond: Math.round(slotBond(sl)), dates: sl.dates } : null),
       trainings: state.facilities.map((f) => ({ stat: f.stat, cards: (f.members || []).map(name), hints: (f.hints || []).map(name), others: f.extra || 0, gain: f.gain, fail: f.fail, extras: f.extras })),
       pick: (rec.action.prefix || []).concat([rec.action.label]).join(" → "),
-      options: rec.ranked.slice(0, 8).map((o) => ({ label: o.label, score: r2(o.value), parts: Object.fromEntries(Object.entries(o.parts).filter(([, v]) => Math.abs(v) > 0.005 * typ).map(([k, v]) => [k, r2(v)])), gains: o.statGains ? Object.fromEntries(Object.entries(o.statGains).map(([k, v]) => [k, Math.round(v)])) : undefined, fail: o.fail }))
+      recoveryComparison: rec.recoveryComparison,
+      options: rec.ranked.slice(0, 8).map((o) => ({ label: o.label, score: r2(o.value), parts: Object.fromEntries(Object.entries(o.parts).filter(([, v]) => Math.abs(v) > 0.005 * typ).map(([k, v]) => [k, r2(v)])), gains: o.statGains ? Object.fromEntries(Object.entries(o.statGains).map(([k, v]) => [k, Math.round(v)])) : undefined, gainEstimated: o.gainEst, energyDelta: o.energyDelta, fail: o.fail, failEstimated: o.failEst, selectionPolicy: o.selectionPolicy, performancePriority: o.performancePriority }))
     };
     return "Uma coach report\n" + JSON.stringify(rep);
   }
@@ -1930,6 +1942,7 @@
       ${runBox}
       ${rec.reasons.length ? `<p class="mini">${esc(rec.reasons[0])}</p>` : ""}
       ${after}
+      ${rec.recoveryComparison ? `<div class="phase" id="recoveryTradeoff"><b>Camp energy choice</b><p class="mini">Wit leaves <b>${rec.recoveryComparison.wit.energyAfter}</b> energy; Rest leaves <b>${rec.recoveryComparison.rest.energyAfter}</b>. ${rec.recoveryComparison.campTurnsAfter} camp turn(s) follow. Wit's ${rec.recoveryComparison.wit.fail}% failure is ${rec.recoveryComparison.wit.failEstimated ? "estimated; enter the game's value" : "entered from the game"}. Reassess each turn.</p>${rec.recoveryComparison.checkEnergyLesson ? '<p class="mini">An affordable Energy lesson can recover energy without using a turn. Mark its actual offer and token type, then recheck the call.</p>' : ""}</div>` : ""}
       <details id="callExplanation" ${explanationOpen ? "open" : ""}><summary>Expand / shorten explanation</summary>
       ${rec.reasons.length ? `<ul class="why">${rec.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
       ${vs}

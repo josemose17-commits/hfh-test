@@ -971,6 +971,44 @@
     return b;
   }
 
+  // Continuation compares future training quality with a typical best turn.
+  // With no entered gains, inspect every facility, not just the first nonzero
+  // formula result. Explicit gains retain their existing observation priority.
+  function strengthSample(state, sc, ctx) {
+    const entered = (state.facilities || []).filter(f => f.gain > 0);
+    let best = entered.length ? Math.max(...entered.map(f => +f.gain)) : 0;
+    if (!entered.length && sc.train && deckInfo(state)) {
+      ctx = ctx || makeCtx(state, sc);
+      (state.facilities || []).forEach(f => {
+        const gain = deckGain(f, ctx);
+        if (gain) best = Math.max(best, gain.total);
+      });
+    }
+    return best > 0 ? best / (typGainAt(state.turn, sc) * (sc.gainScale || 1)) : null;
+  }
+
+  // Repair saved strength samples using original pre-command inputs. Restore
+  // logged facility levels (or the preceding training history for older logs),
+  // without changing balances, outcomes, snapshots or the formula multiplier.
+  function relearnStrength(state, sc) {
+    const samples = [], log = state.log || [];
+    log.forEach((entry, i) => {
+      try {
+        const past = JSON.parse(entry.snapshot);
+        if (!past || !Array.isArray(past.facilities) || past.scenario && past.scenario !== sc.id) return;
+        past.log = log.slice(0, i);
+        past.facLevels = Object.assign({}, past.facLevels);
+        ((entry.diagnostics || {}).options || []).forEach(o => {
+          const level = o.expectedPerformance && o.expectedPerformance.facilityLevel;
+          if (o.kind === "train" && STATS.includes(o.stat) && level >= 1 && level <= 5) past.facLevels[o.stat] = level;
+        });
+        const sample = strengthSample(past, sc);
+        if (sample != null && Number.isFinite(sample)) samples.push(sample);
+      } catch (_) { /* skip unreadable legacy snapshots */ }
+    });
+    return samples.slice(-12);
+  }
+
   // ---- Grand Concert performance tokens ----
   // Each training gives tokens of its primary type most of the time (secondary or another type
   // otherwise; the game shows which on the training), and friendship training gives a second
@@ -2649,6 +2687,20 @@
       energy: clamp(Math.round(ctx.E + (best.energyDelta || 0)), 0, ctx.maxE + (best.maxEnergyDelta || 0)),
       mood: Conditions.moodAfter(state, best.moodDelta, (best.kind === "rest" && isCamp(state.turn, scenario)) || (best.consume && best.consume.cureConditions))
     };
+    let recoveryComparison = null;
+    if (scenario.id === "grandlive" && ctx.camp && ctx.E < 55 && !best.forced) {
+      const wit = options.find(o => o.kind === "train" && o.stat === "wit" && !o.tech && !o.song);
+      const rest = options.find(o => o.kind === "rest");
+      if (wit && rest) {
+        let campTurnsAfter = 0;
+        for (let turn = state.turn + 1; isCamp(turn, scenario); turn++) campTurnsAfter++;
+        const energyAfter = o => clamp(Math.round(ctx.E + o.energyDelta), 0, ctx.maxE);
+        const checkEnergyLesson = !heldSong(state, scenario) && !best.tech && !best.song && ((state.gl || {}).tokens || []).some(n => n >= 25);
+        recoveryComparison = { wit: { energyAfter: energyAfter(wit), delta: energyAfter(wit)-ctx.E, fail: wit.fail, failEstimated: wit.failEst, gainsEstimated: wit.gainEst, value: wit.value }, rest: { energyAfter: energyAfter(rest), delta: energyAfter(rest)-ctx.E, value: rest.value }, campTurnsAfter, checkEnergyLesson };
+        reasons.push("Camp energy: Wit leaves about " + energyAfter(wit) + ", Rest about " + energyAfter(rest) + ". " + campTurnsAfter + " camp turn(s) follow; reassess the next placements rather than repeating Wit automatically.");
+        if (checkEnergyLesson) reasons.push("Check your actual lesson shop for an affordable Energy technique before spending this turn. It costs Performance, uses no turn, and can change which training is safe; mark its actual offer/type and recheck failure.");
+      }
+    }
     return {
       action: best,
       headline: (best.prefix.length ? best.prefix.join(" → ") + " → " : "") + best.label,
@@ -2657,6 +2709,7 @@
       versus,
       ranked: options,
       after,
+      recoveryComparison,
       typ: ctx.typ,
       calib: ctx.calib,
       phase: phaseFor(state.turn, scenario),
@@ -2755,20 +2808,13 @@
       }
     }
     // Learn deck strength (and the formula's scenario multiplier) from real or formula gains.
-    const entered = s.facilities.filter((f) => f.gain > 0);
-    let bestGain = entered.length ? Math.max.apply(null, entered.map((f) => f.gain)) : 0;
     const ctx = deckInfo(state) && scenario.train ? makeCtx(state, scenario) : null;
     if (ctx) {
       const samples = calibSamples(state, scenario);
       if (samples.length) s.fcal = (s.fcal || []).concat(samples).slice(-12);
-      state.facilities.forEach((f) => {
-        const dg = deckGain(f, ctx);
-        if (dg && !bestGain) bestGain = Math.max(bestGain, dg.total);
-      });
     }
-    if (bestGain > 0) {
-      s.calib = (s.calib || []).concat([bestGain / (typGainAt(s.turn, scenario) * (scenario.gainScale || 1))]).slice(-12);
-    }
+    const sample = strengthSample(state, scenario, ctx);
+    if (sample != null) s.calib = (s.calib || []).concat([sample]).slice(-12);
     s.log = (s.log || []).concat([{
       turn: s.turn,
       label: (option.prefix && option.prefix.length ? option.prefix.join(" → ") + " → " : "") + option.label,
@@ -3433,7 +3479,7 @@
   const api = {
     STATS, STAT_LABELS, MOODS, MOOD_MULT, BUILDS, RACES, FACILITY, HOOKS,
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, calibSamples, relearnCalib, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
-    estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
+    estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost, relearnStrength,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, focusWeight, turnsToDebut, applyOpening, NEW_YEAR,
     songBonuses, hypeStatus, songsLearned, concertGoal, calendarPerformance, recordTokenReward, recordLearnedSong, performanceOutcomes, techniquesToSong, concertSongValue, shouldCarrySong, glRewards, songAdvice, songPlan, heldSong, holdSong, periodSongBudget, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, lessonShop, buyTechnique, buySong, shopSongs, undoBuy, recordHelloEvent
   };

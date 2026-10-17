@@ -3,7 +3,7 @@
 (function (root) {
   const E = root.UmaEngine || (typeof require !== "undefined" ? require("./engine.js") : null);
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
-  const VERSION = "20261017g";
+  const VERSION = "20261017h";
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const vector = (x) => Array.from({ length: 5 }, (_, i) => Number.isFinite((x || [])[i]) ? x[i] : 0);
   const add = (a, b) => a.map((n, i) => n + b[i]);
@@ -133,6 +133,7 @@
     last.diagnostics = {
       v: 1, build: VERSION, recommended: optionInfo(recommendation && recommendation.action, before, sc),
       confidence: recommendation ? recommendation.confidence : null, typicalTrainingValue: recommendation ? recommendation.typ : null,
+      recoveryComparison: recommendation && recommendation.recoveryComparison ? clone(recommendation.recoveryComparison) : null,
       chosen: optionInfo(chosen, before, sc), followedRecommendation: recommendation ? recommendation.action === chosen : null,
       options: ((recommendation && recommendation.ranked) || []).map((o) => optionInfo(o, before, sc)),
       result: { training: chosen.kind === "train" ? observed.result || "success" : null, outing: chosen.outingRoll ? observed.outing || "success" : null, cured: chosen.consume && chosen.consume.cureConditions ? observed.cured !== false : null, gotPracticePoor: !!observed.gotPracticePoor },
@@ -190,6 +191,7 @@
       coverage: { loggedTurns: turns.length, detailedTurns: turns.filter((t) => t.coverage === "detailed").length, legacyTurns: turns.filter((t) => t.coverage === "legacy").length, unreadableSnapshots: errors, firstLoggedTurn: turns.length ? turns[0].turn : null, startsAfterTurnOne: turns.length ? turns[0].turn > 1 : state.turn > 1, gaps, currentTurn: state.turn, endsBeforeCurrentTurn: prior != null && prior !== state.turn - 1 && !(prior === state.turn && state.turn === sc.totalTurns), unreconciledTurns: turns.filter((t) => t.performance && t.performance.unreconciled.some((n) => Math.abs(n) > 1e-9)).map((t) => t.turn) },
       current: inputs(state), currentProgress: progress(state, sc), currentRecommendation: optionInfo(recommendation && recommendation.action, state, sc), currentOptions: ((recommendation && recommendation.ranked) || []).map((o) => optionInfo(o, state, sc)), runChecks: clone(state.runChecks || {}), checks: clone(E.runCheck(state, sc)),
       tokens: sc.tokens || [], totals, turns, events, observations,
+      recoveryComparison: recommendation && recommendation.recoveryComparison ? clone(recommendation.recoveryComparison) : null,
       currentPeriodBudget: sc.id === "grandlive" ? E.periodSongBudget(state, sc) : null,
       concerts: (sc.lives || []).filter((turn) => turn < state.turn || turns.some((t) => t.turn === turn)).map((turn) => {
         const logged = turns.filter((t) => t.turn === turn).slice(-1)[0];
