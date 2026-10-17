@@ -146,7 +146,7 @@ def parse_effects(text):
         if "bad condition" in low or "negative condition" in low:
             out["cure"] = True
             continue
-        if "ends chain" in low or "ends support chain" in low:
+        if "ends chain" in low or "ends support chain" in low or "end of chain event" in low:
             out["end"] = True
             continue
         if "depends on card level" in low:
@@ -168,6 +168,23 @@ def parse_effects(text):
 
 def parse_choice(desc):
     """Results always given, then the On Success / On Failure parts."""
+    # A later reward can depend on an earlier selected choice. Do not flatten
+    # those alternative rewards into one additive outcome (Nakayama Festa).
+    conditional = re.split(r"(?:'{3})?\s*Selected Choice (\d+) for (\d+)(?:st|nd|rd|th) event(?:\s*\((Success|Failure)\))?\s*(?:'{3})?\s*:\s*(?:'{3})?", desc, flags=re.I)
+    if len(conditional) > 1:
+        base = parse_choice(conditional[0])
+        groups = {}
+        for k in range(1, len(conditional), 4):
+            choice, stage, branch, text = conditional[k:k + 4]
+            key = (int(stage), int(choice))
+            entry = groups.setdefault(key, {"stage": key[0], "choice": key[1]})
+            reward = parse_choice(text)
+            if branch:
+                entry["ok" if branch.lower() == "success" else "ng"] = reward
+            else:
+                entry.update(reward)
+        base["when"] = list(groups.values())
+        return base
     d = desc.replace("/ <br> /", "\n")
     m = re.split(r"'{3}\s*On (Success|Failure)(?:\(\?\))?:?\s*'{3}\s*:?", d)
     base = parse_effects(m[0])

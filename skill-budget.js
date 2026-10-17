@@ -6,7 +6,7 @@
   const level = (n) => Math.max(0, Math.min(5, Math.floor(+n || 0)));
   const discounted = (cost, lv) => Math.floor(cost * (100 - DISCOUNT[level(lv)]) / 100);
   function create(opts = {}) {
-    const metadata = opts.metadata || DATA.skills, values = Object.assign({}, opts.skills), costs = opts.costs || {};
+    const metadata = opts.metadata || DATA.skills, values = Object.assign({}, opts.skills), costs = Object.assign({}, opts.costs);
     const learned = new Set([...(opts.learned || [])].map(String));
     const available = new Set([...(opts.available || [])].map(String));
     const must = new Set((opts.must || []).map(String));
@@ -115,9 +115,14 @@
     // with every other card's random offers.
     const bestByFamily = (groups) => new Map(groups.map((g) => [g[0].family, Math.max(0, ...g.map((o) => o.value + o.hintSaving * spValue))]));
     const base = bestByFamily(options({}));
+    const utilities = new Map();
     function hintUtility(levels) {
+      const key = JSON.stringify(Object.keys(levels).sort().map((id) => [id, levels[id]]));
+      if (utilities.has(key)) return utilities.get(key);
       const after = bestByFamily(options(levels));
-      return [...after].reduce((n, [family, value]) => n + Math.max(0, value - (base.get(family) || 0)), 0);
+      const value = [...after].reduce((n, [family, value]) => n + Math.max(0, value - (base.get(family) || 0)), 0);
+      if (utilities.size >= 2048) utilities.clear();
+      utilities.set(key, value); return value;
     }
     const key = JSON.stringify([values, costs, [...learned].sort(), [...available].sort(), [...must].sort()]);
     return { options, solve, chain, unlocks, hintUtility, key };

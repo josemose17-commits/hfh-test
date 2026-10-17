@@ -29,10 +29,16 @@
     return out;
   }
   const merge = (a, b) => Object.fromEntries([...new Set(Object.keys(a).concat(Object.keys(b)))].map((id) => [id, Math.min(5, (a[id] || 0) + (b[id] || 0))]));
-  function branches(choice, allowed, success) {
-    const base = hints(choice, allowed);
-    if (choice.ok || choice.ng) return [{ p: success, levels: merge(base, hints(choice.ok || {}, allowed)), end: choice.end || (choice.ok || {}).end }, { p: 1 - success, levels: merge(base, hints(choice.ng || {}, allowed)), end: choice.end || (choice.ng || {}).end }];
-    return [{ p: 1, levels: base, end: choice.end }];
+  const ended = (x) => !!x.end || /^end of chain event[.;]?$/i.test(x.x || "");
+  function records(choice, history = {}) {
+    return [choice, ...(choice.when || []).filter((r) => history[r.stage] === r.choice).flatMap((r) => records(r, history))];
+  }
+  function branches(choice, allowed, success, history = {}) {
+    const parts = records(choice, history);
+    const base = parts.reduce((levels, part) => merge(levels, hints(part, allowed)), {});
+    const finish = (key) => ({ levels: parts.reduce((levels, part) => merge(levels, hints(part[key] || {}, allowed)), base), end: parts.some((part) => ended(part) || ended(part[key] || {})) });
+    if (parts.some((p) => p.ok || p.ng)) return [Object.assign({ p: success }, finish("ok")), Object.assign({ p: 1 - success }, finish("ng"))];
+    return [{ p: 1, levels: base, end: parts.some(ended) }];
   }
   function model(card, ctx = {}, options = {}) {
     const allowed = new Set((card.es || []).map(String));
@@ -54,20 +60,22 @@
     const chain = special ? [] : ce.chain || [];
     const other = special ? [] : [...new Set(ce.other || [])].filter((id) => !chain.includes(id));
     [...chain, ...other].forEach((eid) => {
-      ((data.events[eid] || {}).c || []).forEach((ch, i) => [ch, ch.ok || {}, ch.ng || {}].forEach((out, b) => {
+      const all = (ch) => [ch, ch.ok || {}, ch.ng || {}, ...(ch.when || []).flatMap(all)];
+      ((data.events[eid] || {}).c || []).forEach((ch, i) => all(ch).forEach((out, b) => {
         Object.entries(hints(out, allowed)).forEach(([id, level]) => { parsed.add(id); routes.push({ id, event: eid, name: data.events[eid].n, stage: chain.indexOf(eid) + 1 || null, choice: i + 1, branch: ["always", "success", "failure"][b], level, note: out.x || ch.x || null }); });
       }));
     });
     function plan(ids, probabilities) {
-      function visit(index, levels) {
+      function visit(index, levels, history = {}) {
         if (index >= ids.length) return [{ p: 1, levels }];
         const q = probabilities[index + 1] / Math.max(1e-15, probabilities[index]);
         const choices = (data.events[ids[index]] || {}).c || [{}];
         let best = null, bestValue = -Infinity;
-        choices.forEach((ch) => {
-          const outcomes = branches(ch, allowed, success).flatMap((b) => {
+        choices.forEach((ch, choice) => {
+          const nextHistory = Object.assign({}, history, { [index + 1]: choice + 1 });
+          const outcomes = branches(ch, allowed, success, history).flatMap((b) => {
             const next = merge(levels, b.levels);
-            return (b.end ? [{ p: 1, levels: next }] : visit(index + 1, next)).map((x) => ({ p: b.p * x.p, levels: x.levels }));
+            return (b.end ? [{ p: 1, levels: next }] : visit(index + 1, next, nextHistory)).map((x) => ({ p: b.p * x.p, levels: x.levels }));
           });
           const value = outcomes.reduce((n, x) => n + x.p * utility(x.levels), 0);
           if (value > bestValue + 1e-9) { bestValue = value; best = outcomes; }
@@ -96,7 +104,7 @@
     m.fallback.filter((id) => !(card.n === "Light Hello" && +id === 200272)).forEach((id) => offers.add(id, m.completion, 1, card.id));
     return m;
   }
-  const api = { model, add, reach, PRIOR };
+  const api = { model, add, reach, PRIOR, records, ended };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaSkillEvents = api;
 })(typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : globalThis);

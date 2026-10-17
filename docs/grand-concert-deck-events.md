@@ -2,6 +2,8 @@
 
 This pass starts from merged PR #41. It addresses three remaining deck-builder gaps: event reward eligibility, the effect of event-frequency songs, and comparisons that can change with simulation assumptions. It also corrects an undercount of discounts from repeated hints. It does not establish that event skills deserve a universal source multiplier or that a suggested deck is globally optimal.
 
+Current follow-up: [coupled support events](grand-concert-coupled-events.md) now apply parsed ordinary event resources and hints together during the career. The static/fallback model described below remains a screening approximation.
+
 ## Event eligibility
 
 The previous scorer assigned every event skill a flat rarity-based probability and a level-1 hint. That could simultaneously credit exclusive choices, success and failure rewards, and late rewards after a choice that ends the chain. It also treated a first-step reward like a third-step reward.
@@ -18,7 +20,7 @@ The retained end-of-chain priors are SSR 80%, SR 65% and R 50%. They are uncalib
 
 Success/failure branches use an explicit conditional-success estimate, default 50%, with 25% and 75% controls. Different events can have very different real requirements and odds. The uniform control is a sensitivity input until reliable individual rates are available. The existing Independent Training late-chain penalty is retained as an assumption.
 
-Event stat, SP, energy and bond rewards still use the existing aggregate card estimates spread through the career. Those totals are not fully coupled to the newly selected skill branches; choosing a skill reward can replace a different stat reward in the game. This is a remaining source of bias, rather than a claim that every event lifecycle is now simulated exactly.
+The coupled-event follow-up now grants parsed ordinary-support stats, SP, energy and bond with the selected hint branch during Grand Concert careers. Incomplete records and other Friend/Group cards keep a labeled whole-card aggregate fallback. Raw-text conditions, event eligibility and timing remain sources of bias; the model does not claim every event lifecycle is exact.
 
 ## Hint accumulation
 

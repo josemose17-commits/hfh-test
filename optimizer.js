@@ -14,6 +14,7 @@
   const GC = root.UmaGrandConcert || (typeof require !== "undefined" ? require("./grand-concert.js") : null);
   const SkillEvents = root.UmaSkillEvents || (typeof require !== "undefined" ? require("./skill-events.js") : null);
   const SkillBudget = root.UmaSkillBudget || (typeof require !== "undefined" ? require("./skill-budget.js") : null);
+  const SupportEvents = root.UmaSupportEvents || (typeof require !== "undefined" ? require("./support-events.js") : null);
   const STATS = ["speed", "stamina", "power", "guts", "wit"];
   const SP_VALUE = 0.35;
   // Value points per length (L) of race gain. Roughly what 1 L of speed stat costs, and in line
@@ -80,6 +81,7 @@
       learned: new Set((t ? t.us || [] : []).map(String)),
       available: (t ? [].concat(t.is || [], t.as || []) : []).map(String),
       skillBudget: sc.id === "grandlive" && opts.skillBudget !== false,
+      coupledEvents: sc.id === "grandlive" && opts.coupledEvents !== false,
       runs: opts.runs || 10,
       seed: opts.seed || 12345,
       helloProcRate: opts.helloProcRate != null ? Math.max(0, Math.min(1, +opts.helloProcRate)) : 0.4,
@@ -188,7 +190,8 @@
       const base = D.baseEffects(c.card, level);
       const spec = c.card.ty === "friend" || c.card.ty === "group" ? 0 : (base[19] || 0);
       const hello = ctx.sc.id === "grandlive" ? H.profile(c.card, c.lb) : null;
-      return { card: c.card, level, base, spec, hello, init: D.initialBond(c.card, level), ev: hello ? { stats: [0, 0, 0, 0, 0], sp: 0, energy: 0, bond: 0 } : D.eventRewards(c.card), hintRate: HINT_CHANCE * (1 + (base[18] || 0) / 100), hintLv: 1 + (base[17] || 0) };
+      const support = ctx.coupledEvents && !hello ? SupportEvents.profile(c.card, c.lb) : null;
+      return { card: c.card, level, base, spec, hello, support, init: D.initialBond(c.card, level), ev: hello || support && support.mode === "coupled" ? { stats: [0, 0, 0, 0, 0], sp: 0, energy: 0, bond: 0 } : D.eventRewards(c.card), hintRate: HINT_CHANCE * (1 + (base[18] || 0) / 100), hintLv: 1 + (base[17] || 0) };
     });
     ctx.deckTypes = new Set(deck.map((d) => d.card.ty)).size;
     // Cards' starting bonuses: Initial Speed..Wit (effects 9-13) and Initial Skill Points (32).
@@ -208,11 +211,19 @@
     const helloSkillEvents = new Map();
     const eventExposures = [];
     const careers = [];
+    const supportTotals = deck.map(() => ({ events: 0, complete: 0, ended: 0, s: [0, 0, 0, 0, 0], sp: 0, energy: 0, wastedEnergy: 0, b: 0, wastedBond: 0, me: 0, mo: 0 }));
     const purchase = ctx.skillBudget ? SkillBudget.create({ skills: ctx.skills, costs: ctx.costs, learned: ctx.learned, available: ctx.available, must: ctx.must, lengthValue: L_VALUE, spValue: SP_VALUE }) : null;
     const eventCtx = purchase ? Object.assign({}, ctx, { known: ctx.learned, must: ctx.must.filter((id) => !ctx.available.includes(id)), eventUtility: purchase.hintUtility, eventUtilityKey: purchase.key }) : ctx;
     const scheduled = new Map((ctx.calendar || []).map(day => [day.turn, day]));
     for (let run = 0; run < R; run++) {
       const runHints = deck.map(() => 0);
+      const runLevels = {}, trainingLevels = deck.map(() => ({})), eventLevels = deck.map(() => ({})), eventTrace = [];
+      const trainingRand = deck.map((d) => rng(((ctx.seed + run * 7919) ^ Math.imul(+d.card.id, 2654435761)) ^ 0x19e7d31));
+      const support = deck.map((d) => d.support ? SupportEvents.create(d.support, { days: ctx.turns.length, success: ctx.eventSuccessRate, songBoost: ctx.eventSongBoost, independent: ctx.independent, seed: (ctx.seed + run * 7919) ^ Math.imul(+d.card.id, 2654435761) }) : null);
+      const addHint = (k, id, lv, kind) => {
+        id = String(id); const dst = kind === "training" ? trainingLevels[k] : eventLevels[k];
+        dst[id] = Math.min(5, (dst[id] || 0) + lv); runLevels[id] = Math.min(5, (runLevels[id] || 0) + lv);
+      };
       const rand = rng(ctx.seed + run * 7919);
       const x = ctx.start.map((v, i) => Math.min(ctx.caps[STATS[i]], v + initial[i]));
       let sp = 120 + initialSp;
@@ -227,9 +238,9 @@
       const hello = deck.map((d) => d.hello ? { p: d.hello, met: false, metTurn: 0, unlocked: false, done: 0, hints: {} } : null);
       ctx.live = live && live.state;
       const applyEvent = (event) => {
-        if (event.me) maxEnergy += event.me;
-        for (let i = 0; i < 5; i++) if ((event.s || [])[i]) x[i] = Math.min(ctx.caps[STATS[i]], x[i] + event.s[i]);
-        sp += event.sp || 0;
+        if (event.me) maxEnergy = Math.max(1, maxEnergy + event.me);
+        for (let i = 0; i < 5; i++) if ((event.s || [])[i]) x[i] = Math.max(0, Math.min(ctx.caps[STATS[i]], x[i] + event.s[i]));
+        sp = Math.max(0, sp + (event.sp || 0));
         const before = energy;
         energy = Math.max(0, Math.min(maxEnergy, energy + (event.e || 0)));
         mood = Math.max(0, Math.min(4, mood + (event.mo || 0)));
@@ -237,6 +248,38 @@
       };
       const finishTurn = (turn) => {
         if (!live) return;
+        support.forEach((model, k) => {
+          if (!model || model.profile.mode !== "coupled") return;
+          const lambda = (typ || 25) / 52;
+          const skillValue = (levels) => (purchase ? ctx.skillWeight * purchase.hintUtility(levels) : Object.keys(levels).reduce((n, id) => n + (ctx.known.has(id) ? 0 : Math.max(0, ctx.skills[id] || 0) * L_VALUE), 0)) + ctx.must.filter((id) => levels[id] && !ctx.known.has(id)).length * 10000;
+          model.tick(turn, live.state.eventLevel, {
+            levels: runLevels, skillValue,
+            rewardValue: (event) => {
+              let value = event.sp * SP_VALUE;
+              for (let i = 0; i < 5; i++) value += Math.max(-x[i], Math.min(ctx.caps[STATS[i]] - x[i], event.s[i])) * pointValue(ctx, STATS[i], x[i]);
+              event.random.forEach((g) => { value += g.count / 5 * STATS.reduce((n, s, i) => n + Math.min(ctx.caps[s] - x[i], g.amount) * pointValue(ctx, s, x[i]), 0); });
+              value += (Math.max(0, Math.min(maxEnergy + event.me, energy + event.e)) - energy) * lambda;
+              value += event.me * 0.2 + (Math.max(0, Math.min(4, mood + event.mo)) - mood) * 0.1 * (typ || 25) * Math.min(10, 79 - turn);
+              const change = Math.max(0, Math.min(100, bond[k] + event.b)) - bond[k];
+              value += change * (bond[k] < 80 ? 0.3 + 1.2 * Math.max(0, 1 - turn / 50) : 0.05);
+              return value;
+            },
+            apply: (record) => {
+              const beforeStats = x.slice(), beforeBond = bond[k], beforeSp = sp;
+              record.before = { stats: x.slice(), sp, energy, maxEnergy, mood, bond: bond[k] };
+              const recovered = applyEvent(record.reward);
+              bond[k] = Math.max(0, Math.min(100, bond[k] + record.reward.b));
+              Object.entries(record.reward.h).forEach(([id, lv]) => addHint(k, id, lv, "event"));
+              const credited = { s: x.map((v, i) => v - beforeStats[i]), sp: sp - beforeSp, energy: recovered, b: bond[k] - beforeBond, me: maxEnergy - record.before.maxEnergy, mo: mood - record.before.mood };
+              const total = supportTotals[k]; total.events++; total.sp += credited.sp; total.energy += recovered; total.b += credited.b;
+              total.wastedEnergy += Math.max(0, record.reward.e - recovered); total.wastedBond += Math.max(0, record.reward.b - credited.b);
+              total.me += credited.me; total.mo += credited.mo;
+              credited.s.forEach((n, i) => { total.s[i] += n; });
+              record.after = { stats: x.slice(), sp, energy, maxEnergy, mood, bond: bond[k] };
+              eventTrace.push(Object.assign({}, record, { credited }));
+            }
+          });
+        });
         hello.forEach((h, k) => {
           if (!h || !h.met || h.unlocked || h.metTurn >= turn || bond[k] < 60) return;
           if (eventRand() < ctx.helloUnlockRate) { h.unlocked = true; applyEvent(h.p.unlock); bond[k] = Math.min(100, bond[k] + h.p.unlock.b); liveTotals.helloUnlocks++; }
@@ -245,8 +288,8 @@
         live.end(turn, applyEvent);
         if (turn === 24) deck.forEach((d, k) => { bondAt[k] += bond[k]; });
       };
-      // Card events: bond arrives over the first ~60% of the career; stats, SP and energy
-      // are spread over the whole run. Effect size up (effect 26) scales event stats.
+      // Only incomplete/special-card aggregate fallbacks remain spread estimates.
+      // Fully parsed ordinary cards have zero aggregate rewards and fire in finishTurn.
       const eventBond = deck.map((d) => d.ev.bond / Math.max(1, ctx.turns.length * 0.6));
       const evStats = [0, 0, 0, 0, 0];
       let evSp = 0, evEnergy = 0;
@@ -259,9 +302,9 @@
       for (let ti = 0; ti < ctx.turns.length; ti++) {
         const turn = ctx.turns[ti];
         deck.forEach((d, k) => { bond[k] = Math.min(100, bond[k] + eventBond[k]); });
-        for (let i = 0; i < 5; i++) x[i] += (EVENT_STATS + evStats[i]) / ctx.turns.length;
+        for (let i = 0; i < 5; i++) x[i] = Math.max(0, Math.min(ctx.caps[STATS[i]], x[i] + (EVENT_STATS + evStats[i]) / ctx.turns.length));
         sp += evSp / ctx.turns.length;
-        energy = Math.min(maxEnergy, energy + evEnergy / ctx.turns.length);
+        energy = Math.max(0, Math.min(maxEnergy, energy + evEnergy / ctx.turns.length));
         if (live) {
           live.start(turn, applyEvent);
           if (turn === 25 || turn === 49) applyEvent({ e: E.NEW_YEAR[turn] ? E.NEW_YEAR[turn].e : 20 });
@@ -270,7 +313,7 @@
             const options = h.p.newYear(true);
             const chosen = energy < maxEnergy - 15 ? options[1] : options[0];
             applyEvent(chosen); bond[k] = Math.min(100, bond[k] + chosen.b);
-            (chosen.h || []).forEach(([id, lv]) => { h.hints[id] = Math.min(5, (h.hints[id] || 0) + lv); });
+            (chosen.h || []).forEach(([id, lv]) => { h.hints[id] = Math.min(5, (h.hints[id] || 0) + lv); runLevels[id] = Math.min(5, (runLevels[id] || 0) + lv); });
           });
           live.shop(turn, energy, maxEnergy, applyEvent);
         }
@@ -371,7 +414,7 @@
           liveTotals.helloEnergyRecovered += recovered;
           liveTotals.helloEnergyWasted += Math.max(0, (outcome.e || 0) - recovered);
           bond[k] = Math.min(100, bond[k] + (outcome.b || 0));
-          (outcome.h || []).forEach(([id, lv]) => { h.hints[id] = Math.min(5, (h.hints[id] || 0) + lv); });
+          (outcome.h || []).forEach(([id, lv]) => { h.hints[id] = Math.min(5, (h.hints[id] || 0) + lv); runLevels[id] = Math.min(5, (runLevels[id] || 0) + lv); });
           h.done++; outings++; liveTotals.helloOutings++;
           finishTurn(turn); continue;
         }
@@ -387,7 +430,7 @@
         rainbowTotal += bestG.rainbows;
         at[best].forEach((k) => {
           bond[k] = Math.min(100, bond[k] + D.BOND_PER_TRAINING);
-          if ((deck[k].card.hs || []).length && rand() < deck[k].hintRate) { hints[k]++; runHints[k]++; bond[k] = Math.min(100, bond[k] + D.BOND_PER_HINT); }
+          if ((deck[k].card.hs || []).length && rand() < deck[k].hintRate) { hints[k]++; runHints[k]++; bond[k] = Math.min(100, bond[k] + D.BOND_PER_HINT); const hs = deck[k].card.hs; addHint(k, hs[Math.floor(trainingRand[k]() * hs.length)], deck[k].hintLv, "training"); }
         });
         if (live) {
           bestTokens.forEach((t) => live.add(t.type, t.amount));
@@ -422,7 +465,8 @@
         live.shop(78, energy, maxEnergy, applyEvent, true);
         const ls = live.state;
         eventExposures.push(ls.eventLevelTurns / ctx.turns.length);
-        if (purchase) careers.push({ sp, hints: runHints, hello: hello.map((h) => h ? Object.assign({}, h.hints) : {}), exposure: ls.eventLevelTurns / ctx.turns.length });
+        support.forEach((model, k) => { if (model && model.profile.mode === "coupled") { supportTotals[k].complete += +(model.state.stage === model.profile.chain.length && model.profile.chain.length > 0); supportTotals[k].ended += +(model.state.ended && model.state.stage < model.profile.chain.length); } });
+        careers.push({ sp, hints: runHints, training: trainingLevels, events: eventLevels, eventTrace, hello: hello.map((h) => h ? Object.assign({}, h.hints) : {}), exposure: ls.eventLevelTurns / ctx.turns.length });
         liveTotals.songs += Object.keys(ls.songs).length + 1;
         liveTotals.techniques += ls.techniques; liveTotals.greatConcerts += ls.greatConcerts; liveTotals.lessonEnergy += ls.lessonEnergy;
         if (ls.songCountAtLyrics >= 16) liveTotals.lyrics++;
@@ -436,6 +480,7 @@
     ctx.helloSkillEvents = helloSkillEvents;
     ctx.eventExposures = eventExposures;
     Object.assign(eventCtx, { helloSkillEvents, eventExposures });
+    eventCtx.careers = careers;
     const skill = skillValue(eventCtx, deck, hints.map((h) => h / R));
     const budget = purchase ? affordableSkills(ctx, eventCtx, purchase, deck, careers, skill.list) : null;
     if (budget) { skill.value = budget.value; skill.list = budget.skills; }
@@ -462,19 +507,22 @@
           earnedTokens: earnedTokens.map((n) => n / R), spentTokens: spentTokens.map((n) => n / R), finalTokens: finalTokens.map((n) => n / R),
           model: "discrete-lessons-v1", helloProcRate: ctx.helloProcRate, helloUnlockRate: ctx.helloUnlockRate,
           eventSuccessRate: ctx.eventSuccessRate, eventSongBoost: ctx.eventSongBoost, eventLevelExposure: eventExposures.reduce((n, x) => n + x, 0) / R,
-          assumptions: "repeat/unlock rates, conditional event success and chain arrival priors are assumptions; song event levels activate after concerts; per-level relative arrival boost is an experimental assumption (default 0, uncalibrated magnitude); event stats remain spread estimates; guest placements and random mood drops omitted"
+          assumptions: "repeat/unlock rates, conditional success and event clocks are assumptions; song levels activate after concerts; per-level boost is experimental (default 0); parsed ordinary events couple rewards and hints, incomplete/special cards retain aggregate rewards; generic career events, guest placements and raw-text conditions remain approximate or omitted"
         }) : null,
       calendarAssumptions: ctx.calendar ? {
         requiredRaceResult:"wins assumed; race failure and aptitude feasibility not simulated",
         randomGoalStats:"expected distribution across five stats",
         choiceAndFanGoals:"only automatically fixed race objectives scheduled",
-        rewards:"standard goal/URA winning rewards; discrete concerts and Light Hello events/ending; other career-end/secret rewards omitted",
+        rewards:"standard goal/URA winning rewards; discrete concerts, Light Hello events/ending and parsed ordinary support events (aggregate fallback where incomplete); other career-end/secret rewards omitted",
         scheduledRaces:ctx.calendar.filter(d => d.kind === "race").map(d => d.turn),
         freeTurns:ctx.calendar.filter(d => d.kind === "free").length
       } : null,
       fails: fails / R,
       skills: skill.list,
       eventModel: { successRate: ctx.eventSuccessRate, songBoost: ctx.eventSongBoost, completionPriors: SkillEvents.PRIOR, coverage: skill.coverage },
+      supportEvents: ctx.coupledEvents ? { model: "coupled-events-v1", cards: deck.map((d, k) => ({ card: d.card.id, chainLength: d.support ? d.support.chain.length : 0, mode: d.hello ? "hello-lifecycle" : d.support.mode, missing: d.support ? d.support.missing : [], notes: d.support ? d.support.notes : [], totals: Object.fromEntries(Object.entries(supportTotals[k]).map(([key, value]) => [key, Array.isArray(value) ? value.map((n) => n / R) : value / R])) })),
+        example: careers[0] ? careers[0].eventTrace : [],
+        assumptions: "independent card/event clocks across all calendar turns; binomial chain arrivals calibrated to rarity priors before failures/choices; conditional success assumed; event timing, future choice utility, raw-text conditions and generic +120 per-stat career events remain estimates; incomplete/special cards retain whole-card aggregate rewards" } : null,
       initial,
       initialSp,
     };
@@ -496,10 +544,14 @@
       }
       deck.forEach((d, k) => {
         const seed = (ctx.seed + run * 7919) ^ Math.imul(+d.card.id, 2654435761);
-        const training = rng(seed ^ 0x19e7d31), event = rng(seed ^ 0x428bd57);
+        const event = rng(seed ^ 0x428bd57);
         const hs = d.card.hs || [];
-        for (let n = 0; n < career.hints[k] && hs.length; n++) add(hs[Math.floor(training() * hs.length)], d.hintLv, d.card.id);
+        Object.entries(career.training[k]).forEach(([id, lv]) => add(id, lv, d.card.id));
         if (d.hello) Object.entries(career.hello[k]).forEach(([id, lv]) => add(id, lv, d.card.id));
+        else if (d.support && d.support.mode === "coupled") {
+          Object.entries(career.events[k]).forEach(([id, lv]) => add(id, lv, d.card.id));
+          d.support.fallback.forEach((id) => { if (event() < (SkillEvents.PRIOR[d.card.r] || 0.5)) add(id, 1, d.card.id); });
+        }
         else {
           const model = SkillEvents.model(d.card, eventCtx, { success: ctx.eventSuccessRate, multiplier: 1 + ctx.eventSongBoost * career.exposure, independent: ctx.independent });
           model.groups.forEach((group) => {
@@ -512,6 +564,8 @@
       });
       const plan = purchase.solve(levels, career.sp);
       plan.hintLevels = levels;
+      plan.eventTrace = career.eventTrace;
+      plan.career = run + 1;
       plan.unsupported.forEach((id) => unsupported.add(id));
       plan.offered.forEach((id) => {
         if (!rows.has(id)) rows.set(id, Object.assign({}, diagnosticRows.get(id) || { id, L: ctx.skills[id] || 0, p: 0, src: [], eventP: 0, trainingP: 0 }, { offered: 0, selected: 0, spent: 0, givenBy: new Set() }));
@@ -541,7 +595,7 @@
       learned: plans.reduce((n, p) => n + p.selected.length, 0) / R, L: avg("L"),
       must: ctx.must.map((id) => ({ id, learnedP: plans.filter((p) => !p.unmetMust.includes(id)).length / R })),
       unsupported: [...unsupported].sort(), example, plans,
-      assumptions: "end-of-career purchases; all listed innate/awakening skills available at Lv0; own unique already learned; no inherited or scenario-random skills, Fast Learner, early purchases, free grants or evolved skills; additive chart gains; independent training-hint pool draws; event routes use stated priors; must-haves prioritize affordable purchases; SP is scored through affordable skills, without a second raw-SP bonus" };
+      assumptions: "end-of-career purchases; all listed innate/awakening skills available at Lv0; own unique already learned; no inherited or scenario-random skills, Fast Learner, early purchases, free grants or evolved skills; additive chart gains; independent training-hint pool draws; complete ordinary-support records use coupled events; incomplete records/unknown skills keep disclosed fallbacks; must-haves prioritize affordable purchases; SP is scored through affordable skills, without a second raw-SP bonus" };
     return { value: avg("value"), skills, summary };
   }
 
@@ -557,6 +611,12 @@
           const observed = ctx.helloSkillEvents.get(d.card.id + ":" + id);
           if (observed) offers.exclusive(Object.entries(observed.byLevel).map(([level, count]) => ({ p: count / ctx.runs, levels: { [id]: +level } })), d.card.id);
       });
+      else if (d.support && d.support.mode === "coupled") {
+        const profile = d.support;
+        offers.exclusive(ctx.careers.map((career) => ({ p: 1 / ctx.runs, levels: career.events[k] })), d.card.id);
+        profile.fallback.forEach((id) => add(id, SkillEvents.PRIOR[d.card.r] || 0.5, 1, d.card.id));
+        coverage.push({ card: d.card.id, eventSkills: (d.card.es || []).length, unresolved: profile.fallback, conditionalNotes: profile.notes, coupled: true });
+      }
       else {
         const exposures = ctx.eventExposures.length ? ctx.eventExposures : [0];
         const models = exposures.map((exposure) => SkillEvents.model(d.card, ctx, { success: ctx.eventSuccessRate, multiplier: 1 + ctx.eventSongBoost * exposure, independent: ctx.independent }));
@@ -821,11 +881,12 @@
     if (candidates.length < 2) throw new Error("Choose at least two decks to compare.");
     const seeds = settings.seeds || [857563, 962293, 1067023];
     const runs = settings.runs || 8;
-    const defaults = { helloProcRate: sim.helloProcRate == null ? 0.4 : sim.helloProcRate, helloUnlockRate: sim.helloUnlockRate == null ? 0.15 : sim.helloUnlockRate, eventSuccessRate: sim.eventSuccessRate == null ? 0.5 : sim.eventSuccessRate, eventSongBoost: sim.eventSongBoost || 0 };
+    const defaults = { helloProcRate: sim.helloProcRate == null ? 0.4 : sim.helloProcRate, helloUnlockRate: sim.helloUnlockRate == null ? 0.15 : sim.helloUnlockRate, eventSuccessRate: sim.eventSuccessRate == null ? 0.5 : sim.eventSuccessRate, eventSongBoost: sim.eventSongBoost || 0, coupledEvents: sim.coupledEvents !== false };
     const proposed = settings.profiles || [
       { name: "Selected assumptions" }, { name: "Slow Hello", helloProcRate: 0.36, helloUnlockRate: 0.05 }, { name: "Fast Hello", helloProcRate: 0.45, helloUnlockRate: 0.3 },
       { name: "Conditional event success 25%", eventSuccessRate: 0.25 }, { name: "Conditional event success 75%", eventSuccessRate: 0.75 },
-      { name: "No assumed song-rate boost", eventSongBoost: 0 }, { name: "Assumed chain rate +5% per level", eventSongBoost: 0.05 }, { name: "Assumed chain rate +10% per level", eventSongBoost: 0.1 }
+      { name: "No assumed song-rate boost", eventSongBoost: 0 }, { name: "Assumed chain rate +5% per level", eventSongBoost: 0.05 }, { name: "Assumed chain rate +10% per level", eventSongBoost: 0.1 },
+      { name: "Legacy aggregate reward comparison", coupledEvents: false }
     ];
     const seen = new Set();
     const profiles = proposed.filter((p) => { const values = Object.assign({}, defaults, p); const key = Object.keys(defaults).map((k) => values[k]).join(":"); if (seen.has(key)) return false; seen.add(key); return true; });
