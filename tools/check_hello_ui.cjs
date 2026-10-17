@@ -69,6 +69,54 @@ function load(state, owned) {
     assert.equal(ui.saved().gl.tokens[1], 30);
   } finally { ui.w.close(); }
 
+  const purchase = fixture(); purchase.turn = 18; purchase.gl.tokens = [100, 100, 100, 100, 100];
+  purchase.gl.shop = { "song:zensoku": { turn: 18 } };
+  ui = load(purchase);
+  try {
+    ui.doc.querySelector('[data-song-buy="zensoku"]').click();
+    assert.equal(ui.saved().stats.speed, 422, "the actual Bought handler adds the one-time reward");
+    assert.equal(ui.saved().gl.tokens[0], 68);
+    ui.doc.querySelector("[data-tech-undo]").click();
+    assert.equal(ui.saved().stats.speed, 400);
+    assert.equal(ui.saved().gl.tokens[0], 100);
+    const before = ui.saved().stats.speed;
+    ui.doc.querySelector("#songAddTurn").value = "10";
+    const add = ui.doc.querySelector("#songAdd"); add.value = "runrun";
+    add.dispatchEvent(new ui.w.Event("change", { bubbles: true }));
+    assert.equal(ui.saved().gl.songs.runrun, 10);
+    assert.equal(ui.saved().stats.speed, before, "backfilling history leaves current stats intact");
+  } finally { ui.w.close(); }
+
+  const unknown = fixture(); unknown.turn = 18; unknown.gl.tokens = [0, 0, 0, 0, 100];
+  unknown.gl.shop = { "energy:20": {} };
+  ui = load(unknown);
+  try {
+    assert.equal(ui.doc.querySelector('[data-song-buy="zensoku"]').disabled, true);
+    assert.equal(ui.doc.querySelector('[data-tech-buy="energy:20"]').disabled, true);
+    const type = ui.doc.querySelector('[data-tech-type="energy:20"]'); type.value = "4";
+    type.dispatchEvent(new ui.w.Event("change", { bubbles: true }));
+    assert.equal(ui.doc.querySelector('[data-tech-buy="energy:20"]').disabled, false);
+    ui.doc.querySelector('[data-tech-buy="energy:20"]').click();
+    assert.equal(ui.saved().energy, 40); assert.equal(ui.saved().gl.tokens[4], 75);
+  } finally { ui.w.close(); }
+
+  const carried = fixture(); carried.turn = 25; carried.gl.tokens = [100, 100, 100, 100, 100];
+  carried.gl.shop = { "stat:speed": { turn: 24 } };
+  ui = load(carried);
+  try {
+    const button = ui.doc.querySelector('[data-tech-buy="stat:speed"]');
+    assert.match(button.closest(".shop-row").textContent, /Speed \+5/);
+    button.click();
+    assert.equal(ui.saved().stats.speed, 405); assert.equal(ui.saved().gl.tokens[0], 90);
+  } finally { ui.w.close(); }
+
+  const late = fixture(); late.turn = 72;
+  late.gl.songs = Object.fromEntries(require("../scenarios.js").SCENARIOS.find((s) => s.id === "grandlive").songs.slice(0, 17).map((song, i) => [song.id, i === 16 ? 72 : 60]));
+  ui = load(late);
+  try {
+    assert.match(ui.doc.querySelector(".gl-status").textContent, /17 of 18 by turn 71/);
+  } finally { ui.w.close(); }
+
   const state = fixture();
   const ids = [30002, 30016, 30010, 30078, 30043, 30052];
   state.tab = "cm";
@@ -84,5 +132,5 @@ function load(state, owned) {
     assert.doesNotMatch(result, /metadata missing/);
     assert.match(result, /Fifth outing completed/);
   } finally { ui.w.close(); }
-  console.log("Hello DOM integration: SSR/R events, Undo, actual outing outcome, target search and diagnostics passed.");
+  console.log("Coach DOM integration: SSR/R Hello events, Undo, outings, target search, song rewards/history, typed purchases, held prices and deadline status passed.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

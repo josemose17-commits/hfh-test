@@ -1093,6 +1093,8 @@
         if (live != null && state.turn > live) out.fb += song.fb; else out.pendingFb += song.fb;
       }
     });
+    if (state.turn > 72) out.fb += 10;
+    else if (state.turn === 72) out.pendingFb += 10;
     return out;
   }
 
@@ -1104,12 +1106,19 @@
     const learned = (state.gl && state.gl.songs) || {};
     const next = sc.lives.find((l) => l >= state.turn);
     const prev = sc.lives.filter((l) => l < state.turn).pop() || 0;
-    const since = Object.values(learned).filter((t) => t > prev && t <= (next || 99)).length + (prev === 0 ? 1 : 0);
+    const since = Object.values(learned).filter((t) => t > prev && t <= state.turn).length + (prev === 0 && state.turn >= 5 ? 1 : 0) + (next === 72 && state.turn === 72 ? 1 : 0);
     return { next, prev, since, need: Math.max(0, 3 - since), turnsToLive: next != null ? next - state.turn : null };
   }
   // Songs learned so far, counting Make Debut! from turn 5 (it counts toward the 18 too).
-  function songsLearned(state) {
-    return Object.keys((state.gl && state.gl.songs) || {}).length + (state.turn >= GL_DEBUT_SONG ? 1 : 0);
+  function songsLearned(state, through = state.turn) {
+    return Object.values((state.gl && state.gl.songs) || {}).filter((t) => t >= GL_DEBUT_SONG && t <= through).length + (through >= GL_DEBUT_SONG ? 1 : 0);
+  }
+  // The special version is chosen after the Early December command, one turn
+  // before the concert. GIRLS' LEGEND U itself is excluded from this count.
+  const GL_SPECIAL_DEADLINE = 71;
+  function concertGoal(state) {
+    const count = songsLearned(state, Math.min(state.turn, GL_SPECIAL_DEADLINE));
+    return { count, target: 18, deadline: GL_SPECIAL_DEADLINE, left: Math.max(0, 18 - count), closed: state.turn > GL_SPECIAL_DEADLINE };
   }
 
   // ---- Grand Concert: what you get at fixed points (uma.guide, GameTora) ----
@@ -1141,7 +1150,7 @@
     sc.lives.forEach((L, i) => {
       const last = i === sc.lives.length - 1;
       const prev = i ? sc.lives[i - 1] : 0;
-      const songs = Object.values(learned).filter((x) => x > prev && x <= L).length + (i === 0 ? 1 : 0);
+      const songs = Object.values(learned).filter((x) => x > prev && x <= Math.min(t, L)).length + (i === 0 && t >= 5 ? 1 : 0) + (last && t >= 72 ? 1 : 0);
       const tech = lessons[i] || 0;
       const sp = 5 * tech + 25 * songs;
       const great = songs >= 3;
@@ -1160,27 +1169,26 @@
           short: (great ? "all stats +10" : "all stats +3 (" + (3 - songs) + " more song" + (3 - songs === 1 ? "" : "s") + " for +10)") + ", +" + sp + " SP so far, token cap to " + cap
         });
       } else {
-        const n = songsLearned(Object.assign({}, state, { turn: Math.max(t, GL_DEBUT_SONG) }));
+        const n = concertGoal(state).count;
         out.push({
           turn: L, label: "Grand Live: GIRLS' LEGEND U", status: st,
-          gain: "All stats +10 and Friendship +10% (both versions). With 18+ songs before it (Make Debut! counts) you get the special version and the scenario's gold skill, I Wanna Win with You; otherwise the white Halfway to a Dream. Like the Promo Lives it should pay SP per lesson.",
-          sofar: sofar + n + " of 18 songs" + (n >= 18 ? ": special version unlocked." : "."),
-          short: "all stats +10, Friendship +10%; " + n + " of 18 songs for the special version and the gold skill",
-          stats: 10
+          gain: "Concert reward: all stats +10 with full Hype, +3 otherwise; 25 SP per song and 5 per technique this period. GIRLS' LEGEND U activates Friendship +10% after this concert. The guaranteed special version requires 18 songs by the end of turn 71, counting Make Debut! and excluding GIRLS' LEGEND U.",
+          sofar: sofar + n + " of 18 songs by turn 71; " + songs + " this period, +" + sp + " SP" + (n >= 18 ? "; guaranteed special version." : "; below the guaranteed threshold."),
+          short: "all stats +" + (great ? 10 : 3) + ", +" + sp + " SP so far; Friendship +10% activates after the concert",
+          stats: great ? 10 : 3, sp
         });
       }
     });
+    out.push({ turn: GL_SPECIAL_DEADLINE, label: "GIRLS' LEGEND U learned / special-concert deadline", gain: "After this turn: all stats +10; Friendship +10% waits for the final concert. Learn 18 songs by this command's end to guarantee the special version. Make Debut! counts; GIRLS' LEGEND U does not.", short: "all stats +10; last command for the 18-song guarantee", stats: 10, status: status(GL_SPECIAL_DEADLINE) });
     const nL = songsLearned(Object.assign({}, state, { turn: Math.max(t, GL_DEBUT_SONG) }));
     out.push({ turn: 69, label: "Lyrics event", gain: "With 16+ songs: pick a lyrics line for a skill hint (gold if it's a scenario-link character you're using).", sofar: "So far: " + nL + " of 16 songs.", short: "a skill hint with 16+ songs (you have " + nL + ")", status: status(69) });
     return out.sort((a, b) => a.turn - b.turn);
   }
 
   // ---- Grand Concert song plan (CM ace guide, with 5 songs in year one) ----
-  // Year one, before the 1st Promo Live: buy 5 songs, do 2 more technique lessons so the 6th
-  // shows up, and carry it over (buy it right after the live: it counts for the next live and
-  // saves a lesson). Every half year after: the carried song, 1 lesson, a song, 2 lessons, a
-  // song, 2 lessons, carry over. Before the Grand Live there's nothing to carry into, so that
-  // 4th song is bought too, for 18 songs (the special GIRLS' LEGEND U).
+  // The guide's five-song Junior target and three-song intermediate targets
+  // are heuristics. Carries are credited only when observed. The final target
+  // catches up to 18 including Make Debut!, by the end of turn 71.
   // Steps: technique lessons before each song this half (the game's lesson pattern).
   const GL_FOCUS = { 1: ["yumewo", "growup"], 2: ["yumewo", "growup"], 3: ["daisuki", "fanfare"], 4: ["daisuki", "fanfare"] };
   // Technique lessons (uma.guide): the usual Stat or Skill Points technique each half year:
@@ -1201,9 +1209,17 @@
   ];
   // Technique lessons the song plan takes each half year: year one 1+2+3+4+4 for 5 songs and 2
   // more so the 6th shows; then 1+2 after the carried song and 2 more for the next carry; the
-  // last half 1+2+2.
-  const GL_STEPS = (p, n) => (p === 0 ? [1, 2, 3, 4, 4] : p === n - 1 ? [0, 1, 2, 2] : [0, 1, 2]);
-  const GL_CARRY = (p, n) => (p === n - 1 ? null : 2);
+  // healthy final half needs 1+2 after its carry, reaching 17 paid songs.
+  function techniquesToSong(period, songIndex) {
+    const first = period === 0 ? [1, 2, 3] : [2, 2, 2];
+    const loop = period === 0 ? [4, 4, 2, 2] : period === 4 ? [4, 3, 2, 2] : [4, 5, 2, 2];
+    return songIndex < first.length ? first[songIndex] : loop[(songIndex - first.length) % loop.length];
+  }
+  function songSteps(period, count, carried) {
+    return Array.from({ length: count }, (_, i) => carried
+      ? i === 0 ? 0 : techniquesToSong(period, i - 1) - (i === 1 ? 1 : 0)
+      : techniquesToSong(period, i));
+  }
   const GL_AVOID = { 0: ["ringring", "nigekiri"] };
   function glPeriod(sc, turn) {
     const i = sc.lives.findIndex((l) => turn <= l);
@@ -1213,23 +1229,33 @@
     if (!sc.songs || state.turn < 5) return null;
     const p = glPeriod(sc, state.turn);
     const last = p === sc.lives.length - 1;
-    const steps = GL_STEPS(p, sc.lives.length);
-    const carry = GL_CARRY(p, sc.lives.length);
-    const cum = steps.reduce((a, x) => a.concat([(a.length ? a[a.length - 1] : 0) + x]), []);
-    const learned = (state.gl && state.gl.songs) || {};
+    const gl = state.gl || {};
+    const learned = gl.songs || {};
     const bought = Object.values(learned).filter((t) => glPeriod(sc, t) === p && t >= 5).length;
-    const lessons = ((state.gl && state.gl.lessons) || {})[p] || 0;
     const live = sc.lives[p];
+    const carried = p > 0 && (!!(gl.carriedPeriods || {})[p] || (gl.carry && gl.carry.period === p && gl.carry.songs.length > 0));
+    const before = songsLearned(state, p ? sc.lives[p - 1] : 4);
+    const target = last ? Math.max(3, GL_SONG_GOAL - before) : p === 0 ? 5 : 3;
+    const steps = songSteps(p, Math.max(target, bought), carried);
+    const carry = last ? null : techniquesToSong(p, Math.max(target, bought) - (carried ? 1 : 0));
+    const cum = steps.reduce((a, x) => a.concat([(a.length ? a[a.length - 1] : 0) + x]), []);
+    const recordedLessons = (gl.lessons || {})[p] || 0;
+    // Bought songs prove the preceding lessons happened even in older saves.
+    // A currently shown song also proves its unlock techniques are complete.
+    const shown = Object.keys(gl.shop || {}).some((id) => id.startsWith("song:") && learned[id.slice(5)] == null && sc.songs.some((s) => s.id === id.slice(5) && s.from <= state.turn));
+    const proved = bought ? cum[bought - 1] : 0;
+    const offered = shown ? bought < target ? cum[bought] : cum[cum.length - 1] + (carry || 0) : 0;
+    const lessons = Math.max(recordedLessons, proved, offered);
     const tech = GL_TECH[Math.min(p, GL_TECH.length - 1)];
-    const plan = { period: p, target: steps.length, bought, lessons, live, last, focus: GL_FOCUS[p] || [], avoid: GL_AVOID[p] || [], techCost: tech.cost };
+    const plan = { period: p, target, bought, lessons, recordedLessons, live, last, carried: !!carried, focus: GL_FOCUS[p] || [], avoid: GL_AVOID[p] || [], techCost: tech.cost };
     // Techniques still to buy this half: to the last song, plus the carry-over's.
     plan.techLeft = Math.max(0, cum[cum.length - 1] + (carry || 0) - lessons);
     // The step comes from the songs you've bought (the game's technique count is easy to lose
     // track of): songs to buy this half, then hold the next one for after the live.
     plan.techNow = bought < steps.length ? Math.max(0, cum[bought] - lessons) : carry != null ? Math.max(0, cum[cum.length - 1] + carry - lessons) : 0;
-    if (bought < steps.length) {
+    if (bought < target) {
       plan.step = "song";
-      plan.text = p > 0 && bought === 0
+      plan.text = carried && bought === 0
         ? "Buy the song you carried over first (it saves a lesson), then " + (steps.length - 1) + " more this half."
         : "Buy song " + (bought + 1) + " of " + steps.length + " this half: buy techniques until songs show in your shop, then the most important one.";
     } else if (carry != null) {
@@ -1237,26 +1263,47 @@
       plan.text = "This half's " + steps.length + " songs are bought. Buy techniques until the next song shows, then hold it: buy it right after the live on turn " + live + " (it counts for the next live and saves a lesson). Spare tokens go to stat techniques.";
     } else {
       plan.step = "done";
-      plan.text = "Plan done: 18 songs for the special GIRLS' LEGEND U. Spare tokens go to stat techniques; extra songs still help.";
+      plan.text = "Period plan done. " + (concertGoal(state).left ? concertGoal(state).left + " more songs still needed for the special concert." : "18-song requirement reached (Make Debut! counts).") + " Spare tokens can fund useful techniques or extra songs.";
+    }
+    if (state.turn > GL_SPECIAL_DEADLINE) {
+      plan.step = "done"; plan.techLeft = 0; plan.techNow = 0;
+      plan.text = "The special-concert deadline was turn 71: " + concertGoal(state).count + " of 18 songs by then. Extra lessons still give their immediate rewards.";
     }
     return plan;
   }
 
   // What a song's bonus is worth over the turns left after you buy it (weighted stat points).
-  function songBaseValue(song, build, left) {
+  function songBaseValue(song, build, left, liveLeft) {
     let v = 0;
     Object.entries(song.extra || {}).forEach(([k, n]) => { v += k === "sp" ? n * SP_VALUE * left * 0.75 : n * build.w[k] * left * 0.2; });
     Object.entries(song.once || {}).forEach(([k, n]) => { v += k === "sp" ? n * SP_VALUE : n * build.w[k]; });
     // Friendship %: about 45% of the remaining turns are friendship trainings worth ~30 weighted stats.
-    if (song.fb) v += (song.fb / 100) * 0.45 * left * 30 * build.w.speed * 0.75;
+    if (song.fb) v += (song.fb / 100) * 0.45 * liveLeft * 30 * build.w.speed * 0.75;
+    if (/Specialty/.test(song.live || "")) v += liveLeft * 0.2;
     return v;
+  }
+  function concertSongValue(song, w, turn, sc) {
+    const next = sc.lives.find((l) => l >= turn);
+    return songBaseValue(song, { w }, Math.max(0, sc.totalTurns - turn), next == null ? 0 : Math.max(0, sc.totalTurns - next));
+  }
+  // Compare the value lost by deferring this same song with the estimated value
+  // of the one technique a carry saves in the next period. This is a transparent
+  // heuristic, not a solved shop policy or a measured probability.
+  function shouldCarrySong(song, w, turn, sc) {
+    const live = sc.lives.find((l) => l >= turn);
+    if (live == null || live === sc.lives[sc.lives.length - 1]) return false;
+    const delayed = concertSongValue(song, w, turn, sc) - concertSongValue(song, w, live + 1, sc);
+    const tier = GL_TECH[Math.min(glPeriod(sc, live + 1), GL_TECH.length - 1)];
+    const top = STATS.map((k) => w[k]).sort((a, b) => b - a);
+    const saved = tier.n * 0.8 * (top[0] + top[1]) / 2 + 5 * SP_VALUE;
+    return delayed <= saved;
   }
 
   // How much a song matters for this run: its bonus over the turns left once you can buy it,
   // at your stat weights, with the song plan's picks first and its skips last.
   function songImportance(song, state, sc, w) {
     const at = Math.max(state.turn, song.from);
-    let v = songBaseValue(song, { w }, Math.max(0, sc.totalTurns - at));
+    let v = concertSongValue(song, w, at, sc);
     const p = glPeriod(sc, at);
     if ((GL_FOCUS[p] || []).indexOf(song.id) !== -1) v *= 1.6;
     if ((GL_AVOID[p] || []).indexOf(song.id) !== -1) v *= 0.3;
@@ -1271,12 +1318,11 @@
   const GL_SONG_GOAL = 18;
   const AIM_W = [1, 0.7, 0.5, 0.35, 0.25];
   function tokenPlan(state, sc) {
-    if (!sc.songs || !sc.tokenOf || state.turn > 72) return null;
+    if (!sc.songs || !sc.tokenOf || state.turn > sc.totalTurns) return null;
     const learned = (state.gl && state.gl.songs) || {};
     const have = ((state.gl && state.gl.tokens) || [0, 0, 0, 0, 0]).slice();
     const w = statWeights(state);
-    const nLearned = Object.keys(learned).length;
-    const toBuy = Math.max(0, GL_SONG_GOAL - nLearned);
+    const toBuy = state.turn > GL_SPECIAL_DEADLINE ? 0 : concertGoal(state).left;
     const picked = sc.songs.filter((song) => learned[song.id] == null && song.from <= 72).map((song) => ({
       song, v: songImportance(song, state, sc, w), cost: song.cost.reduce((a, b) => a + b, 0), now: song.from <= state.turn
     })).sort((a, b) => b.v - a.v).slice(0, toBuy);
@@ -1295,7 +1341,9 @@
     const sp = songPlan(state, sc);
     const p0 = glPeriod(sc, state.turn);
     const nL = sc.lives.length;
-    const techCount = (p) => GL_STEPS(p, nL).reduce((a, b) => a + b, 0) + (GL_CARRY(p, nL) || 0);
+    // Future periods assume the planned carry succeeds. This period only credits
+    // a carry actually observed at the preceding concert.
+    const techCount = (p) => songSteps(p, 3, true).reduce((a, b) => a + b, 0) + (p === nL - 1 ? 0 : 2);
     let techAll = 0;
     let techTokens = 0;
     for (let p = p0; p < nL; p++) {
@@ -1307,7 +1355,7 @@
     // facilities like your stat weights, with ~2.5 cards each ((9 + level) x 1.15^2.5, 5 + level
     // for Wit), the main type 60% of the time, the second 30%, and about 40% friendship trainings
     // that add a second type (very likely your scarcest).
-    const turnsLeft = Math.max(0, 72 - state.turn);
+    const turnsLeft = Math.max(0, GL_SPECIAL_DEADLINE - state.turn + 1);
     const wsum = STATS.reduce((a, k) => a + w[k], 0);
     const supplyTo = (turns) => {
       const out = [0, 0, 0, 0, 0];
@@ -1345,7 +1393,7 @@
       const avail = queue.filter((x) => x.now).slice(0, songsLeft);
       const songTokens = avail.reduce((a, x) => a + x.cost, 0) + Math.max(0, songsLeft - avail.length) * 42;
       const techTok = sp.techLeft * sp.techCost;
-      const toLive = Math.max(0, sp.live - state.turn);
+      const toLive = Math.max(0, (sp.last ? GL_SPECIAL_DEADLINE : sp.live) - state.turn + 1);
       const hs = supplyTo(toLive);
       const supplyHalf = hs.out.reduce((a, b) => a + b, 0) + hs.extra;
       const haveSum = have.reduce((a, b) => a + b, 0);
@@ -1363,10 +1411,9 @@
     const learned = (state.gl && state.gl.songs) || {};
     const tokens = (state.gl && state.gl.tokens) || [0, 0, 0, 0, 0];
     const build = { w: statWeights(state) };
-    const left = Math.max(0, sc.totalTurns - state.turn);
     const hype = hypeStatus(state, sc);
     return sc.songs.filter((song) => learned[song.id] == null && song.from <= state.turn).map((song) => {
-      let v = songBaseValue(song, build, left);
+      let v = concertSongValue(song, build.w, state.turn, sc);
       if (hype && hype.need > 0) v += 25;
       // The plan's picks: the SP songs in year two, the +10% friendship songs in year three; skip
       // the +Stamina and +Guts songs in year one.
@@ -1390,7 +1437,7 @@
     return 0.8 * plan.tech.n * (top[0] + top[1]) / 2;
   }
   function techTokenUnit(plan, ctx) {
-    return (techStatValue(plan, ctx) + 5 * SP_VALUE) / plan.tech.cost;
+    return (techStatValue(plan, ctx) + (ctx.sc.lives.some((l) => l >= ctx.state.turn) ? 5 * SP_VALUE : 0)) / plan.tech.cost;
   }
   // Technique lessons you can buy now without touching the tokens the next song in your token
   // aim needs (types are approximate: the shop's offers decide them).
@@ -1441,8 +1488,13 @@
   function techCostOf(t, type) {
     if (t.cost) return t.cost.slice();
     const c = [0, 0, 0, 0, 0];
-    if (type != null && type !== "") c[+type] = t.any;
+    if (type != null && type !== "" && Number.isInteger(+type) && +type >= 0 && +type < 5) c[+type] = t.any;
     return c;
+  }
+  function offeredTechnique(state, sc, id) {
+    const offer = ((state.gl && state.gl.shop) || {})[id];
+    const at = offer && Number.isInteger(offer.turn) && offer.turn >= 5 && offer.turn <= state.turn ? offer.turn : state.turn;
+    return techniqueList({ turn: at }, sc).find((t) => t.id === id);
   }
   // Each technique's worth: its stats, SP, energy (what it saves you later) or hint (about 10 SP a
   // level), plus the 5 SP it pays at the next live, less what its tokens are worth. A random-type
@@ -1458,10 +1510,13 @@
     const shop = (state.gl && state.gl.shop) || {};
     const have = plan.have;
     const rank = STATS.slice().sort((a, b) => ctx.w[b] * (ctx.need ? ctx.need[b] : 1) - ctx.w[a] * (ctx.need ? ctx.need[a] : 1));
-    const items = list.map((t) => {
+    const items = list.map((current) => {
+      const t = offeredTechnique(state, sc, current.id) || current;
       const offer = shop[t.id];
-      const type = offer && offer.type != null && offer.type !== "" ? +offer.type : null;
-      let value = 5 * SP_VALUE;
+      const typed = offer && offer.type != null && offer.type !== "" ? +offer.type : null;
+      const type = Number.isInteger(typed) && typed >= 0 && typed < 5 ? typed : null;
+      const needsType = !!(t.any && offer && type == null);
+      let value = sc.lives.some((l) => l >= state.turn) ? 5 * SP_VALUE : 0;
       const why = [];
       Object.entries(t.gain || {}).forEach(([k, n]) => { value += ctx.gainValue(k, n); });
       if (t.gain) why.push(Object.keys(t.gain).map((k) => L_RANK(rank.indexOf(k)) + " stat").join(" and "));
@@ -1477,8 +1532,9 @@
       if (t.any && type == null) costV = t.any * avgPrice;
       c.forEach((n, i) => { if (n && prices[i].why) why.push(prices[i].why === "cap" ? "spends " + sc.tokens[i] + " (near the cap)" : "uses " + sc.tokens[i] + " your next songs need"); });
       const short = c.map((n, i) => Math.max(0, n - (have[i] || 0)));
-      const afford = t.any && type == null ? Math.max.apply(null, have) >= t.any : short.every((n) => !n);
-      return Object.assign({}, t, { value, costV, net: value - costV, afford, short, offered: !!offer, type, why: why.filter(Boolean) });
+      const afford = !needsType && (t.any && type == null ? Math.max.apply(null, have) >= t.any : short.every((n) => !n));
+      if (needsType) why.push("choose the Performance type shown in your shop");
+      return Object.assign({}, t, { value, costV, net: value - costV, afford, short, offered: !!offer, type, needsType, why: why.filter(Boolean) });
     }).sort((a, b) => b.net - a.net);
     const offered = items.filter((x) => x.offered);
     const pool = (offered.length ? offered : items).filter((x) => x.afford);
@@ -1498,7 +1554,7 @@
     const phase = !plan || plan.step === "song" ? "songs" : plan.step === "hold" ? "hold" : "stats";
     const have = r.plan.have;
     const nextSong = r.songs.find((x) => x.offered) || r.songs.find((x) => x.aim < Infinity);
-    const reserve = nextSong ? nextSong.song.cost.slice() : [0, 0, 0, 0, 0];
+    const reserve = phase !== "stats" && nextSong ? nextSong.song.cost.slice() : [0, 0, 0, 0, 0];
     const total = (t) => techCostOf(t, t.type).reduce((a, b) => a + b, 0) || t.any || 0;
     r.items.forEach((t) => {
       const c = techCostOf(t, t.type);
@@ -1519,11 +1575,19 @@
     const offeredTechs = techs.filter((t) => t.offered && t.afford);
     // A technique that eats into the next song's tokens only while no song is showing (you need
     // techniques to see songs); once songs are bought, only from spare tokens.
-    const okTech = (t) => t.keeps || (phase === "songs" && !r.songsOffered);
+    const okTech = (t) => (t.keeps || (phase === "songs" && !r.songsOffered)) && (phase !== "stats" || t.net > 0);
     let pick = null;
-    const song = r.songs.find((x) => x.offered && x.afford);
+    let song = r.songs.find((x) => x.offered && x.afford);
     const shownSong = r.songs.find((x) => x.offered);
-    if (shownSong && phase === "hold") pick = { kind: "hold", item: shownSong };
+    if (phase === "stats") {
+      const prices = tokenPrices(r.plan, r.ctx);
+      const liveSP = sc.lives.some((l) => l >= state.turn) ? 25 * SP_VALUE : 0;
+      r.songs.forEach((x) => { x.net = concertSongValue(x.song, r.ctx.w, state.turn, sc) + liveSP - x.song.cost.reduce((n, c, i) => n + c * prices[i].price, 0); });
+      song = r.songs.filter((x) => x.offered && x.afford && x.net > 0).sort((a, b) => b.net - a.net)[0];
+      const tech = offeredTechs.find((t) => t.kind !== "energy" && okTech(t));
+      if (song && (!tech || song.net > tech.net)) pick = { kind: "song", item: song };
+      else if (tech) pick = { kind: "tech", item: tech };
+    } else if (shownSong && phase === "hold" && (!song || shouldCarrySong(song.song, r.ctx.w, state.turn, sc))) pick = { kind: "hold", item: song || shownSong };
     else if (song) pick = { kind: "song", item: song };
     if (!pick || pick.kind === "hold") {
       const t = offeredTechs.find((x) => x.kind !== "energy" && okTech(x));
@@ -1555,48 +1619,71 @@
   // Learning a song from the shop: its cost, marked learned this turn, and the shop's ticks clear
   // (it shows new lessons). lastBuy undoes it.
   function buySong(state, sc, songId) {
-    const song = sc.songs.find((x) => x.id === songId);
-    if (!song) return state;
+    const song = (sc.songs || []).find((x) => x.id === songId);
+    const old = state.gl || {};
+    const have = old.tokens || [0, 0, 0, 0, 0];
+    if (!song || state.turn < song.from || state.turn > sc.totalTurns || (old.songs || {})[songId] != null || !canPay(have, song.cost)) return state;
     state.gl = state.gl || { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} };
     const gl = state.gl;
-    const before = { tokens: gl.tokens.slice(), lessons: Object.assign({}, gl.lessons), songs: Object.assign({}, gl.songs), stats: Object.assign({}, state.stats), energy: state.energy, shop: Object.assign({}, gl.shop) };
-    gl.tokens = gl.tokens.map((n, i) => Math.max(0, n - song.cost[i]));
+    const before = purchaseState(state);
+    gl.tokens = have.map((n, i) => n - song.cost[i]);
     gl.songs = Object.assign({}, gl.songs, { [song.id]: state.turn });
+    if (state.trackStats && state.stats) Object.entries(song.once || {}).forEach(([k, n]) => { if (STATS.includes(k) && state.stats[k] > 0) state.stats[k] += n; });
+    const p = glPeriod(sc, state.turn);
+    if (!Object.values(old.songs || {}).some((t) => t < state.turn && glPeriod(sc, t) === p) && gl.carry && gl.carry.period === p && gl.carry.songs.includes(song.id)) {
+      gl.carriedPeriods = Object.assign({}, gl.carriedPeriods, { [p]: true });
+    }
+    delete gl.carry;
     gl.shop = {};
-    gl.lastBuy = { id: "song:" + song.id, label: song.name, turn: state.turn, before };
+    gl.lastBuy = { id: "song:" + song.id, label: song.name, turn: state.turn, before, after: JSON.stringify(purchaseState(state)), sp: (song.once || {}).sp || 0 };
     return state;
   }
   const L_RANK = (i) => ["your top", "your 2nd", "your 3rd", "your 4th", "your 5th"][i] || "a";
-  // Buying a technique: its tokens (a random-type cost comes off the type you set, else your
-  // biggest pile), a lesson toward the next song, its stats (when the coach tracks them) and
+  // Buying a technique: its tokens (a random-type cost requires the actual shown
+  // type), a lesson toward the next song, its stats (when the coach tracks them) and
   // energy. The shop shows 3 new offers after a buy, so the ticks clear. lastBuy undoes it.
   function buyTechnique(state, sc, id, type) {
-    const t = techniqueList(state, sc).find((x) => x.id === id);
+    const t = offeredTechnique(state, sc, id);
     if (!t) return state;
+    const old = state.gl || {};
+    const offer = (old.shop || {})[id];
+    const chosenType = type != null && type !== "" ? +type : offer && offer.type != null && offer.type !== "" ? +offer.type : null;
+    if (t.any && !(Number.isInteger(chosenType) && chosenType >= 0 && chosenType < 5)) return state;
+    const c = techCostOf(t, chosenType);
+    if (!canPay(old.tokens || [], c)) return state;
     state.gl = state.gl || { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} };
     const gl = state.gl;
-    const before = { tokens: gl.tokens.slice(), lessons: Object.assign({}, gl.lessons), stats: Object.assign({}, state.stats), energy: state.energy, shop: Object.assign({}, gl.shop) };
-    const big = gl.tokens.indexOf(Math.max.apply(null, gl.tokens));
-    const c = techCostOf(t, type != null && type !== "" ? type : t.any ? big : null);
-    gl.tokens = gl.tokens.map((n, i) => Math.max(0, n - c[i]));
+    const before = purchaseState(state);
+    gl.tokens = gl.tokens.map((n, i) => n - c[i]);
     const p = glPeriod(sc, state.turn);
     gl.lessons = gl.lessons || {};
     gl.lessons[p] = (gl.lessons[p] || 0) + 1;
     if (state.trackStats && state.stats) Object.entries(t.gain || {}).forEach(([k, n]) => { if (state.stats[k] > 0) state.stats[k] = Math.round(state.stats[k] + n); });
     if (t.energy) state.energy = clamp(Math.round(state.energy + t.energy), 0, state.maxEnergy || 100);
+    delete gl.carry;
     gl.shop = {};
-    gl.lastBuy = { id, label: t.label, turn: state.turn, before };
+    gl.lastBuy = { id, label: t.label, turn: state.turn, before, after: JSON.stringify(purchaseState(state)), sp: t.sp || 0 };
     return state;
+  }
+  function canPay(have, cost) {
+    return have.length === 5 && cost.length === 5 && cost.every((n, i) => Number.isFinite(have[i]) && have[i] >= 0 && Number.isFinite(n) && n >= 0 && have[i] >= n);
+  }
+  function purchaseState(state) {
+    const gl = state.gl || {};
+    return JSON.parse(JSON.stringify({ turn: state.turn, tokens: gl.tokens || [], lessons: gl.lessons || {}, songs: gl.songs || {}, stats: state.stats || {}, energy: state.energy, shop: gl.shop || {}, carry: gl.carry || null, carriedPeriods: gl.carriedPeriods || {} }));
   }
   function undoBuy(state) {
     const b = state.gl && state.gl.lastBuy;
     if (!b) return state;
+    if (b.turn !== state.turn || !b.after || JSON.stringify(purchaseState(state)) !== b.after) return state;
     state.gl.tokens = b.before.tokens;
     state.gl.lessons = b.before.lessons;
     if (b.before.songs) state.gl.songs = b.before.songs;
     state.gl.shop = b.before.shop || {};
     if (b.before.stats) state.stats = b.before.stats;
     if (b.before.energy != null) state.energy = b.before.energy;
+    if (b.before.carry) state.gl.carry = b.before.carry; else delete state.gl.carry;
+    state.gl.carriedPeriods = b.before.carriedPeriods || {};
     delete state.gl.lastBuy;
     return state;
   }
@@ -1609,7 +1696,7 @@
   function songTokenValue(f, ctx) {
     const st = ctx.state;
     const sc = ctx.sc;
-    if (!sc.songs || !sc.tokenOf || st.turn < 5 || st.turn > 72) return null;
+    if (!sc.songs || !sc.tokenOf || st.turn < 5 || st.turn > sc.totalTurns) return null;
     const plan = tokenPlan(st, sc);
     if (!plan) return null;
     const shorts = plan.queue.map((x) => x.short.slice());
@@ -2226,7 +2313,7 @@
     return options.filter((o) => o.kind === "train").sort((a, b) => b.value - a.value)[0];
   }
 
-  function evaluate(state, sc) {
+  function evaluate(state, sc, deferOpening = false) {
     const ctx = makeCtx(state, sc);
     const hook = HOOKS[sc.hook] || {};
     const { typ, E } = ctx;
@@ -2341,7 +2428,7 @@
       hook.items(ctx, options);
       options.sort((a, b) => b.value - a.value);
     }
-    applyOpening(ctx, options);
+    if (!deferOpening) applyOpening(ctx, options);
     return { options, ctx };
   }
 
@@ -2428,6 +2515,8 @@
       });
     }
     const s = JSON.parse(JSON.stringify(state));
+    const hook = HOOKS[scenario.hook] || {};
+    if (hook.beforeTurn && hook.beforeTurn(s, scenario, option) === false) return state;
     // An outing that raises max energy (Light Hello's first: +4) counts before the energy it gives.
     if (option.maxEnergyDelta) s.maxEnergy = (s.maxEnergy || 100) + option.maxEnergyDelta;
     const maxE = s.maxEnergy || 100;
@@ -2453,7 +2542,6 @@
       if (k === "badCondition" || k === "practicePoor") s[k] = v;
       else s.extras[k] = typeof v === "function" ? v(s.extras[k]) : v;
     });
-    const hook = HOOKS[scenario.hook] || {};
     if (hook.afterTurn && !fr) hook.afterTurn(s, option, scenario);
     if (hook.endOfTurn) hook.endOfTurn(s, scenario, option);
     // Deck bonds: +7 for every card that trained with you this turn.
@@ -2714,6 +2802,22 @@
     },
 
     grandlive: {
+      // Lessons named before the action are paid from the balance before that
+      // action. A failed training never refunds a lesson already bought.
+      beforeTurn(s, sc, option) {
+        if (!option.song && !option.tech) return true;
+        const before = s.gl && s.gl.lastBuy;
+        if (option.song) buySong(s, sc, option.song.id);
+        if (option.tech) {
+          const energy = s.energy;
+          buyTechnique(s, sc, option.tech.id, option.tech.type);
+          // withEnergy already includes this recovery in the action's delta.
+          s.energy = energy;
+        }
+        if (!s.gl || s.gl.lastBuy === before) return false;
+        delete s.gl.lastBuy;
+        return true;
+      },
       // Turns 5-11 (to the debut): favour the cards closest to friendship, so one or two rainbow
       // as soon as possible instead of spreading bond around. (Light Hello's first training is
       // the opening's chase rule.)
@@ -2747,25 +2851,20 @@
       // fails (lessons don't use the turn); an Energy technique's energy is already in the turn.
       endOfTurn(s, sc, option) {
         s.gl = s.gl || { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} };
-        if (option && option.song) {
-          buySong(s, sc, option.song.id);
-          delete s.gl.lastBuy;
-        }
-        if (option && option.tech) {
-          const e = s.energy;
-          buyTechnique(s, sc, option.tech.id, option.tech.type);
-          s.energy = e;
-          delete s.gl.lastBuy;
-        }
         if (s.turn === GL_DEBUT_SONG - 1) {
           const cap = tokenCap(Object.assign({}, s, { turn: GL_DEBUT_SONG }), sc);
           s.gl.tokens = s.gl.tokens.map((n) => Math.min(cap, (n || 0) + 10));
         }
         const li = sc.lives.indexOf(s.turn);
-        if (li !== -1 && s.trackStats && s.stats) {
+        if ((li !== -1 || s.turn === GL_SPECIAL_DEADLINE) && s.trackStats && s.stats) {
           const r = glRewards(s, sc).find((x) => x.turn === s.turn && x.stats);
           const add = r ? r.stats : 0;
           STATS.forEach((k) => { if (s.stats[k] > 0) s.stats[k] = Math.round(s.stats[k] + add); });
+        }
+        if (li !== -1) {
+          Object.values(s.gl.shop || {}).forEach((offer) => { if (offer.turn == null) offer.turn = s.turn; });
+          const songs = Object.keys(s.gl.shop || {}).filter((id) => id.startsWith("song:")).map((id) => id.slice(5)).filter((id) => (s.gl.songs || {})[id] == null);
+          s.gl.carry = { period: li + 1, songs };
         }
       },
       items(ctx, options) {
@@ -2776,20 +2875,23 @@
         // An Energy technique in your shop: buy it and train instead of resting. Its energy is
         // scored on the training; the rest of its worth (the live's SP) less its tokens is the
         // item's.
-        const energyOffer = shop && shop.items.filter((t) => t.offered && t.kind === "energy" && t.afford).sort((a, b) => b.energy - a.energy)[0];
-        if (energyOffer && ctx.E < ctx.maxE - 10) {
-          const top = options.filter((o) => o.kind === "train").sort((a, b) => b.raw - a.raw)[0];
-          if (top) {
+        const energyOffers = shop ? shop.items.filter((t) => t.offered && t.kind === "energy" && t.afford) : [];
+        const trainsBeforeRecovery = options.filter((o) => o.kind === "train");
+        for (const energyOffer of energyOffers) if (ctx.E < ctx.maxE) {
+          const candidates = trainsBeforeRecovery.map((top) => {
             const e2 = Math.min(ctx.maxE, ctx.E + energyOffer.energy);
             const v = withEnergy(top, ctx, e2);
-            useOn(v, ctx, "Buy the " + energyOffer.label + " technique (" + costText(energyOffer) + ", no turn used)", 5 * SP_VALUE - energyOffer.costV,
+            useOn(v, ctx, "Buy the " + energyOffer.label + " technique (" + costText(energyOffer) + ", no turn used)", (ctx.sc.lives.some((l) => l >= ctx.state.turn) ? 5 * SP_VALUE : 0) - energyOffer.costV,
               "energy " + ctx.E + " → " + e2 + " before training; it counts as a technique lesson toward your next song");
             v.tech = { id: energyOffer.id, type: energyOffer.type };
-            options.push(v);
+            return v;
+          }).sort((a, b) => b.value - a.value);
+          if (candidates.length) {
+            options.push(candidates[0]);
             options.sort((a, b) => b.value - a.value);
           }
         }
-        const best = options[0];
+        let best = options[0];
         if (!best) return;
         const hype = hypeStatus(ctx.state, ctx.sc);
         // Songs first: the most important song your shop shows that you can afford (or hold it
@@ -2800,11 +2902,18 @@
         const songCost = (song) => song.cost.map((n, i) => (n ? n + " " + ctx.sc.tokens[i] : "")).filter(Boolean).join(" + ");
         const nearCap = aim && aim.have.some((h) => h >= aim.cap - 15);
         if (pk && pk.kind === "song" && !best.tech) {
+          // Mastery affects this command too. Re-evaluate after the purchase;
+          // the cleared shop prevents another concrete purchase in this pass.
+          const after = JSON.parse(JSON.stringify(ctx.state));
+          buySong(after, ctx.sc, pk.item.song.id);
+          const revised = evaluate(after, ctx.sc, true).options;
+          options.splice(0, options.length, ...revised);
+          best = options[0];
           best.prefix.unshift("Learn " + pk.item.song.name + " (" + songCost(pk.item.song) + ", no turn used)");
-          best.notes.push("songs first: the most important song in your shop you can afford" + (pk.item.why.length ? " (" + pk.item.why.join(", ") + ")" : ""));
+          best.notes.push((ls.phase === "hold" ? "buy before this concert to activate the valuable bonus sooner" : ls.phase === "stats" ? "the remaining song benefits are worth its Performance cost" : "songs first: the most important song in your shop you can afford") + (pk.item.why.length ? " (" + pk.item.why.join(", ") + ")" : ""));
           best.song = { id: pk.item.song.id };
         } else if (pk && pk.kind === "hold") {
-          best.notes.push("hold " + pk.item.song.name + ": buy it right after the live on turn " + ls.songPlan.live + ", so it counts for the next live");
+          best.notes.push("hold " + pk.item.song.name + ": buy it on turn " + (ls.songPlan.live + 1) + ", after the live, so it counts for the next live");
         }
         const tPick = pk && (pk.kind === "tech" ? pk.item : pk.tech);
         if (tPick && !best.tech && !best.song) {
@@ -2825,7 +2934,7 @@
           const full = aim.have.map((h, i) => [h, i]).filter(([h]) => h >= aim.cap - 15).map(([h, i]) => ctx.sc.tokens[i] + " " + h + "/" + aim.cap);
           if (full.length) best.notes.push(full.join(", ") + ": near the cap, spend it on technique lessons before it's wasted");
         }
-        if (!energyOffer && ctx.E < 50 && aim && Math.max.apply(null, aim.have) >= 25 && (best.kind === "rest" || best.kind === "recreation" || best.stat === "wit")) {
+        if (!energyOffers.length && ctx.E < 50 && aim && Math.max.apply(null, aim.have) >= 25 && (best.kind === "rest" || best.kind === "recreation" || best.stat === "wit")) {
           best.notes.push("if your shop offers an Energy technique, tick it in the Lesson shop: it's a technique lesson too and can beat resting");
         }
         const live = glRewards(ctx.state, ctx.sc).find((x) => x.turn === ctx.state.turn && x.sofar && x.stats);
@@ -3144,7 +3253,7 @@
     turnInfo, phaseFor, eventsFor, traineeGoals, autoGoalTurns, isGoalTurn, akikawaCheck, tokenPlan, cardEvents, rankEventChoices, eventText, dateCard, dateText, dateScale, scaleDate, gradeGoal, gradePlan, gradePlanText, runCheck, calibSamples, relearnCalib, careerMaxEnergy, statWeights, buildPriority, racesAt, expectedFans, fanPlan, fanPlanText, GRADE_KEY, GRADE_LABEL, isCamp, campTurns, recommend, evaluate, advance, undo,
     estimateFail, estimateGain, calibFactor, typAt, forcedTurns, deckInfo, facLevelFor, scenarioBoost,
     capsFor, sparkUncap, trainedGain, needFactors, focusCards, focusWeight, turnsToDebut, applyOpening, NEW_YEAR,
-    songBonuses, hypeStatus, songsLearned, glRewards, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, lessonShop, buyTechnique, buySong, shopSongs, undoBuy, recordHelloEvent
+    songBonuses, hypeStatus, songsLearned, concertGoal, techniquesToSong, concertSongValue, shouldCarrySong, glRewards, songAdvice, songPlan, tokenGain, tokenCap, facilityRainbows, techniqueList, rankTechniques, lessonShop, buyTechnique, buySong, shopSongs, undoBuy, recordHelloEvent
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaEngine = api;

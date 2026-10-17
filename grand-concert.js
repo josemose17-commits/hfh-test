@@ -25,11 +25,7 @@
       songCountAtLyrics: null, songCountAtFinalDeadline: null, greatConcerts: 0
     };
     const cap = () => 200 + s.concerts * 50;
-    const required = () => {
-      const first = s.period === 0 ? [1, 2, 3] : [2, 2, 2];
-      const loop = s.period === 0 ? [4, 4, 2, 2] : s.period === 4 ? [4, 3, 2, 2] : [4, 5, 2, 2];
-      return s.cycleSongs < 3 ? first[s.cycleSongs] : loop[(s.cycleSongs - 3) % 4];
-    };
+    const required = () => E.techniquesToSong(s.period, s.cycleSongs);
     function add(type, amount) {
       s.earned[type] += amount;
       const credited = Math.max(0, Math.min(amount, cap() - s.tokens[type]));
@@ -71,12 +67,7 @@
     const affordable = (t) => t.cost.every((n, i) => n <= s.tokens[i]);
     const pay = (t) => t.cost.forEach((n, i) => { s.tokens[i] -= n; s.spent[i] += n; });
     function songValue(song, turn) {
-      const left = Math.max(0, 78 - turn);
-      let v = (song.fb || 0) * left * 0.15;
-      Object.entries(song.extra || {}).forEach(([k, n]) => { v += n * left * (k === "sp" ? 0.35 : ctx.w[k] * 0.25); });
-      Object.entries(song.once || {}).forEach(([k, n]) => { v += n * (k === "sp" ? 0.35 : ctx.w[k]); });
-      if (/Specialty/.test(song.live || "")) v += left * 0.2;
-      return v;
+      return E.concertSongValue(song, ctx.w, turn, sc);
     }
     // apply receives already-scaled event stats (not training gains), SP, energy.
     function shop(turn, energy, maxEnergy, apply, finalSpend) {
@@ -88,8 +79,8 @@
         if (offer.kind === "song") {
           // Carry an offered song over a concert, preserving the actual shop.
           const limit = s.period === 0 ? 5 : s.period === 4 ? 99 : 3;
-          if (s.periodSongs >= limit && s.period < 4 && !finalSpend) { s.held = true; return; }
           const pick = choices.sort((a, b) => songValue(b, turn) - songValue(a, turn))[0];
+          if (s.periodSongs >= limit && s.period < 4 && !finalSpend && E.shouldCarrySong(pick, ctx.w, turn, sc)) { s.held = true; return; }
           pay(pick);
           s.songs[pick.id] = turn;
           const gains = [0, 0, 0, 0, 0];
@@ -136,8 +127,9 @@
       if (great) s.greatConcerts++;
       s.friendship += s.pendingFriendship; s.pendingFriendship = 0;
       s.specialty += s.pendingSpecialty; s.pendingSpecialty = 0;
-      // A held shop survives; technique progression itself resets.
-      if (s.shop && s.shop.kind === "song") s.held = true; else s.shop = null;
+      // Every displayed offer survives, including its old technique tier/cost.
+      // Only the cadence resets; buying a carried song credits one technique.
+      s.held = !!(s.shop && s.shop.kind === "song");
       s.period++; s.concerts++; s.periodSongs = 0; s.periodTech = 0; s.techSince = 0; s.cycleSongs = 0;
     }
     function training(turn, stat, level, members, rainbows) {

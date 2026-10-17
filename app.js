@@ -521,15 +521,17 @@
       // Your shop: tick what it shows (and the type an any-type cost asks for).
       if (d.techOffer || d.techType) {
         state.gl.shop = state.gl.shop || {};
-        if (d.techOffer) { if (e.target.checked) state.gl.shop[d.techOffer] = state.gl.shop[d.techOffer] || {}; else delete state.gl.shop[d.techOffer]; }
-        if (d.techType) state.gl.shop[d.techType] = Object.assign({}, state.gl.shop[d.techType], { type: e.target.value === "" ? null : +e.target.value });
+        if (d.techOffer) { if (e.target.checked) state.gl.shop[d.techOffer] = state.gl.shop[d.techOffer] || { turn: state.turn }; else delete state.gl.shop[d.techOffer]; }
+        if (d.techType) state.gl.shop[d.techType] = Object.assign({ turn: state.turn }, state.gl.shop[d.techType], { type: e.target.value === "" ? null : +e.target.value });
         commit(true);
         return;
       }
       // Songs you have: add one you'd learned before (no tokens taken).
       if (e.target.id === "songAdd" && e.target.value) {
         const song = scenario().songs.find((x) => x.id === e.target.value);
-        state.gl.songs[song.id] = state.turn;
+        const at = +$("#songAddTurn").value;
+        if (!Number.isInteger(at) || at < song.from || at > state.turn) { flash("Choose the actual learned turn, from " + song.from + " through " + state.turn + "."); e.target.value = ""; return; }
+        state.gl.songs[song.id] = at;
         commit(true);
         flash("Added " + song.name + " to your songs");
       }
@@ -566,17 +568,21 @@
         e.preventDefault();
         const id = buy.dataset.techBuy;
         const offer = (state.gl.shop || {})[id];
+        const previous = state.gl.lastBuy;
         E.buyTechnique(state, scenario(), id, offer ? offer.type : null);
+        if (state.gl.lastBuy === previous) { flash("Purchase not recorded: check your Performance balance and choose the type shown in the shop."); return; }
         commit(true);
-        flash("Bought " + state.gl.lastBuy.label + ": tick your shop's new offers");
+        flash("Bought " + state.gl.lastBuy.label + (state.gl.lastBuy.sp ? "; +" + state.gl.lastBuy.sp + " SP in game" : "") + ": tick your shop's new offers");
         return;
       }
       const sbuy = e.target.closest("[data-song-buy]");
       if (sbuy) {
         e.preventDefault();
+        const previous = state.gl.lastBuy;
         E.buySong(state, scenario(), sbuy.dataset.songBuy);
+        if (state.gl.lastBuy === previous) { flash("Purchase not recorded: check your Performance balance and whether you already learned this song."); return; }
         commit(true);
-        flash("Learned " + state.gl.lastBuy.label + ": tick your shop's new offers");
+        flash("Learned " + state.gl.lastBuy.label + (state.gl.lastBuy.sp ? "; +" + state.gl.lastBuy.sp + " SP in game" : "") + ": tick your shop's new offers");
         return;
       }
       const rm = e.target.closest("[data-song-rm]");
@@ -589,7 +595,9 @@
       }
       if (e.target.closest("[data-tech-undo]")) {
         const label = state.gl.lastBuy && state.gl.lastBuy.label;
+        const previous = state.gl.lastBuy;
         E.undoBuy(state);
+        if (previous && state.gl.lastBuy === previous) { flash("Run changed since purchase: undo later actions first or correct balances manually."); return; }
         commit(true);
         flash("Undid " + (label || "the buy"));
       }
@@ -814,7 +822,9 @@
     state.example = false;
     const failed = option.kind === "train" ? failPick : "";
     const poor = !!failed && poorPick;
-    state = E.advance(state, scenario(), option, failed || undefined, { outing: outingPick });
+    const next = E.advance(state, scenario(), option, failed || undefined, { outing: outingPick });
+    if (next === state) { flash("The lesson can no longer be bought. Check your shop and Performance balance, then choose again."); return; }
+    state = next;
     if (poor) state.practicePoor = true;
     failPick = "";
     poorPick = false;
@@ -997,7 +1007,7 @@
     return `<details class="token-plan"><summary><b>Token plan</b>: ${p.songs.length} songs left to buy${worst.length ? ` · short on ${worst.join(", ")}` : " · tokens look fine"}</summary>
       <div class="table-wrap"><table class="tp"><thead><tr><th>Token</th><th>Songs left cost</th><th>You have</th><th>Training brings</th><th></th></tr></thead><tbody>${row}</tbody></table></div>
       <p class="mini">Technique lessons the song plan still needs: <b>${p.tech.left}</b> (~${Math.round(p.tech.tokens)} tokens of whatever types the shop asks for), on top of the songs above.</p>
-      <p class="mini">Songs left: the ${p.queue.length} that matter most for your stat priority (18 in all with the ones you've learned), including ones that unlock later. "Training brings" is a rough estimate to the Grand Live. Trainings that give the token types you're short of count for more, so the coach steers you toward buying them all.</p>
+      <p class="mini">Songs left: the ${p.queue.length} priority purchases toward 18 by turn 71. Make Debut! counts, so 17 shop songs meet that threshold. Future carries and token supply are estimates; this period credits a carry only when recorded.</p>
     </details>`;
   }
 
@@ -1031,6 +1041,7 @@
     const gl = state.gl;
     const hype = E.hypeStatus(state, sc);
     const learnedN = E.songsLearned(state);
+    const goal = E.concertGoal(state);
     const plan = E.songPlan(state, sc);
     const bon = E.songBonuses(state, sc);
     const extras = Object.entries(bon.extra).filter(([, v]) => v).map(([k, v]) => "+" + v + " " + (k === "sp" ? "SP" : E.STAT_LABELS[k])).join(", ");
@@ -1038,11 +1049,11 @@
     const status = [
       plan ? `This half: <b>${plan.bought} of ${plan.target}</b> songs` : "",
       hype && hype.next != null ? (hype.need ? `<b>${hype.since}/3</b> songs for the live on turn ${hype.next}` : `Hype full for the live on turn ${hype.next} ✓`) : "",
-      `<b>${learnedN} of 18</b> for GIRLS' LEGEND U`
+      `<b>${goal.count} of 18</b> ${goal.closed ? "by turn 71" : "for the special concert · deadline turn 71"}`
     ].filter(Boolean).join(" · ");
     const nextR = E.glRewards(state, sc).find((x) => x.status !== "done" && x.status !== "once");
     const mine = Object.entries(gl.songs || {}).map(([id, t]) => [sc.songs.find((x) => x.id === id), t]).filter(([x]) => x).sort((x, y) => x[1] - y[1]);
-    const addable = sc.songs.filter((x) => gl.songs[x.id] == null && x.from <= Math.max(state.turn, 5));
+    const addable = sc.songs.filter((x) => gl.songs[x.id] == null && x.from <= state.turn);
     const helloSlot = state.deck.slots.find((s) => s && H.isHello(D.card(s.id)));
     const hp = helloSlot && H.profile(D.card(helloSlot.id), helloSlot.lb);
     $("#songSummary").textContent = learnedN + " of 22 songs" + (hype && hype.next != null ? " · " + hype.since + "/3 for the live on turn " + hype.next : "");
@@ -1050,7 +1061,7 @@
       <div id="glShop"></div>
       <div class="gl-status">${status}</div>
       ${nextR ? `<div class="gl-next"><b>Next: ${esc(nextR.label)}</b>, turn ${nextR.turn}: ${esc(nextR.short || nextR.gain)}</div>` : ""}
-      <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="400" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
+      <div class="tokens">${sc.tokens.map((n, i) => `<label class="nf"><span>${n}</span><input type="number" inputmode="numeric" min="0" max="${E.tokenCap(state, sc)}" data-tok="${i}" value="${gl.tokens[i] || 0}"></label>`).join("")}</div>
       ${state.turn >= (sc.tokensFrom || 5) && hp ? `<details data-keep="hello"${open("hello", false)}><summary>Light Hello · ${D.RARITY[hp.card.r]} LB${helloSlot.lb} · events and value</summary>
         <p class="mini">Training Effectiveness ${hp.effects[8] || 0}%; normal energy reduction ${hp.effects[28] || 0}%${hp.card.r === 3 ? "; +30 percentage points when she joins a friendship training" : "; no SSR friendship-energy unique"}. Failure Protection ${hp.effects[27]}% reduces the current risk proportionally; it does not remove that many percentage points.</p>
         <p class="mini">First training: Speed +${hp.first.s[0]}, Guts +${hp.first.s[3]}, mood +1, +10 event bond. Outings still require their separate unlock event. Later token events are random: the coach uses a 40% estimate (published estimates 36–45%)${hp.card.r === 1 ? " and a conservative +10 for R because its +10/+20 mixture is unverified" : ", for +8 expected points"}. Expected points are never added by Done.</p>
@@ -1061,8 +1072,8 @@
       <p class="mini">Done adds each training's tokens; Bought takes a lesson's cost. Cap ${E.tokenCap(state, sc)} for now (+50 after each live). Fix the numbers here if the game shows different ones.</p>
       <div id="glCurrentBudget">${currentSongBudgetHTML(sc)}</div>
       <div class="songs-have"><b>Songs you have</b> ${mine.length ? mine.map(([x, t]) => `<span class="have-chip">${esc(x.name)} <button type="button" class="linkish" data-song-rm="${x.id}" aria-label="Remove ${esc(x.name)}">×</button></span>`).join("") : '<span class="mini">none yet</span>'}
-        ${addable.length ? `<select id="songAdd" aria-label="Add a song you already have"><option value="">+ add a song you already have</option>${addable.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>` : ""}
-        <span class="mini">Adding or removing here doesn't touch your tokens (Bought in your shop does).</span></div>
+        ${addable.length ? `<label class="mini song-learned-turn">Learned turn <input id="songAddTurn" type="number" min="5" max="${state.turn}" value="${state.turn}" aria-label="Turn the existing song was learned"></label><select id="songAdd" aria-label="Add a song you already have"><option value="">+ add a song you already have</option>${addable.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>` : ""}
+        <span class="mini">For an existing song, enter its actual learned turn before adding it. This changes neither tokens nor current stats.</span></div>
       <details class="gl-more" data-keep="more"${open("more", false)}><summary>More: song plan, token plan, token aim, scenario rewards</summary>
         ${songPlanHTML(sc)}
         <div class="mini">Active now: ${extras || "no extra stat gains from songs yet"}${bon.fb ? ` · Friendship +${bon.fb}%` : ""}${bon.pendingFb ? ` · +${bon.pendingFb}% Friendship after the next live` : ""}</div>
@@ -1083,7 +1094,7 @@
         <div class="mini">${esc(x.gain)}</div>
         ${x.sofar && x.status !== "once" ? `<div class="rw-sofar">${esc(x.sofar)}</div>` : ""}
       </li>`).join("")}</ol>
-      <p class="mini">Done adds Make Debut!'s tokens going into turn 5 and each live's stats (with "Add training gains" on in Stats). Amounts from uma.guide and GameTora.</p>
+      <p class="mini">Done adds Make Debut!'s tokens going into turn 5, GIRLS' LEGEND U's stats after turn 71, and each live's stats (with "Add training gains" on). Friendship bonuses activate after their concert.</p>
     </div>`;
   }
 
@@ -1094,6 +1105,7 @@
     return `<div class="song-plan">
       <div><b>Song plan to the ${plan.last ? "Grand Live" : "live on turn " + plan.live}:</b> ${plan.target} song${plan.target > 1 ? "s" : ""}${plan.last ? "" : ", then carry 1 over"} · bought: <b>${plan.bought}</b></div>
       <div class="plan-next">${esc(plan.text)}</div>
+      ${plan.period > 0 && !plan.carried && state.turn <= 71 ? '<div class="mini">No carried song recorded for this period: technique budgets use the normal lesson pattern.</div>' : ""}
       ${budgetHTML(sc)}
     </div>`;
   }
@@ -1147,23 +1159,24 @@
     const songRow = (x) => `<div class="shop-row${getSong && getSong.id === x.id ? " best" : ""}${hold && hold.id === x.id ? " held" : ""}${x.offered ? " on" : ""}${x.afford ? "" : " cant"}">
         <label class="tech-pick"><input type="checkbox" data-tech-offer="${x.id}" ${x.offered ? "checked" : ""}><span class="tech-name">${esc(x.song.name)}${tag(x.song.id)}</span></label>
         <span class="tech-cost">${chips(x.song.cost)}</span>
-        <button type="button" class="btn ghost small" data-song-buy="${x.song.id}">Bought</button>
+        <button type="button" class="btn ghost small" data-song-buy="${x.song.id}" ${x.afford ? "" : "disabled"}>Bought</button>
       </div>`;
     const techRow = (t) => `<div class="shop-row${getTech && getTech.id === t.id ? " best" : ""}${t.offered ? " on" : ""}${t.afford ? "" : " cant"}">
         <label class="tech-pick"><input type="checkbox" data-tech-offer="${t.id}" ${t.offered ? "checked" : ""}><span class="tech-name">${esc(t.label)}</span></label>
         <span class="tech-cost">${tCostHTML(t)}</span>
-        <button type="button" class="btn ghost small" data-tech-buy="${t.id}">Bought</button>
+        <button type="button" class="btn ghost small" data-tech-buy="${t.id}" ${t.afford && (!t.any || t.type != null) ? "" : "disabled"}>Bought</button>
       </div>`;
     const shownTechs = ls.techs.filter((t, i) => t.offered || i < 4);
     const moreTechs = ls.techs.filter((t, i) => !(t.offered || i < 4));
     const lb = state.gl.lastBuy && state.gl.lastBuy.turn === state.turn ? state.gl.lastBuy : null;
     const phaseText = ls.phase === "songs" ? "Songs first: techniques make songs show up, so the coach picks ones that keep your next song's tokens."
-      : ls.phase === "hold" ? "This half's songs are bought: hold the next one for after the live, and spend spare tokens on stat techniques."
+      : ls.phase === "hold" ? "The period target is met. Usually carry the next song; buy earlier when its estimated bonus before the following concert is worth more than the lesson saved."
         : "Song plan done: spare tokens go to stat techniques.";
     let get;
     if (getSong) get = `<b>Get: ${esc(getSong.song.name)}</b> (${esc(costText(getSong.song.cost))})${getSong.why.length ? ": " + esc(getSong.why.join(", ")) : ""}.`;
-    else if (hold) get = `<b>Hold ${esc(hold.song.name)}</b>: buy it right after the live on turn ${ls.songPlan.live}.${getTech ? ` Meanwhile get <b>${esc(getTech.label)}</b> (${esc(tCost(getTech))}).` : ""}`;
+    else if (hold) get = `<b>Hold ${esc(hold.song.name)}</b>: buy it on turn ${ls.songPlan.live + 1}, after the live.${getTech ? ` Meanwhile get <b>${esc(getTech.label)}</b> (${esc(tCost(getTech))}).` : ""}`;
     else if (getTech) get = `<b>Get: ${esc(getTech.label)}</b> (${esc(tCost(getTech))})${callTech ? ", with this turn's call" : ""}${getTech.why.length ? ": " + esc(getTech.why.join(", ")) : ""}.`;
+    else if (ls.items.some((t) => t.needsType)) get = "Select the Performance type shown for your checked technique before the coach can price it.";
     else if (ls.offered || ls.songsOffered) get = "Nothing in your shop to buy right now: keep training for tokens.";
     else get = `Tick what your shop shows.${ls.ifOffered.length ? ` If it has them: <b>${ls.ifOffered.map((t) => esc(t.label)).join("</b>, <b>")}</b>.` : ""}`;
     $("#songSummary").textContent = getSong ? "Get: " + getSong.song.name : hold ? "Hold " + hold.song.name + (getTech ? " · get " + getTech.label : "") : getTech ? "Get: " + getTech.label : E.songsLearned(state) + " of 22 songs";

@@ -287,9 +287,10 @@ test("Grand Concert song plan: 5 songs and a carry-over in year one, 3 + carry a
   assert.match(at(22, five, {}).text, /hold it/);
   const y2 = at(25, five, {});
   assert.strictEqual(y2.target, 3);
-  assert.match(y2.text, /carried over first/);
+  assert.doesNotMatch(y2.text, /carried over first/, "a carry is only credited when actually recorded");
+  assert.strictEqual(y2.techNow, 2);
   assert.deepStrictEqual(y2.focus, ["yumewo", "growup"]);
-  assert.strictEqual(at(61, five, {}).target, 4, "the last half buys the 4th song instead of carrying it");
+  assert.strictEqual(at(61, five, {}).target, 12, "the last half catches up to 18 including Make Debut");
   assert.deepStrictEqual(at(50, five, {}).focus, ["daisuki", "fanfare"]);
 });
 
@@ -632,17 +633,17 @@ test("Grand Concert: trainings count the tokens they give toward the songs you s
 test("Grand Concert token aim: songs you can buy now first, most important first, then later ones", () => {
   const gl = sc("grandlive");
   const plan = E.tokenPlan(base({ turn: 6, gl: { songs: {}, tokens: [0, 0, 0, 0, 0] } }), gl);
-  assert.strictEqual(plan.queue.length, 18, "18 songs in all");
+  assert.strictEqual(plan.queue.length, 17, "17 purchased songs plus the free Make Debut");
   const nowN = plan.queue.filter((x) => x.now).length;
   assert.ok(plan.queue.slice(0, nowN).every((x) => x.song.from <= 6) && plan.queue.slice(nowN).every((x) => x.song.from > 6), "available songs come first");
   for (let k = 1; k < nowN; k++) assert.ok(plan.queue[k - 1].v >= plan.queue[k].v, "most important first");
   assert.strictEqual(plan.aim, plan.queue[0]);
   // A song's shortfall counts what the songs above it use first.
-  const rich = E.tokenPlan(base({ turn: 6, gl: { songs: {}, tokens: [40, 0, 40, 20, 20] } }), gl);
+  const rich = E.tokenPlan(base({ turn: 6, gl: { songs: {}, tokens: [40, 40, 40, 40, 40] } }), gl);
   assert.ok(rich.queue[0].ready, "the top song is affordable with these tokens");
   const used = rich.queue[0].song.cost;
   const second = rich.queue[1];
-  second.song.cost.forEach((c, i) => assert.strictEqual(second.short[i], Math.max(0, c - Math.max(0, [40, 0, 40, 20, 20][i] - used[i]))));
+  second.song.cost.forEach((c, i) => assert.strictEqual(second.short[i], Math.max(0, c - Math.max(0, [40, 40, 40, 40, 40][i] - used[i]))));
   // Tokens for the top song count for more than the same tokens for a song further down.
   const fac2 = (stat) => base({ turn: 6, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} }, facilities: facs({ [stat]: { cards: 2 } }) });
   const tok = (stat) => E.evaluate(fac2(stat), gl).options.find((o) => o.stat === stat).parts.tokens || 0;
@@ -1106,8 +1107,9 @@ test("Grand Concert plan counts technique lessons: songs only show up after them
   const gl = sc("grandlive");
   const st = (o) => base(Object.assign({ turn: 6, gl: { songs: {}, tokens: [0, 0, 0, 0, 0], lessons: {} } }, o));
   const p = E.tokenPlan(st(), gl);
-  // Year one: 1+2+3+4+4 techniques for 5 songs and 2 more for the 6th; 5 in each half after.
-  assert.strictEqual(p.tech.left, 16 + 5 * 4);
+  // Five songs plus carry in year one; three intermediate periods plus carry;
+  // three last-period songs reach 17 paid + Make Debut, with no final carry.
+  assert.strictEqual(p.tech.left, 16 + 5 * 3 + 3);
   assert.strictEqual(p.tech.cost, 10);
   assert.strictEqual(p.half.techLeft, 16);
   assert.strictEqual(p.half.techTokens, 160);
@@ -1258,7 +1260,8 @@ test("Grand Concert rewards: each live adds its stats on Done (+10 on a Great Su
   assert.strictEqual(restAt(st(24, { kiseki: 8, gothisway: 14 })).stats.speed, 310, "2 songs + Make Debut!: Great Success, +10");
   assert.strictEqual(restAt(st(24, { kiseki: 8 })).stats.speed, 303, "fewer songs: +3");
   assert.strictEqual(restAt(st(23, { kiseki: 8 })).stats.speed, 300, "nothing before the live turn");
-  assert.strictEqual(restAt(st(72, {})).stats.wit, 210, "GIRLS' LEGEND U: all stats +10");
+  assert.strictEqual(restAt(st(72, {})).stats.wit, 203, "one automatic final song alone gives normal concert success (+3)");
+  assert.strictEqual(restAt(st(71, {})).stats.wit, 210, "GIRLS' LEGEND U's one-time +10 arrives separately after turn 71");
   // A failed training on the live turn still gets the live.
   const s = st(24, { kiseki: 8, gothisway: 14 });
   const wit = E.evaluate(s, gl).options.find((o) => o.stat === "wit");
@@ -1266,7 +1269,7 @@ test("Grand Concert rewards: each live adds its stats on Done (+10 on a Great Su
   const live = E.glRewards(st(20, { kiseki: 8, gothisway: 14 }), gl).find((x) => x.turn === 24);
   assert.match(live.sofar, /3 songs \(with Make Debut!\) and 6 techniques: Great Success, all stats \+10, \+105 SP/);
   const r = E.glRewards(st(20, {}), gl);
-  assert.deepStrictEqual(r.map((x) => x.turn), [5, 5, 24, 25, 36, 48, 49, 60, 69, 72]);
+  assert.deepStrictEqual(r.map((x) => x.turn), [5, 5, 24, 25, 36, 48, 49, 60, 69, 71, 72]);
   // On the live turn the call says what the live gives.
   assert.ok(E.recommend(st(24, { kiseki: 8, gothisway: 14 }), gl).action.notes.some((n) => /1st Promo Live after this turn/.test(n)));
 });
