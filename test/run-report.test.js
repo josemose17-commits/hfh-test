@@ -19,6 +19,11 @@ function advance(s, chosen, observed = {}) {
   const pick = chosen || rec.action;
   const next = E.advance(s, sc, pick, observed.result, observed);
   R.recordTurn(s, next, sc, rec, pick, observed);
+  if (next.gl && next.gl.pendingConcert) {
+    const pt = next.gl.pendingConcert.turn;
+    E.finalizeConcert(next, sc);
+    R.event(next, "finalizeConcert", { turn: pt });
+  }
   return next;
 }
 function buySong(s, id = "tachiichi") {
@@ -190,6 +195,22 @@ test("the final command and non-Grand-Concert exports retain valid coverage and 
   assert.equal(report.currentProgress, null); assert.equal(report.turns[0].performance, null);
   assert.ok(report.checks); assert.equal(report.turns[0].followedRecommendation, true);
   assert.doesNotMatch(R.format(report, ura).split("\n\n")[0], /Recorded training income/);
+});
+
+test("pendingConcert serializes in inputs, and build marks pending vs finalized concerts", () => {
+  const s = fixture({ turn: 24 }); s.gl.tokens = [100, 100, 100, 100, 100];
+  const rest = E.evaluate(s, sc).options.find((o) => o.kind === "rest");
+  const next = E.advance(s, sc, rest);
+  assert.ok(next.gl.pendingConcert, "advance at a concert turn sets pendingConcert");
+  const serialized = R.inputs(next);
+  assert.deepEqual(serialized.gl.pendingConcert, { turn: 24, concertIndex: 0 }, "pendingConcert is serialized in inputs");
+  R.recordTurn(s, next, sc, E.recommend(s, sc), rest, {});
+  R.event(next, "finalizeConcert", { turn: 24, concertIndex: 0 });
+  E.finalizeConcert(next, sc);
+  const report = R.build(next, sc);
+  const concert = report.concerts.find((c) => c.turn === 24);
+  assert.equal(concert.pending, false, "not pending after finalizing");
+  assert.equal(concert.finalized, true, "marked finalized after the event");
 });
 
 test("a scripted run through the second concert reconciles recorded income, spend and corrections", () => {

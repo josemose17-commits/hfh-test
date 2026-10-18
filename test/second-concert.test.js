@@ -26,6 +26,11 @@ function hello(s) {
 function advance(s, choice = rest, result) {
   const rec = E.recommend(s, sc), next = E.advance(s, sc, choice, result);
   R.recordTurn(s, next, sc, rec, choice, { result });
+  if (next.gl && next.gl.pendingConcert) {
+    const pt = next.gl.pendingConcert.turn;
+    E.finalizeConcert(next, sc);
+    R.event(next, "finalizeConcert", { turn: pt });
+  }
   return next;
 }
 

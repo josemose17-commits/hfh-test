@@ -3,7 +3,7 @@
 (function (root) {
   const E = root.UmaEngine || (typeof require !== "undefined" ? require("./engine.js") : null);
   const D = root.UmaDeck || (typeof require !== "undefined" ? require("./deck.js") : null);
-  const VERSION = "20261017h";
+  const VERSION = "20261017l";
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const vector = (x) => Array.from({ length: 5 }, (_, i) => Number.isFinite((x || [])[i]) ? x[i] : 0);
   const add = (a, b) => a.map((n, i) => n + b[i]);
@@ -19,7 +19,7 @@
     if (state.deck) out.deck = { trainee: state.deck.trainee, slots: (state.deck.slots || []).map((s) => s && { id: s.id, card: D.card(s.id) ? D.card(s.id).n : String(s.id), lb: s.lb, bond: s.bond, met: s.met, dates: s.dates }) };
     if (state.gl) {
       out.gl = {};
-      ["tokens", "songs", "lessons", "focus", "tokenTypes", "shop", "carry", "holdSong", "carriedPeriods", "hints"].forEach((key) => { if (state.gl[key] !== undefined) out.gl[key] = state.gl[key]; });
+      ["tokens", "songs", "lessons", "focus", "tokenTypes", "shop", "carry", "holdSong", "carriedPeriods", "hints", "pendingConcert"].forEach((key) => { if (state.gl[key] !== undefined) out.gl[key] = state.gl[key]; });
     }
     return clone(out);
   }
@@ -114,8 +114,16 @@
     const training = option.kind === "train" && !failed && f ? income(working, sc, f, false) : { requested: vector(), credited: vector(), lostAtCap: vector(), sources: [], balances: paid };
     let calculated = training.balances.slice();
     const calendar = { requested: vector(), credited: vector(), lostAtCap: vector() };
+    const deferredCalendar = { requested: vector(), credited: vector(), lostAtCap: vector() };
     const reward = E.calendarPerformance(before.turn, sc);
-    if (reward) {
+    if (reward && after.gl && after.gl.pendingConcert) {
+      const cap = reward.cap;
+      calculated.forEach((n, i) => {
+        const take = Math.max(0, Math.min(reward.amount, cap - n));
+        deferredCalendar.requested[i] = reward.amount; deferredCalendar.credited[i] = take; deferredCalendar.lostAtCap[i] = reward.amount - take;
+      });
+      // Don't add to calculated: the performance is applied by finalizeConcert.
+    } else if (reward) {
       const cap = reward.cap;
       calculated = calculated.map((n, i) => {
         const take = Math.max(0, Math.min(reward.amount, cap - n));
@@ -124,7 +132,7 @@
       });
     }
     const closing = vector((after.gl || {}).tokens);
-    return { before: opening, prefixedPurchaseSpent: subtract(opening, paid), afterPurchase: paid, training, calendar, after: closing, unreconciled: subtract(closing, calculated) };
+    return { before: opening, prefixedPurchaseSpent: subtract(opening, paid), afterPurchase: paid, training, calendar, deferredCalendar, after: closing, unreconciled: subtract(closing, calculated) };
   }
 
   function recordTurn(before, after, sc, recommendation, chosen, observed = {}) {
@@ -165,12 +173,26 @@
       totals.trainingLostAtCap = add(totals.trainingLostAtCap, p.training.lostAtCap);
       totals.calendarIncome = add(totals.calendarIncome, p.calendar.credited);
       totals.calendarLostAtCap = add(totals.calendarLostAtCap, p.calendar.lostAtCap);
+      // Deferred calendar performance from a pending concert is counted when
+      // the concert is finalized (or immediately if the run ends before that).
+      if (p.deferredCalendar) {
+        totals.calendarIncome = add(totals.calendarIncome, p.deferredCalendar.credited);
+        totals.calendarLostAtCap = add(totals.calendarLostAtCap, p.deferredCalendar.lostAtCap);
+      }
       totals.netPurchaseSpend = add(totals.netPurchaseSpend, p.prefixedPurchaseSpent);
       totals.unreconciled = add(totals.unreconciled, p.unreconciled);
     });
     events.forEach((e) => {
       if (e.spent) totals.netPurchaseSpend = add(totals.netPurchaseSpend, e.spent);
       if (e.kind === "balanceCorrection") totals.balanceCorrections = add(totals.balanceCorrections, e.delta);
+      if (e.kind === "finalizeConcert") {
+        // The concert's deferred calendar income was already counted above
+        // from the turn's performance; this event marks when it resolved so
+        // the concerts section can show beforeCommand vs. afterCommand.
+        if (e.deferredCalendar) {
+          // No-op: deferred calendar is attributed to the turn that deferred it.
+        }
+      }
       if (e.kind === "helloEvent") { totals.helloIncome[e.type] += e.credited; totals.helloLostAtCap[e.type] += e.amount - e.credited; }
       if (e.kind === "observedTokenReward") {
         totals.observedRewardIncome = add(totals.observedRewardIncome, e.credited);
@@ -193,9 +215,11 @@
       tokens: sc.tokens || [], totals, turns, events, observations,
       recoveryComparison: recommendation && recommendation.recoveryComparison ? clone(recommendation.recoveryComparison) : null,
       currentPeriodBudget: sc.id === "grandlive" ? E.periodSongBudget(state, sc) : null,
-      concerts: (sc.lives || []).filter((turn) => turn < state.turn || turns.some((t) => t.turn === turn)).map((turn) => {
+      concerts: (sc.lives || []).filter((turn) => turn < state.turn || turns.some((t) => t.turn === turn) || (state.gl && state.gl.pendingConcert && state.gl.pendingConcert.turn === turn)).map((turn) => {
         const logged = turns.filter((t) => t.turn === turn).slice(-1)[0];
-        return { turn, recorded: !!logged, beforeCommand: logged ? logged.progressBeforeCommand : null, afterCommand: logged ? logged.concert : null };
+        const pending = state.gl && state.gl.pendingConcert && state.gl.pendingConcert.turn === turn && turn >= state.turn;
+        const finalized = events.some((e) => e.kind === "finalizeConcert" && e.turn === turn);
+        return { turn, recorded: !!logged, beforeCommand: logged ? logged.progressBeforeCommand : null, afterCommand: logged ? logged.concert : null, pending: !!pending, finalized: !!finalized };
       }),
       limits: ["Only inputs and actions recorded in this browser are included. Unticked offers and unrecorded purchases are unknown.", "Recorded training income can use formula amounts or assumed types; inspect each source. Preselected usual types are assumptions until edited. Expected Hello rewards never count as recorded income.", "Songs first ranks the entered one-command candidates by its exported criterion; unknown future shops, event outcomes and token types prevent a proof of the best whole career.", "Legacy entries preserve saved inputs. Their original recommendation, command outcome and between-command purchases are unavailable.", "Net purchase spend excludes backfilled songs and unrecorded purchases; entered balance corrections and observed token rewards remain separate."]
     };
@@ -222,7 +246,7 @@
         if (o.helloCheckWithoutEvent) lines.push("Hello's prior +20 is checked, but no actual Hello token event was logged. Balance corrections cannot identify its timing or type.");
       }
     }
-    report.concerts.forEach((c) => lines.push("Concert turn " + c.turn + ": " + (c.afterCommand ? c.afterCommand.total + " total songs; " + c.afterCommand.hype.since + " this period; " + c.afterCommand.hype.need + " short of full Hype" : "end-of-command progress unavailable")));
+    report.concerts.forEach((c) => lines.push("Concert turn " + c.turn + (c.pending ? " (pending — Step on stage to resolve)" : c.finalized ? " (resolved)" : c.recorded ? "" : " (unrecorded)") + (c.afterCommand ? ": " + c.afterCommand.total + " total songs; " + c.afterCommand.hype.since + " this period; " + c.afterCommand.hype.need + " short of full Hype" : c.recorded ? "" : " (end-of-command progress unavailable)")));
     lines.push("Details include available inputs, recommendations, chosen commands, offers, purchases and token accounting. Missing observations stay unknown.");
     return lines.filter(Boolean).join("\n") + "\n\n" + JSON.stringify(report);
   }

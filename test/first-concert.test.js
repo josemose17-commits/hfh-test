@@ -59,7 +59,10 @@ test("the observed held selection crosses a concert and gives the real next-peri
   const rec = E.recommend(s, sc); assert.equal(rec.action.kind, "race");
   assert.equal(rec.action.song, undefined); assert.equal(rec.action.tech, undefined);
   const next = E.advance(s, sc, rec.action);
-  assert.equal(next.turn, 25); assert.equal(next.gl.holdSong, undefined);
+  assert.equal(next.turn, 25);
+  assert.ok(next.gl.pendingConcert, "concert enters pending phase");
+  E.finalizeConcert(next, sc);
+  assert.equal(next.gl.holdSong, undefined);
   assert.deepEqual(next.gl.carry, { period: 1, songs: ["runrun"] });
   E.buySong(next, sc, "runrun");
   assert.equal(next.gl.carriedPeriods[1], true);

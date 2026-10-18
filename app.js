@@ -666,6 +666,7 @@
       if (fix) { rcFix[fix.dataset.rcFix] = true; renderCall(); return; }
       if (e.target.closest("#doneBtn")) done(rec && rec.action);
       if (e.target.closest("#undoBtn")) undoTurn();
+      if (e.target.closest("#stepStageBtn")) stepStage();
       if (e.target.closest("#rcNew")) newCareer($("#rcNew"));
       const fb = e.target.closest("[data-fail]");
       if (fb) { failPick = fb.dataset.fail; if (!failPick || failPick === "slacker") poorPick = false; renderCall(); return; }
@@ -895,6 +896,20 @@
     state.tab = tab;
     commit(true);
     flash("Undid turn " + state.turn);
+  }
+
+  // Resolves a pending concert: applies the deferred concert rewards
+  // (calendar performance, concert stats, shop carry) by calling the
+  // engine's finalizeConcert, then records the event in the run report.
+  function stepStage() {
+    if (!state.gl || !state.gl.pendingConcert) return;
+    const pending = state.gl.pendingConcert;
+    const ok = E.finalizeConcert(state, scenario());
+    if (ok) {
+      R.event(state, "finalizeConcert", { turn: pending.turn, concertIndex: pending.concertIndex });
+      commit(true);
+      flash("Concert on turn " + pending.turn + " resolved: stats, collaborators' tokens and carry applied.");
+    }
   }
 
   // Two taps start over (the first arms it for 3 seconds). btn: the button pressed.
@@ -1954,7 +1969,8 @@
       ${kind !== "train" ? '<details><summary>Logging a different training result</summary>' : ""}<div class="fail-row" role="radiogroup" aria-label="Training result"><span class="mini">Training result:</span>${[["", "Success", ""], ["fail", "Failed", "Get Well Soon!: mood -1, -5 to that stat"], ["bad", "Failed badly", "Don't Overdo It! (20%+ failure only): mood -3, -10 to that stat and 2 random stats"]].concat(C.has(state, "slacker") ? [["slacker", "Did not show up", "No training gains, energy cost, bonds or Performance"]] : []).map(([v, l, t]) => `<button type="button" class="btn ghost small" role="radio" data-fail="${v}" aria-checked="${failPick === v}"${t ? ` title="${esc(t)}"` : ""}>${l}</button>`).join("")}
         ${failPick && failPick !== "slacker" && !C.has(state, "poor") ? `<label class="chip-toggle"><input type="checkbox" id="gotPoor" ${poorPick ? "checked" : ""}> Got Practice Poor</label>` : ""}</div>${kind !== "train" ? "</details>" : ""}
       <div class="actions">
-        <button type="button" class="btn" id="doneBtn">Done, next turn ▶</button>
+        <button type="button" class="btn" id="doneBtn" ${(state.gl && state.gl.pendingConcert) ? "disabled" : ""}>Done, next turn ▶</button>
+        ${state.gl && state.gl.pendingConcert ? `<button type="button" class="btn ghost" id="stepStageBtn" title="Resolve the pending concert now. Spend song income from this command, then click to apply concert rewards, set up the carry, and clear the pre-stage.">Step on stage ▶</button>` : ""}
         <button type="button" class="btn ghost" id="undoBtn" ${(state.log || []).length ? "" : "disabled"}>Undo last</button>
       </div>
       <details class="report" id="report" data-run-export ${reportOpen ? "open" : ""}><summary>This call looks wrong?</summary>
