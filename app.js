@@ -1925,7 +1925,7 @@
     const shown = skills.filter((s) => s.eventP != null && s.trainingP != null && (s.eventP > 0 || s.trainingP > 0));
     if (!shown.length) return "";
     const pct = (n) => Math.round(n * 100) + "%";
-    return `<details class="pred-help"><summary>Event skills and training hints</summary><p class="mini">${coupled ? "Coupled event percentages are frequencies in these simulated careers; unresolved sources keep availability priors. Training percentages retain their hint-pool approximation. " : ""}Estimated direct hint opportunities for this race. Training hints share a card's hint pool; high Hint Frequency raises their chance. Event skills use separate completion assumptions. The sources can overlap, so their percentages do not add. Hint discounts follow their actual modeled likelihood, rather than assuming the highest hint level always happens.</p><div class="table-wrap"><table><thead><tr><th>Skill</th><th>Event</th><th>Training hint</th><th>Either source</th></tr></thead><tbody>${shown.map((s) => `<tr><th>${esc(debuffOrSkillName(s.id))}</th><td>${pct(s.eventP)}</td><td>${pct(s.trainingP)}</td><td>${pct(s.sourceP == null ? s.p : s.sourceP)}</td></tr>`).join("")}</tbody></table></div><p class="mini">These are model estimates. Known event choices and success/failure branches are modeled separately. Missing event results retain availability priors. Conditional success is assumed; raw-text conditions and hint-pool sampling remain approximations. Trainee availability and lower tiers unlocked by a gold hint are additional purchase routes.</p></details>`;
+    return `<details class="pred-help"><summary>Event skills and training hints</summary><p class="mini">${coupled ? "Coupled event percentages are frequencies in these simulated careers; unresolved sources keep availability priors. Training percentages retain their hint-pool approximation. " : ""}Estimated direct hint opportunities for this race. Training hints share a card's hint pool; high Hint Frequency raises their chance. Event skills use separate completion assumptions. The sources can overlap, so their percentages do not add. Hint discounts follow their actual modeled likelihood, rather than assuming the highest hint level always happens.</p><div class="table-wrap"><table><thead><tr><th>Skill</th><th>Event</th><th>Training hint</th><th>Either source</th></tr></thead><tbody>${shown.map((s) => `<tr><th>${skillNameHTML(s.id)}</th><td>${pct(s.eventP)}</td><td>${pct(s.trainingP)}</td><td>${pct(s.sourceP == null ? s.p : s.sourceP)}</td></tr>`).join("")}</tbody></table></div><p class="mini">These are model estimates. Known event choices and success/failure branches are modeled separately. Missing event results retain availability priors. Conditional success is assumed; raw-text conditions and hint-pool sampling remain approximations. Trainee availability and lower tiers unlocked by a gold hint are additional purchase routes.</p></details>`;
   }
 
   function renderCall() {
@@ -2518,7 +2518,7 @@
       ${c.must.length ? `<div class="row-wrap">${c.must.map((id) => {
         const n = (src[id] || []).length;
         const note = known.has(String(id)) ? "available to your trainee" : n ? n + (mine ? " of your cards" : " cards") : mine ? "none of your cards" : "no support card";
-        return `<span class="chip lockchip${n || known.has(String(id)) ? "" : " warnchip"}">${esc(debuffOrSkillName(id))} <span class="mini">${note}</span> <button type="button" class="linkish" data-must-del="${id}" aria-label="Remove ${esc(debuffOrSkillName(id))}">✕</button></span>`;
+        return `<span class="chip lockchip${n || known.has(String(id)) ? "" : " warnchip"}">${skillNameHTML(id)} <span class="mini">${note}</span> <button type="button" class="linkish" data-must-del="${id}" aria-label="Remove ${esc(debuffOrSkillName(id))}">✕</button></span>`;
       }).join("")}</div>` : ""}
       <p class="mini">The deck will include a card that can hint each must-have skill or give it through an event, before anything else counts. Cards only offer a skill by chance, so the result shows how likely you are to see it.</p>
     </div>`;
@@ -2544,6 +2544,11 @@
   }
 
   const debuffOrSkillName = (id) => (window.UmaDebuffs && window.UmaDebuffs[id] ? window.UmaDebuffs[id].n : skillInfo(id)[0]);
+  const skillLabels = window.UmaSkillLabels.create({skills: SV && SV.skills, trainees: D.DATA.trainees});
+  function skillNameHTML(id, displayName = debuffOrSkillName(id)) {
+    const source = skillLabels.sourceText(id);
+    return esc(displayName) + (source ? ` <span class="mini inherited-source">· ${esc(source)}</span>` : "");
+  }
 
   function supportEventsHTML(r) {
     const model = r.est && r.est.supportEvents;
@@ -2585,11 +2590,11 @@
       <p class="mini">Average of ${budget.careers} simulated careers: <b>${number(budget.learned)} final skills</b>, spending <b>${number(budget.spent)} / ${number(budget.budget)} SP</b>; ${number(budget.unspent)} SP left. Each career chooses its own set within its own budget, including lower-tier costs. Upgrades count as one final skill.</p>
       <details><summary>Skills selected across these careers</summary>
         <p class="mini">Counts describe this sample of simulated careers. Availability includes trainee skills and lower tiers unlocked by gold hints. Purchases also depend on the other available skills and SP. Each career's strongest affordable set uses the chart's additive gains.</p>
-        <div class="table-wrap"><table><thead><tr><th>Final skill</th><th>Available</th><th>Purchased</th><th>Mean SP when purchased</th></tr></thead><tbody>${skills.map((s) => `<tr><th>${esc(skillInfo(s.id)[0])}${s.innate ? ' <span class="mini">trainee</span>' : ""}</th><td>${pct(s.sampledAvailableP)}</td><td>${pct(s.selectedP)}</td><td>${s.meanPurchaseCost == null ? "–" : number(s.meanPurchaseCost)}</td></tr>`).join("") || '<tr><td colspan="4">No valued skills were available in these sampled careers.</td></tr>'}</tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Final skill</th><th>Available</th><th>Purchased</th><th>Mean SP when purchased</th></tr></thead><tbody>${skills.map((s) => `<tr><th>${skillNameHTML(s.id, skillInfo(s.id)[0])}${s.innate ? ' <span class="mini">trainee</span>' : ""}</th><td>${pct(s.sampledAvailableP)}</td><td>${pct(s.selectedP)}</td><td>${s.meanPurchaseCost == null ? "–" : number(s.meanPurchaseCost)}</td></tr>`).join("") || '<tr><td colspan="4">No valued skills were available in these sampled careers.</td></tr>'}</tbody></table></div>
       </details>
-      ${example ? `<details id="skillBudgetExample"><summary>One complete purchase example</summary><p class="mini">One simulated career: ${example.budget} SP, ${example.spent} spent, ${example.unspent} left. White/gold and ○/◎ versions replace each other's race gain; the cost includes every required tier.</p><div class="table-wrap"><table><thead><tr><th>Final skill</th><th>Total SP</th><th>Cost breakdown</th></tr></thead><tbody>${example.selected.map((s) => `<tr><th>${esc(skillInfo(s.id)[0])}</th><td>${s.cost}</td><td class="mini">${s.tiers.map((t) => `${esc(skillInfo(t.id)[0])}: ${t.cost} SP (hint Lv${t.hint})`).join(" + ")}</td></tr>`).join("") || '<tr><td colspan="3">No valued purchase fits this career.</td></tr>'}</tbody></table></div></details>` : ""}
-      ${budget.must.length ? `<p class="mini">Must-have purchases in this sample: ${budget.must.map((m) => `${esc(debuffOrSkillName(m.id))} ${pct(m.learnedP)}`).join("; ")}. Available must-haves get purchase priority; a shortfall can mean missing offers or insufficient SP.</p>` : ""}
-      ${budget.unsupported.length ? `<p class="mini warn">Purchase data missing or unsupported; excluded from affordable skill value: ${budget.unsupported.map((id) => esc(skillInfo(id)[0])).join(", ")}.</p>` : ""}
+      ${example ? `<details id="skillBudgetExample"><summary>One complete purchase example</summary><p class="mini">One simulated career: ${example.budget} SP, ${example.spent} spent, ${example.unspent} left. White/gold and ○/◎ versions replace each other's race gain; the cost includes every required tier.</p><div class="table-wrap"><table><thead><tr><th>Final skill</th><th>Total SP</th><th>Cost breakdown</th></tr></thead><tbody>${example.selected.map((s) => `<tr><th>${skillNameHTML(s.id, skillInfo(s.id)[0])}</th><td>${s.cost}</td><td class="mini">${s.tiers.map((t) => `${skillNameHTML(t.id, skillInfo(t.id)[0])}: ${t.cost} SP (hint Lv${t.hint})`).join(" + ")}</td></tr>`).join("") || '<tr><td colspan="3">No valued purchase fits this career.</td></tr>'}</tbody></table></div></details>` : ""}
+      ${budget.must.length ? `<p class="mini">Must-have purchases in this sample: ${budget.must.map((m) => `${skillNameHTML(m.id)} ${pct(m.learnedP)}`).join("; ")}. Available must-haves get purchase priority; a shortfall can mean missing offers or insufficient SP.</p>` : ""}
+      ${budget.unsupported.length ? `<p class="mini warn">Purchase data missing or unsupported; excluded from affordable skill value: ${budget.unsupported.map((id) => skillNameHTML(id, skillInfo(id)[0])).join(", ")}.</p>` : ""}
       <details><summary>Purchase assumptions</summary><p class="mini">All listed innate and awakening skills are assumed available at hint Lv0 and still cost SP. The trainee's own unique is already learned. Skills are bought at career end. Inherited skills, random scenario skills, Fast Learner, free skill grants, evolved skills and the effect of early purchases are omitted. Chart gains are added; skill interactions are not simulated. Parsed ordinary-support choices grant resources and hints together; incomplete records keep labeled fallbacks. Event choices and timing use the stated assumptions. SP contributes through affordable purchases, with no extra raw-SP bonus.</p></details>
     </div>`;
   }
@@ -2600,7 +2605,7 @@
       skills: SV.skills, purchases: window.UmaSkillPurchases.skills, events: window.UmaCardEvents,
       targets: config.targets, must: config.must, globalOnly: config.globalOnly, today: TODAY
     });
-    const name = id => esc(debuffOrSkillName(id));
+    const name = id => skillNameHTML(id);
     const rows = skills => skills.map(s => `<tr data-parent-skill="${esc(s.id)}"><th>${name(s.id)} ${s.must ? '<span class="skillpill">Must-have</span>' : ""}${s.release === false ? ' <span class="mini warn">Not listed on Global</span>' : s.release == null ? ' <span class="mini warn">Release metadata unknown</span>' : ""}<div class="mini">${s.spark ? "White · skill spark candidate if learned" : s.rarity === 2 ? "Gold · does not itself become a skill spark" : "Spark eligibility unverified / not a white skill"}</div></th><td>${s.sources.map(source => {
       const card = D.card(source.card), picked = r.cards.find(x => x.id === source.card);
       const routes = [...new Set(source.routes.map(route => `${route.kind === "hint" ? "Training hint" : route.grant ? "Event skill grant" : "Event hint"}${route.via ? " via " + name(route.via) + " (purchase tier)" : ""}${route.unresolved ? " · event details unknown" : route.event ? ` · ${esc((window.UmaCardEvents.events[route.event] || {}).n || "event " + route.event)} / choice ${route.choice}${route.conditional ? " (conditional outcome)" : ""}${route.note ? " · " + esc(route.note) : ""}` : ""}`))];
@@ -2632,7 +2637,7 @@
         <span class="tydot" aria-hidden="true"></span>
         <div class="opt-name"><b>${esc(card.n)}</b> <span class="mini">${esc(card.t)}</span>
           <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""}${c.locked.indexOf(x.id) !== -1 ? " · locked" : r.link && r.link.lock === x.id ? " · scenario card" : ""}</div>
-          ${r.goal === "race" && x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => esc(debuffOrSkillName(id))).join(", ")}</div>` : ""}
+          ${r.goal === "race" && x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => skillNameHTML(id)).join(", ")}</div>` : ""}
           ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? (r.goal === "race" ? ", but no must-have" : ", lower modeled must-have coverage") : ""})</div>` : ""}</div>
         <div class="num" title="Euophrys score with the other five cards fixed, plus skills">${Math.round(x.score)}<div class="mini">${Math.round(x.base)} + ${Math.round(x.skill)} skills</div></div>
       </div>`;
@@ -2644,7 +2649,7 @@
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>
       ${r.simulationMeta && r.simulationMeta.scenario === "grandlive" && r.goal === "race" ? '<p class="mini">The final suggestion also considers simulated careers. A lower static total can still finish closer to your targets or buy a stronger affordable skill set.</p>' : ""}
       ${r.goal !== "race" ? parentSkillsHTML(r) : r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
-        <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${esc(debuffOrSkillName(x.id))} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.est && r.est.skillBudget ? affordableSkillsHTML(r) : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${esc(skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
+        <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${skillNameHTML(x.id)} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.est && r.est.skillBudget ? affordableSkillsHTML(r) : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${skillNameHTML(x.id, skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
       ${r.goal === "race" ? skillSourcesHTML(r.skills || [], !!(r.est && r.est.supportEvents)) : ""}
       <div class="row-wrap">
         <button type="button" class="btn" data-use-opt="1">Use this deck in the coach</button>
@@ -2727,7 +2732,7 @@
     const all = {};
     D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).forEach((x) => (x.hs || []).concat(x.es || []).forEach((id) => { (all[id] = all[id] || []).push(x); }));
     return `<div class="must-result"><b>Must-have skills</b><ul>${r.must.map((m) => {
-      const name = esc(debuffOrSkillName(m.id));
+      const name = skillNameHTML(m.id);
       if (m.p > 0) {
         const from = m.src.map((id) => { const cd = D.card(id); return esc(cd.n) + ((cd.es || []).map(String).indexOf(String(m.id)) !== -1 ? " (event)" : " (hint)"); }).join(", ");
         return `<li class="ok"><b>${name}</b>: about ${Math.round(m.p * 100)}% to be offered, from ${from}.</li>`;
@@ -2776,7 +2781,7 @@
           const from = src[r.id] || [];
           const kind = info[2] === 2 ? "gold" : info[2] === 9 ? "inh" : "white";
           const must = c.must.indexOf(String(r.id)) !== -1;
-          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${esc(info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
+          return `<tr class="sk-${kind}"><td><button type="button" class="must-tog" data-must="${r.id}" aria-pressed="${must}" title="${must ? "Remove from" : "Add to"} the deck optimizer's must-have skills">${must ? "★" : "☆"}</button> <b>${skillNameHTML(r.id, info[0])}</b>${info[3] ? "" : ' <span class="pill">JP</span>'}${known.has(r.id) ? ' <span class="pill" title="Your trainee has this unique, or can buy this innate/awakening skill">trainee skill</span>' : ""}</td><td class="num"><b>${r.L.toFixed(2)}</b></td>${mine ? "" : `<td class="num opt-col">${r.mean != null ? r.mean.toFixed(2) : "–"}</td>`}<td class="num">${cost == null ? "Unknown" : cost}</td><td class="num">${cost ? (r.L / cost * 100).toFixed(2) : "–"}</td><td class="mini opt-col">${from.slice(0, 3).map((x) => esc(x.n) + (deckIds.has(x.id) ? " ★" : "")).join(", ")}${from.length > 3 ? " +" + (from.length - 3) : ""}</td></tr>`;
         }).join("")}</tbody></table></div>
         ${rows.length > shown.length ? `<button type="button" class="btn ghost" data-cm-more="1">Show more (${rows.length - shown.length} left)</button>` : ""}` : `<div class="empty">${empty}</div>`}</div>
       <details class="paste">
@@ -2960,7 +2965,7 @@
     const fx = D.baseEffects(card, lv);
     switch (what) {
       case "score": return `<b>${Math.round(x.score)}</b> <span class="mini">(${Math.round(x.base)}${x.skill >= 0.5 ? " + " + Math.round(x.skill) + " skills" : ""})</span>`;
-      case "skills": return x.skills.length ? x.skills.map((s) => esc(skillInfo(s.id)[0]) + " " + s.L.toFixed(2) + "L").join(", ") : '<span class="mini">no strong skills here</span>';
+      case "skills": return x.skills.length ? x.skills.map((s) => skillNameHTML(s.id, skillInfo(s.id)[0]) + " " + s.L.toFixed(2) + "L").join(", ") : '<span class="mini">no strong skills here</span>';
       case "evbond": { const ev = D.eventRewards(card); return "Event bond +" + ev.bond + (ev.known ? "" : " (est.)"); }
       case "bond": return "Initial bond " + (fx[14] || 0);
       case "race": return "Race bonus " + (fx[15] || 0) + "%";
