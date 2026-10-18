@@ -906,7 +906,7 @@
     const pending = state.gl.pendingConcert;
     const ok = E.finalizeConcert(state, scenario());
     if (ok) {
-      R.event(state, "finalizeConcert", { turn: pending.turn, concertIndex: pending.concertIndex });
+      R.recordFinalization(state, scenario(), pending.turn);
       commit(true);
       flash("Concert on turn " + pending.turn + " resolved: stats, collaborators' tokens and carry applied.");
     }

@@ -388,7 +388,8 @@
     },
     // Grand Concert: 5 songs bought in year one and a 6th showing, held for after the 1st live.
     songs1(state, sc, c, a) {
-      const marked = Object.values((state.gl && state.gl.songs) || {}).filter((t) => t >= 5 && glPeriodFor(sc, t, state) === 0).length;
+      const gl = state.gl || {};
+      const marked = Object.entries(gl.songs || {}).filter(([id, t]) => t >= 5 && glPeriodFor(sc, id, state) === 0).length;
       const n = numAns(a.songs);
       const questions = [
         { id: "songs", type: "number", text: "How many shop songs have you bought? Exclude the free Make Debut! and the held song.", answer: n, guess: marked, sure: marked > 0, guessWhy: marked ? "your purchased songs (free Make Debut! excluded)" : "none marked yet" },
@@ -1016,7 +1017,11 @@
   // link cards and higher facility levels give more. The per-card amounts below are estimates.
   const GL_LINK = ["Silence Suzuka", "Agnes Tachyon", "Smart Falcon", "Mihono Bourbon", "Light Hello"];
   function tokenCap(state, sc) {
-    return 200 + 50 * (sc.lives || []).filter((t) => t < state.turn).length;
+    const gl = state.gl || {};
+    const pending = gl.pendingConcert;
+    // Only count concerts that have been RESOLVED (not pending)
+    // A concert turn before current turn is resolved unless it's the pending concert
+    return 200 + 50 * (sc.lives || []).filter((t) => t < state.turn && (!pending || pending.turn !== t)).length;
   }
   function facilityRainbows(f, state) {
     if (Array.isArray(f.members) && f.members.length && Deck && state.deck) {
@@ -1137,19 +1142,23 @@
     const out = { extra: { speed: 0, stamina: 0, power: 0, guts: 0, wit: 0, sp: 0 }, fb: 0, pendingFb: 0 };
     if (!sc.songs) return out;
     const learned = (state.gl && state.gl.songs) || {};
+    const pending = state.gl && state.gl.pendingConcert;
     sc.songs.forEach((song) => {
       const t = learned[song.id];
       if (t == null) return;
       Object.entries(song.extra || {}).forEach(([k, v]) => { out.extra[k] += v; });
       if (song.fb) {
-        const live = sc.lives.find((l) => l >= t);
-        if (live != null && state.turn > live) out.fb += song.fb; else out.pendingFb += song.fb;
+        const period = glPeriodFor(sc, song.id, state);
+        const live = period == null ? null : sc.lives[period];
+        // Pre-stage purchases keep their concert after finalization/reload.
+        // An explicitly unknown period cannot establish an active Live Bonus.
+        if (live != null && state.turn > live && (!pending || pending.turn !== live)) out.fb += song.fb;
+        else out.pendingFb += song.fb;
       }
     });
     if (state.turn > 72) {
       // GIRLS' LEGEND U's +10% is active after the final concert resolves,
       // but stays pending while that concert is still in the pre-stage window.
-      const pending = state.gl && state.gl.pendingConcert;
       if (pending && pending.turn === 72) out.pendingFb += 10;
       else out.fb += 10;
     }
@@ -1183,17 +1192,20 @@
     const pending = state.gl && state.gl.pendingConcert;
     if (pending) {
       // During the pending phase, Hype is reported for the concert that is
-      // about to resolve, counting every song learned since the previous live
-      // up to the current turn (including pre-stage window purchases).
+      // about to resolve, counting songs attributed to the pending period
+      // via songPeriods (or date-based fallback for legacy saves).
       const li = pending.concertIndex;
       const next = sc.lives[li];
       const prev = li > 0 ? sc.lives[li - 1] : 0;
-      const since = Object.values(learned).filter((t) => t > prev && t <= state.turn).length + (prev === 0 && state.turn >= 5 ? 1 : 0) + (next === 72 && state.turn >= 72 ? 1 : 0);
+      // Use persistent period attribution
+      const since = Object.entries(learned).filter(([id, turn]) => glPeriodFor(sc, id, state) === li).length + (prev === 0 && state.turn >= 5 ? 1 : 0) + (next === 72 && state.turn >= 72 ? 1 : 0);
       return { next, prev, since, need: Math.max(0, 3 - since), turnsToLive: 0 };
     }
     const next = sc.lives.find((l) => l >= state.turn);
     const prev = sc.lives.filter((l) => l < state.turn).pop() || 0;
-    const since = Object.values(learned).filter((t) => t > prev && t <= state.turn).length + (prev === 0 && state.turn >= 5 ? 1 : 0) + (next === 72 && state.turn === 72 ? 1 : 0);
+    const li = sc.lives.indexOf(next);
+    // Use persistent period attribution
+    const since = Object.entries(learned).filter(([id, turn]) => glPeriodFor(sc, id, state) === li).length + (prev === 0 && state.turn >= 5 ? 1 : 0) + (next === 72 && state.turn === 72 ? 1 : 0);
     return { next, prev, since, need: Math.max(0, 3 - since), turnsToLive: next != null ? next - state.turn : null };
   }
   // Songs learned so far, counting Make Debut! from turn 5 (it counts toward the 18 too).
@@ -1244,12 +1256,9 @@
     sc.lives.forEach((L, i) => {
       const last = i === sc.lives.length - 1;
       const prev = i ? sc.lives[i - 1] : 0;
-      // During the pending phase, pre-stage window purchases (learned at turns
-      // past the pending concert's turn) count toward that concert's Hype and
-      // rewards, so the upper bound is the current turn rather than L.
-      const isPending = pending && L === pending.turn;
-      const upperBound = isPending ? t : Math.min(t, L);
-      const songs = Object.values(learned).filter((x) => x > prev && x <= upperBound).length + (i === 0 && upperBound >= 5 ? 1 : 0) + (last && upperBound >= 72 ? 1 : 0);
+      // Use persistent period attribution (songPeriods) when available
+      // Songs attributed to this period count toward this concert's Hype and rewards
+      const songs = Object.entries(learned).filter(([id, turn]) => glPeriodFor(sc, id, state) === i).length + (i === 0 && t >= 5 ? 1 : 0) + (last && t >= 72 ? 1 : 0);
       const tech = lessons[i] || 0;
       const sp = 5 * tech + 25 * songs;
       const great = songs >= 3;
@@ -1298,10 +1307,23 @@
       delete gl.pendingConcert;
       return false;
     }
+    // Record before state for actual credited amounts
+    const beforeTokens = (gl.tokens || []).slice();
+    const vector = () => Array.from({ length: 5 }, () => 0);
     // 1. Calendar performance: collaborators' +10 of every token after a
     //    Promo Live (Make Debut!'s +10 is applied by endOfTurn on turn 5).
     const perf = calendarPerformance(pending.turn, sc);
-    if (perf) gl.tokens = gl.tokens.map((n) => Math.min(perf.cap, (n || 0) + perf.amount));
+    const credited = vector();
+    const lostAtCap = vector();
+    if (perf) {
+      gl.tokens = gl.tokens.map((n, i) => {
+        const room = Math.max(0, perf.cap - n);
+        const take = Math.min(perf.amount, room);
+        credited[i] = take;
+        lostAtCap[i] = perf.amount - take;
+        return Math.min(perf.cap, (n || 0) + perf.amount);
+      });
+    }
     // 2. Concert stats (+10 Great Success: 3+ songs since the last live;
     //    +3 otherwise; +10 for GIRLS' LEGEND U regardless of Hype).
     if (state.trackStats && state.stats) {
@@ -1317,6 +1339,9 @@
     delete gl.holdSong;
     // 4. Clear the pending phase.
     delete gl.pendingConcert;
+    // Store finalization event data for reporting
+    gl.finalizationEvent = gl.finalizationEvent || {};
+    gl.finalizationEvent[pending.turn] = { turn: pending.turn, before: beforeTokens, after: (gl.tokens || []).slice(), credited, lostAtCap };
     return true;
   }
 
@@ -1368,13 +1393,27 @@
     if (gl.pendingConcert) return gl.pendingConcert.concertIndex;
     return glPeriod(sc, state.turn);
   }
-  // The period a song learned at turn 't' belongs to. Songs bought in the
-  // pre-stage window (after the pending concert's turn) belong to the pending
-  // period, not the period glPeriod would assign from their turn alone.
-  function glPeriodFor(sc, t, state) {
+  // The period a song belongs to. Uses persistent songPeriods map when available,
+  // falling back to date-based logic only for legacy saves without metadata.
+  // Three states of attribution:
+  // 1. Explicitly recorded period (from songPeriods[songId])
+  // 2. Legacy entry with no period metadata (fallback to date-based glPeriod)
+  // 3. Entry explicitly marked as ambiguous (songPeriods[songId] = null) - no definite assignment
+  function glPeriodFor(sc, songId, state) {
     const gl = state.gl || {};
-    if (gl.pendingConcert && t > gl.pendingConcert.turn) return gl.pendingConcert.concertIndex;
-    return glPeriod(sc, t);
+    const songPeriods = gl.songPeriods || {};
+    // Check for explicit period assignment
+    if (songPeriods[songId] !== undefined) {
+      // null means explicitly ambiguous - do not fall through to date-based rule
+      if (songPeriods[songId] === null) return null;
+      return songPeriods[songId];
+    }
+    // Legacy fallback: use date-based logic
+    const learnedTurn = (gl.songs || {})[songId];
+    if (learnedTurn == null) return null;
+    // During pending phase, purchases after the concert turn belong to pending period
+    if (gl.pendingConcert && learnedTurn > gl.pendingConcert.turn) return gl.pendingConcert.concertIndex;
+    return glPeriod(sc, learnedTurn);
   }
   function songPlan(state, sc) {
     if (!sc.songs || state.turn < 5) return null;
@@ -1382,7 +1421,7 @@
     const last = p === sc.lives.length - 1;
     const gl = state.gl || {};
     const learned = gl.songs || {};
-    const bought = Object.values(learned).filter((t) => glPeriodFor(sc, t, state) === p && t >= 5).length;
+    const bought = Object.entries(learned).filter(([id, t]) => glPeriodFor(sc, id, state) === p && t >= 5).length;
     const live = sc.lives[p];
     const carried = p > 0 && (!!(gl.carriedPeriods || {})[p] || (gl.carry && gl.carry.period === p && gl.carry.songs.length > 0));
     const before = songsLearned(state, p ? sc.lives[p - 1] : 4);
@@ -1491,7 +1530,8 @@
   function songImportance(song, state, sc, w) {
     const at = Math.max(state.turn, song.from);
     let v = concertSongValue(song, w, at, sc);
-    const p = glPeriodFor(sc, at, state);
+    // For forward-looking planning, use date-based period assignment
+    const p = glPeriod(sc, at);
     if ((GL_FOCUS[p] || []).indexOf(song.id) !== -1) v *= 1.6;
     if ((GL_AVOID[p] || []).indexOf(song.id) !== -1) v *= 0.3;
     return v;
@@ -1829,9 +1869,11 @@
     const before = purchaseState(state);
     gl.tokens = have.map((n, i) => n - song.cost[i]);
     gl.songs = Object.assign({}, gl.songs, { [song.id]: state.turn });
+    // Record the current period for persistent attribution
+    gl.songPeriods = Object.assign({}, gl.songPeriods, { [song.id]: currentPeriod(sc, state) });
     if (state.trackStats && state.stats) Object.entries(song.once || {}).forEach(([k, n]) => { if (STATS.includes(k) && state.stats[k] > 0) state.stats[k] += n; });
     const p = currentPeriod(sc, state);
-    if (!Object.values(old.songs || {}).some((t) => t < state.turn && glPeriodFor(sc, t, state) === p) && gl.carry && gl.carry.period === p && gl.carry.songs.includes(song.id)) {
+    if (!Object.entries(old.songs || {}).some(([id, t]) => t < state.turn && glPeriodFor(sc, id, state) === p) && gl.carry && gl.carry.period === p && gl.carry.songs.includes(song.id)) {
       gl.carriedPeriods = Object.assign({}, gl.carriedPeriods, { [p]: true });
     }
     delete gl.carry;
@@ -1842,11 +1884,21 @@
   }
   // Record an already-owned song when its rewards/cost are already reflected in
   // the game's balances. This never invents missing income or charges twice.
+  // Preserves uncertainty when the historical date does not establish before/after
+  // concert timing. A current pending phase or observed carry can establish it.
   function recordLearnedSong(state, sc, songId, at) {
     const song = (sc.songs || []).find((x) => x.id === songId);
     if (!state.gl || !song || !Number.isInteger(at) || at < song.from || at > Math.min(state.turn, sc.totalTurns) || (state.gl.songs || {})[songId] != null) return false;
-    const gl = state.gl, p = glPeriodFor(sc, at, state);
-    if (at === state.turn && !Object.values(gl.songs || {}).some(t => glPeriodFor(sc, t, state) === p) && gl.carry && gl.carry.period === p && gl.carry.songs.includes(songId)) gl.carriedPeriods = Object.assign({}, gl.carriedPeriods, { [p]: true });
+    const gl = state.gl;
+    const current = currentPeriod(sc, state);
+    const observedCarry = gl.carry && gl.carry.period === current && gl.carry.songs.includes(songId);
+    // The current pending phase or an observed current carry supplies timing
+    // evidence. A historical concert-plus-one date alone could be pre-stage
+    // or after the concert; persist null so legacy fallback cannot guess later.
+    const p = at === state.turn && (gl.pendingConcert || observedCarry) ? current
+      : sc.lives.some((turn) => at === turn + 1) ? null : glPeriod(sc, at);
+    gl.songPeriods = Object.assign({}, gl.songPeriods, { [songId]: p });
+    if (p != null && at === state.turn && !Object.entries(gl.songs || {}).some(([id]) => glPeriodFor(sc, id, state) === p) && observedCarry) gl.carriedPeriods = Object.assign({}, gl.carriedPeriods, { [p]: true });
     gl.songs = Object.assign({}, gl.songs, { [songId]: at });
     if (at === state.turn) { gl.shop = {}; delete gl.holdSong; delete gl.carry; }
     else if (gl.shop) delete gl.shop["song:" + songId];
@@ -1885,7 +1937,7 @@
   }
   function purchaseState(state) {
     const gl = state.gl || {};
-    return JSON.parse(JSON.stringify({ turn: state.turn, tokens: gl.tokens || [], lessons: gl.lessons || {}, songs: gl.songs || {}, stats: state.stats || {}, energy: state.energy, shop: gl.shop || {}, carry: gl.carry || null, holdSong: gl.holdSong || null, carriedPeriods: gl.carriedPeriods || {}, pendingConcert: gl.pendingConcert || null }));
+    return JSON.parse(JSON.stringify({ turn: state.turn, tokens: gl.tokens || [], lessons: gl.lessons || {}, songs: gl.songs || {}, ...(Object.prototype.hasOwnProperty.call(gl, "songPeriods") ? { songPeriods: gl.songPeriods } : {}), stats: state.stats || {}, energy: state.energy, shop: gl.shop || {}, carry: gl.carry || null, holdSong: gl.holdSong || null, carriedPeriods: gl.carriedPeriods || {}, pendingConcert: gl.pendingConcert || null, finalizationEvent: gl.finalizationEvent || {} }));
   }
   function undoBuy(state) {
     const b = state.gl && state.gl.lastBuy;
@@ -1894,6 +1946,7 @@
     state.gl.tokens = b.before.tokens;
     state.gl.lessons = b.before.lessons;
     if (b.before.songs) state.gl.songs = b.before.songs;
+    if (Object.prototype.hasOwnProperty.call(b.before, "songPeriods")) state.gl.songPeriods = b.before.songPeriods; else delete state.gl.songPeriods;
     state.gl.shop = b.before.shop || {};
     if (b.before.stats) state.stats = b.before.stats;
     if (b.before.energy != null) state.energy = b.before.energy;
@@ -2825,6 +2878,16 @@
   // toward the facility's level.
   const FAIL_RESULT = { fail: { mood: -1, stat: -5, energy: 0, label: "failed" }, bad: { mood: -3, stat: -10, energy: 10, label: "failed badly" }, slacker: { mood: 0, stat: 0, energy: 0, label: "did not show up" } };
   function advance(state, scenario, option, result, observed) {
+    // Engine-level command blocking during pending concert phase
+    // ALL ordinary career commands (training, rest, racing, outings) are rejected
+    // before any mutation, rewards, calibration, logging, or turn advancement.
+    // Shop purchases must use standalone buySong/buyTechnique, not advance().
+    const gl = state.gl || {};
+    if (gl.pendingConcert) {
+      // Reject ALL commands during pending phase
+      // Shop purchases must use buySong/buyTechnique directly
+      return state;
+    }
     if (option.outingRoll) {
       const index = observed && observed.outing === "great" ? 0 : 1;
       const outcome = option.outingRoll[index];

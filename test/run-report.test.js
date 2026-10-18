@@ -22,7 +22,7 @@ function advance(s, chosen, observed = {}) {
   if (next.gl && next.gl.pendingConcert) {
     const pt = next.gl.pendingConcert.turn;
     E.finalizeConcert(next, sc);
-    R.event(next, "finalizeConcert", { turn: pt });
+    R.recordFinalization(next, sc, pt);
   }
   return next;
 }
@@ -205,8 +205,8 @@ test("pendingConcert serializes in inputs, and build marks pending vs finalized 
   const serialized = R.inputs(next);
   assert.deepEqual(serialized.gl.pendingConcert, { turn: 24, concertIndex: 0 }, "pendingConcert is serialized in inputs");
   R.recordTurn(s, next, sc, E.recommend(s, sc), rest, {});
-  R.event(next, "finalizeConcert", { turn: 24, concertIndex: 0 });
   E.finalizeConcert(next, sc);
+  R.recordFinalization(next, sc, 24);
   const report = R.build(next, sc);
   const concert = report.concerts.find((c) => c.turn === 24);
   assert.equal(concert.pending, false, "not pending after finalizing");
