@@ -1258,7 +1258,11 @@ test("Grand Concert rewards: each live adds its stats on Done (+10 on a Great Su
   const gl = sc("grandlive");
   const stats = { speed: 300, stamina: 200, power: 250, guts: 150, wit: 200 };
   const st = (turn, songs, o) => base(Object.assign({ turn, energy: 60, trackStats: true, stats: Object.assign({}, stats), gl: { songs, tokens: [0, 0, 0, 0, 0], lessons: { 0: 6 } }, facilities: facs({ wit: { cards: 1 } }) }, o));
-  const restAt = (s) => E.advance(s, gl, E.evaluate(s, gl).options.find((o) => o.kind === "rest"));
+  const restAt = (s) => {
+    const next = E.advance(s, gl, E.evaluate(s, gl).options.find((o) => o.kind === "rest"));
+    if (next.gl && next.gl.pendingConcert) E.finalizeConcert(next, gl);
+    return next;
+  };
   assert.strictEqual(restAt(st(24, { kiseki: 8, gothisway: 14 })).stats.speed, 310, "2 songs + Make Debut!: Great Success, +10");
   assert.strictEqual(restAt(st(24, { kiseki: 8 })).stats.speed, 303, "fewer songs: +3");
   assert.strictEqual(restAt(st(23, { kiseki: 8 })).stats.speed, 300, "nothing before the live turn");
@@ -1267,7 +1271,9 @@ test("Grand Concert rewards: each live adds its stats on Done (+10 on a Great Su
   // A failed training on the live turn still gets the live.
   const s = st(24, { kiseki: 8, gothisway: 14 });
   const wit = E.evaluate(s, gl).options.find((o) => o.stat === "wit");
-  assert.strictEqual(E.advance(s, gl, wit, "fail").stats.speed, 310);
+  const failed = E.advance(s, gl, wit, "fail");
+  if (failed.gl && failed.gl.pendingConcert) E.finalizeConcert(failed, gl);
+  assert.strictEqual(failed.stats.speed, 310);
   const live = E.glRewards(st(20, { kiseki: 8, gothisway: 14 }), gl).find((x) => x.turn === 24);
   assert.match(live.sofar, /3 songs \(with Make Debut!\) and 6 techniques: Great Success, all stats \+10, \+105 SP/);
   const r = E.glRewards(st(20, {}), gl);
