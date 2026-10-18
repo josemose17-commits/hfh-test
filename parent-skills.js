@@ -1,17 +1,13 @@
 // Factual support skill coverage for parent results. Deliberately separate from
 // target scoring and its event-choice/availability estimates.
 (function (root) {
+  const Prerequisites = root.UmaParentPrerequisites || (typeof require !== "undefined" ? require("./parent-prerequisites.js") : null);
   function build(cards, opts = {}) {
     const info = opts.skills || {}, purchase = opts.purchases || {};
     const events = opts.events || {cards: {}, events: {}};
-    const byId = new Map(), unavailableCards = [];
+    const byId = new Map(), unavailableCards = [], unresolvedPrerequisites = [];
+    const canonical = Prerequisites.create(purchase);
     const must = new Set((opts.must || []).map(String));
-    const whites = new Map();
-    Object.entries(purchase).forEach(([id, m]) => {
-      if (m[3] !== 1) return;
-      if (!whites.has(m[0])) whites.set(m[0], []);
-      whites.get(m[0]).push(id);
-    });
     function add(id, card, route) {
       id = String(id);
       if (!byId.has(id)) {
@@ -27,18 +23,19 @@
     }
     function offer(id, card, route) {
       id = String(id); add(id, card, route);
-      // Same unlock rules as skill-budget: prerequisites, plus ordinary white
-      // upgrades in that family. Never infer a gold unlock from a white hint.
-      const seen = new Set([id]);
-      let m = purchase[id];
-      while (m && m[2] != null && !seen.has(String(m[2]))) {
-        const before = String(m[2]); seen.add(before);
-        add(before, card, Object.assign({}, route, {via: id})); m = purchase[before];
+      const isGold = (purchase[id] && purchase[id][3] === 2) || (info[id] && info[id][2] === 2);
+      if (isGold && !canonical.whites(id).length) {
+        if (!unresolvedPrerequisites.some(x => x.id === id && x.card === card.id)) unresolvedPrerequisites.push({id, card:card.id});
+        return;
       }
-      if (purchase[id]) (whites.get(purchase[id][0]) || []).forEach(other => {
-        if (other !== id) add(other, card, Object.assign({}, route, {via: id}));
+      // An excluded or unknown-release gold cannot establish a Global white route.
+      if (opts.globalOnly && !(info[id] && info[id][3])) return;
+      canonical.unlocks(id).forEach(other => {
+        const throughGold = isGold && canonical.whites(id).includes(other);
+        add(other, card, Object.assign({}, route, {via:id, purchase:throughGold ? 'prerequisite' : 'upgrade'}));
       });
     }
+
     cards.forEach(card => {
       if (opts.globalOnly && !(card.en && card.en <= opts.today)) { unavailableCards.push(card.id); return; }
       (card.hs || []).forEach(id => offer(id, card, {kind: 'hint'}));
@@ -62,7 +59,7 @@
     });
     const all = [...byId.values()].sort((a, b) => +b.target - +a.target || a.id.localeCompare(b.id));
     const skills = all.filter(s => !opts.globalOnly || s.release === true);
-    return {skills, restricted: all.filter(s => !skills.includes(s)), unavailableCards,
+    return {skills, unresolvedPrerequisites, restricted: all.filter(s => !skills.includes(s)), unavailableCards,
       missingMust: [...must].filter(id => !skills.some(s => s.id === id))};
   }
   const api = {build};
