@@ -2152,7 +2152,12 @@
     const sv = skillMap(p.id, c.style);
     const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: !!c.independent, eventSuccessRate: +c.eventSuccessRate };
     if (c.goal === "ace" || c.goal === "debuff") {
-      o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, (id) => skillInfo(id)[2]), statsWeight: +c.statsW };
+      o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, (id) => SV.skills[id] ? SV.skills[id][2] : null), statsWeight: +c.statsW };
+      if (c.globalSkills) {
+        const released = id => !!(SV.skills[id] && SV.skills[id][3]);
+        Object.keys(o.parent.targets).forEach(id => { if (!released(id)) delete o.parent.targets[id]; });
+        o.must = o.must.filter(released);
+      }
     }
     return o;
   }
@@ -2204,14 +2209,14 @@
   }
 
   function optPool(c) {
-    if (c.ownedOnly && ownedIds().length) return ownedIds().filter((id) => !T.entry || window.EuophrysCards ? T.entry(id, owned[id]) : true).map((id) => ({ id, lb: owned[id] }));
+    if (c.ownedOnly && ownedIds().length) return ownedIds().filter(id => c.goal === "race" || D.onGlobal(D.card(id), TODAY)).filter((id) => !T.entry || window.EuophrysCards ? T.entry(id, owned[id]) : true).map((id) => ({ id, lb: owned[id] }));
     return D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r >= 2).map((x) => ({ id: x.id, lb: 4 }));
   }
   const borrowPool = () => D.DATA.supports.filter((x) => D.onGlobal(x, TODAY) && x.r === 3).map((x) => ({ id: x.id, lb: 4 }));
 
   function optKey() {
     const c = cm();
-    return [c.goal, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
+    return [c.goal, c.goal !== "race" && c.globalSkills, c.statsW, c.preset, c.style, euScen(), JSON.stringify(euOver()), state.deck.trainee, c.ownedOnly, c.borrow, c.skillW, c.locked.join("."), c.must.join("."), JSON.stringify(c.targets), c.independent, c.helloProcRate, c.helloUnlockRate, c.eventSuccessRate, c.eventSongBoost, JSON.stringify(c.comp), ownedCode(), svCache[c.preset] && typeof svCache[c.preset] === "object" ? 1 : 0].join("|");
   }
 
   function runOptimizer() {
@@ -2239,7 +2244,7 @@
         } catch (err) { est = null; }
       }
       if (scenario().id === "grandlive" && c.goal === "race" && est) r.skills = est.skills;
-      optResult = Object.assign(r, { key, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
+      optResult = Object.assign(r, { key, parentConfig: opts.parent ? { targets: opts.parent.targets, must: c.must.slice(), globalOnly: c.globalSkills } : null, goal: c.goal, preset: p.id, style: c.style, scen: euScen(), est, fit, simulationMeta, independent: !!c.independent, link, skillsUsed: Object.keys(opts.parent ? opts.parent.targets : skillMap(p.id, c.style).map).length });
       wish = null;
       optRun = null;
       if (state.tab === "cm") renderCM();
@@ -2589,6 +2594,30 @@
     </div>`;
   }
 
+  function parentSkillsHTML(r) {
+    const config = r.parentConfig;
+    const pool = window.UmaParentSkills.build(r.cards.map(x => D.card(x.id)), {
+      skills: SV.skills, purchases: window.UmaSkillPurchases.skills, events: window.UmaCardEvents,
+      targets: config.targets, must: config.must, globalOnly: config.globalOnly, today: TODAY
+    });
+    const name = id => esc(debuffOrSkillName(id));
+    const rows = skills => skills.map(s => `<tr data-parent-skill="${esc(s.id)}"><th>${name(s.id)} ${s.must ? '<span class="skillpill">Must-have</span>' : ""}${s.release === false ? ' <span class="mini warn">Not listed on Global</span>' : s.release == null ? ' <span class="mini warn">Release metadata unknown</span>' : ""}<div class="mini">${s.spark ? "White · skill spark candidate if learned" : s.rarity === 2 ? "Gold · does not itself become a skill spark" : "Spark eligibility unverified / not a white skill"}</div></th><td>${s.sources.map(source => {
+      const card = D.card(source.card), picked = r.cards.find(x => x.id === source.card);
+      const routes = [...new Set(source.routes.map(route => `${route.kind === "hint" ? "Training hint" : route.grant ? "Event skill grant" : "Event hint"}${route.via ? " via " + name(route.via) + " (purchase tier)" : ""}${route.unresolved ? " · event details unknown" : route.event ? ` · ${esc((window.UmaCardEvents.events[route.event] || {}).n || "event " + route.event)} / choice ${route.choice}${route.conditional ? " (conditional outcome)" : ""}${route.note ? " · " + esc(route.note) : ""}` : ""}`))];
+      return `<details><summary><b>${esc(card.n)} [${esc(card.t)}]</b>${picked.borrowed ? " · borrowed" : ""} · ${[...new Set(source.routes.map(route => route.kind === "hint" ? "Training hint" : "Event"))].join(" + ")}</summary><div class="mini">${routes.join("<br>")}</div></details>`;
+    }).join("<hr>")}</td></tr>`).join("");
+    const section = (title, skills, open) => `<details ${open ? "open" : ""}><summary>${title} (${skills.length})</summary><div class="table-wrap"><table><thead><tr><th>Skill / status</th><th>Deck sources</th></tr></thead><tbody>${rows(skills) || '<tr><td colspan="2">No known skills in this section.</td></tr>'}</tbody></table></div></details>`;
+    return `<div id="parentSkillPool" class="pred-help"><h4>Recommended deck skill pool (${pool.skills.length})</h4>
+      <p class="mini">Known support sources, including purchase prerequisites and ordinary white upgrades. ${config.globalOnly ? "Global releases only." : "All skill releases; the builder's card pool remains Global."} Source coverage is not an acquisition probability, an affordable purchase, or a skill actually learned. Event choices, conditions and completion can prevent obtaining every listed skill in one career. A white skill must be learned for a chance at its skill spark; a spark is not guaranteed.</p>
+      ${section("Race/style-relevant parent targets", pool.skills.filter(s => s.target), true)}
+      ${section("Other obtainable skills · relevance not established for this parent", pool.skills.filter(s => !s.target), false)}
+      ${pool.missingMust.length ? `<p class="mini warn">Must-have source not covered in this released deck pool: ${pool.missingMust.map(name).join(", ")}. A source may be on another card, trainee/scenario-only, unreleased, or unknown in the data.</p>` : ""}
+      ${pool.restricted.length ? `<details><summary>Release exclusions / unknown availability (${pool.restricted.length})</summary><ul>${pool.restricted.map(s => `<li>${name(s.id)}${s.must ? " · Must-have" : ""}: ${s.release === false ? "not listed on Global" : "release metadata unknown"}; ${s.sources.map(x => esc(D.card(x.card).n)).join(", ")}</li>`).join("")}</ul></details>` : ""}
+      ${pool.unavailableCards.length ? '<p class="mini warn">Unreleased or undated source cards excluded from this skill pool.</p>' : ""}
+      <details><summary>Parent estimates and limitations</summary><p class="mini">${r.expected == null ? "" : `Target offer estimate: ${r.expected.toFixed(1)} under the existing skill-source heuristic; not a learned-skill count or SP budget. `}Parent scoring uses modeled direct target offers and weighted stats; purchase-tier coverage in this inventory is not added to its score. It does not solve an affordable parent skill set. Trainee innate/awakening skills are assumed available by scoring and are excluded from its added support value; this pool still shows their support sources. Trainee-only and scenario-only skills are outside this deck-source inventory. Event data may be incomplete; unknown event routes remain labeled. Static shortlisting can miss cards that help by discounting trainee skills, and final ace simulation can rank candidates differently. All listed outcomes are possibilities, not guarantees.</p></details>
+    </div>`;
+  }
+
   function optResultHTML(r, c) {
     const p = presetById(r.preset);
     const stale = r.key !== optKey();
@@ -2603,20 +2632,20 @@
         <span class="tydot" aria-hidden="true"></span>
         <div class="opt-name"><b>${esc(card.n)}</b> <span class="mini">${esc(card.t)}</span>
           <div class="mini">${D.RARITY[card.r]} ${D.typeLabel(card.ty)} · LB${x.lb}${x.borrowed ? " · <b>borrow this</b>" : ""}${c.locked.indexOf(x.id) !== -1 ? " · locked" : r.link && r.link.lock === x.id ? " · scenario card" : ""}</div>
-          ${x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => esc(debuffOrSkillName(id))).join(", ")}</div>` : ""}
-          ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? ", but no must-have" : ""})</div>` : ""}</div>
+          ${r.goal === "race" && x.gives && x.gives.length ? `<div class="mini must-gives">Gives your must-have: ${x.gives.map((id) => esc(debuffOrSkillName(id))).join(", ")}</div>` : ""}
+          ${x.alt ? `<div class="mini">Next best: ${esc(D.card(x.alt.id).n)} LB${x.alt.lb} (${Math.round(x.alt.score)}${x.alt.losesMust ? (r.goal === "race" ? ", but no must-have" : ", lower modeled must-have coverage") : ""})</div>` : ""}</div>
         <div class="num" title="Euophrys score with the other five cards fixed, plus skills">${Math.round(x.score)}<div class="mini">${Math.round(x.base)} + ${Math.round(x.skill)} skills</div></div>
       </div>`;
       }).join("")}</div>
       ${r.link ? `<p class="mini${r.link.lock ? "" : " warn"}">${r.link.lock ? `<b>${esc(r.link.name)}</b> is in${r.link.borrow ? " as the borrowed card" : ""}: uma.guide calls the scenario's link card mandatory for Independent Training.` : r.link.blocked ? `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but your deck makeup allows no Friend card.` : `uma.guide calls ${esc(r.link.name)} mandatory for Independent Training here, but you don't own her: mark her owned, or allow a borrowed card.`}</p>` : ""}
-      ${mustResultHTML(r, c)}
+      ${r.goal === "race" ? mustResultHTML(r, c) : ""}
       ${predictedHTML(r)}
       ${supportEventsHTML(r)}
       <p class="mini">Each number is the card's score with the other five fixed: Euophrys' score plus its skill score. Deck total ${Math.round(total)}.</p>
       ${r.simulationMeta && r.simulationMeta.scenario === "grandlive" && r.goal === "race" ? '<p class="mini">The final suggestion also considers simulated careers. A lower static total can still finish closer to your targets or buy a stronger affordable skill set.</p>' : ""}
-      ${r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
+      ${r.goal !== "race" ? parentSkillsHTML(r) : r.expected != null ? `<p><b>About ${r.expected.toFixed(1)} target skills</b> expected from this deck's hints and events (out of ${r.skillsUsed} worth getting${r.goal === "debuff" ? " for a debuffer here" : " on this race"}). Each one you learn can become a skill spark.</p>
         <div class="opt-skills">${r.skills.map((x) => `<span class="skillpill">${esc(debuffOrSkillName(x.id))} ${r.goal === "ace" ? `<b>${x.L.toFixed(2)} L</b> ` : ""}<span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.est && r.est.skillBudget ? affordableSkillsHTML(r) : r.skills.length ? `<div class="opt-skills"><b>Best skills this deck can hint here:</b> ${r.skills.map((x) => `<span class="skillpill">${esc(skillInfo(x.id)[0])} <b>${x.L.toFixed(2)} L</b> <span class="mini">${Math.round(x.p * 100)}%</span></span>`).join(" ")}</div>` : r.skillsUsed ? "" : `<p class="mini">Skills weren't counted (no skill values for this race).</p>`}
-      ${skillSourcesHTML(r.skills || [], !!(r.est && r.est.supportEvents))}
+      ${r.goal === "race" ? skillSourcesHTML(r.skills || [], !!(r.est && r.est.supportEvents)) : ""}
       <div class="row-wrap">
         <button type="button" class="btn" data-use-opt="1">Use this deck in the coach</button>
         <button type="button" class="btn ghost" id="cmWish" ${wishJob || stale && r.est && r.est.skillBudget ? "disabled" : ""}>${wishJob ? "Comparing upgrades…" : "Which cards would improve it?"}</button>
