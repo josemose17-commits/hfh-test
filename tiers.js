@@ -13,6 +13,11 @@
   const cardsData = () => root.EuophrysCards || (typeof require !== "undefined" ? require("./data/euophrys-cards.js") : null);
   const eventsData = () => root.UmaCardEvents || (typeof require !== "undefined" ? require("./data/card-events.js") : null);
 
+  const ParentPrerequisites = root.UmaParentPrerequisites || (typeof require !== "undefined" ? require("./parent-prerequisites.js") : null);
+  const purchases = root.UmaSkillPurchases || (typeof require !== "undefined" ? require("./data/skill-purchases.js") : null);
+  const skillInfo = root.UmaSkillValues || (typeof require !== "undefined" ? require("./data/skillvalues/index.js") : null);
+  const parentRoutes = ParentPrerequisites.create(purchases.skills);
+
   // Euophrys' Global scenario presets, and which one each coach scenario uses.
   const SCENARIOS = [["URA", "URA Finale"], ["Aoharu", "Unity Cup"], ["MANT", "Trackblazer"], ["GL", "Grand Concert"], ["GM", "Grand Masters"]];
   const FROM_COACH = { ura: "URA", unity: "Aoharu", trackblazer: "MANT", grandlive: "GL", grandmasters: "GM" };
@@ -85,10 +90,11 @@
 
   // Expected skill value of a set of cards: each skill once, by its chance to be offered.
   function skillValue(cards, ctx) {
-    const offers = D.skillOffers();
+    const offers = ctx.parent ? parentRoutes.offers(ctx) : D.skillOffers();
     const days = Math.max(1, 65 - (ctx.races || 0));
     cards.forEach((c) => {
       const card = D.card(c.id);
+      if (ctx.parentGlobal && !D.onGlobal(card, ctx.today)) return;
       const eu = entry(c.id, c.lb);
       const level = D.levelFor(card, c.lb);
       const fx = D.baseEffects(card, level);
@@ -97,7 +103,7 @@
       const lv = 1 + (fx[17] || 0);
       const hs = card.hs || [];
       hs.forEach((id) => offers.trainingHints(id, hints / Math.max(1, hs.length), lv, card.id));
-      SkillEvents.add(offers, card, ctx, { success: ctx.eventSuccessRate, independent: ctx.it });
+      SkillEvents.add(offers, card, ctx.parent ? parentRoutes.eventContext(ctx, card) : ctx, { success: ctx.eventSuccessRate, independent: ctx.it });
     });
     const list = [];
     const probabilities = offers.values();
@@ -138,6 +144,12 @@
       it: !!opts.independent,
       eventSuccessRate: opts.eventSuccessRate == null ? 0.5 : opts.eventSuccessRate,
     };
+    if (parent) {
+      ctx.parentGlobal = !!parent.globalOnly;
+      ctx.today = parent.today;
+      ctx.allowSkill = id => !ctx.parentGlobal || !!(skillInfo.skills[id] && skillInfo.skills[id][3]);
+      [...ctx.known].forEach(id => parentRoutes.whites(id).forEach(white => ctx.known.add(white)));
+    }
     // A must-have the trainee already has needs no card.
     ctx.must = (opts.must || []).map(String).filter((id) => !ctx.known.has(id));
     return ctx;

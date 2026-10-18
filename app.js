@@ -2118,15 +2118,24 @@
   function skillSources(c) {
     const out = {};
     const ids = c.ownedOnly && ownedIds().length ? ownedIds() : D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).map((x) => x.id);
-    ids.forEach((id) => {
-      const card = D.card(id);
-      (card.hs || []).concat(card.es || []).forEach((sk) => { (out[sk] = out[sk] || []).push(card); });
-    });
+    if (c.goal !== "race") {
+      const inventory = window.UmaParentSkills.build(ids.map(id => D.card(id)).filter(card => D.onGlobal(card, TODAY)), {
+        skills: SV.skills, purchases: window.UmaSkillPurchases.skills, events: window.UmaCardEvents,
+        globalOnly: c.globalSkills, today: TODAY
+      });
+      inventory.skills.forEach(skill => { out[skill.id] = skill.sources.map(source => D.card(source.card)); });
+    } else {
+      ids.forEach((id) => {
+        const card = D.card(id);
+        (card.hs || []).concat(card.es || []).forEach((sk) => { (out[sk] = out[sk] || []).push(card); });
+      });
+    }
     return out;
   }
 
   // ---- Euophrys' scoring (shared by the deck optimizer and the tier list) ----
   const T = window.UmaTiers;
+  const parentPurchaseRoutes = window.UmaParentPrerequisites.create(window.UmaSkillPurchases.skills);
   let euLoading = false;
   let euOpen = false; // keep the weights panel open across re-renders
   // Euophrys' card data is large, so it loads the first time a ranking needs it.
@@ -2152,7 +2161,7 @@
     const sv = skillMap(p.id, c.style);
     const o = { scenario: euScen(), overrides: euOver(), trainee: state.deck.trainee, skills: sv.map, costs: sv.costs, skillWeight: +c.skillW, must: (c.must || []).slice(), independent: !!c.independent, eventSuccessRate: +c.eventSuccessRate };
     if (c.goal === "ace" || c.goal === "debuff") {
-      o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, (id) => SV.skills[id] ? SV.skills[id][2] : null), statsWeight: +c.statsW };
+      o.parent = { targets: T.parentTargets(c.goal, p, c.style, sv.map, window.UmaDebuffs, 0.1, (id) => SV.skills[id] ? SV.skills[id][2] : null), statsWeight: +c.statsW, globalOnly: c.globalSkills, today: TODAY };
       if (c.globalSkills) {
         const released = id => !!(SV.skills[id] && SV.skills[id][3]);
         Object.keys(o.parent.targets).forEach(id => { if (!released(id)) delete o.parent.targets[id]; });
@@ -2507,7 +2516,15 @@
     const src = skillSources(c);
     const trn = state.deck.trainee ? D.trainee(state.deck.trainee) : null;
     const known = new Set(trn ? trn.us.concat(trn.is, trn.as).map(String) : []);
-    const names = [...new Set(D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).flatMap((x) => (x.hs || []).concat(x.es || [])))].map((id) => debuffOrSkillName(id)).sort();
+    let sourceIds = [...new Set(D.DATA.supports.filter((x) => D.onGlobal(x, TODAY)).flatMap((x) => (x.hs || []).concat(x.es || [])))];
+    if (c.goal !== "race") {
+      sourceIds = sourceIds.map(String);
+      if (c.globalSkills) sourceIds = sourceIds.filter(id => SV.skills[id] && SV.skills[id][3]);
+      sourceIds = [...new Set(sourceIds.flatMap(id => [id, ...parentPurchaseRoutes.whites(id)]))];
+      if (c.globalSkills) sourceIds = sourceIds.filter(id => SV.skills[id] && SV.skills[id][3]);
+      [...known].forEach(id => parentPurchaseRoutes.whites(id).forEach(white => known.add(white)));
+    }
+    const names = sourceIds.map(id => debuffOrSkillName(id)).sort();
     const mine = c.ownedOnly && ownedIds().length;
     return `<div class="must">
       <div class="row-wrap">
@@ -2520,12 +2537,16 @@
         const note = known.has(String(id)) ? "available to your trainee" : n ? n + (mine ? " of your cards" : " cards") : mine ? "none of your cards" : "no support card";
         return `<span class="chip lockchip${n || known.has(String(id)) ? "" : " warnchip"}">${skillNameHTML(id)} <span class="mini">${note}</span> <button type="button" class="linkish" data-must-del="${id}" aria-label="Remove ${esc(debuffOrSkillName(id))}">✕</button></span>`;
       }).join("")}</div>` : ""}
-      <p class="mini">The deck will include a card that can hint each must-have skill or give it through an event, before anything else counts. Cards only offer a skill by chance, so the result shows how likely you are to see it.</p>
+      <p class="mini">${c.goal === "race" ? "The deck will include a card that can hint each must-have skill or give it through an event, before anything else counts." : "Parent must-haves prioritize cards with a direct hint/event source or a canonical gold prerequisite route. A gold route makes the white purchasable, without granting its hint discount."} Cards only offer a skill by chance, so the result shows how likely you are to see it.</p>
     </div>`;
   }
   const skillIdByName = (name) => {
     const n = name.trim().toLowerCase();
     if (!n) return null;
+    if (cm().goal !== "race") {
+      const id = Object.keys(SV.skills).find(id => debuffOrSkillName(id).toLowerCase() === n);
+      if (id) return id;
+    }
     for (const x of D.DATA.supports) for (const id of (x.hs || []).concat(x.es || [])) if (debuffOrSkillName(id).toLowerCase() === n) return String(id);
     return null;
   };
@@ -2606,10 +2627,19 @@
       targets: config.targets, must: config.must, globalOnly: config.globalOnly, today: TODAY
     });
     const name = id => skillNameHTML(id);
-    const rows = skills => skills.map(s => `<tr data-parent-skill="${esc(s.id)}"><th>${name(s.id)} ${s.must ? '<span class="skillpill">Must-have</span>' : ""}${s.release === false ? ' <span class="mini warn">Not listed on Global</span>' : s.release == null ? ' <span class="mini warn">Release metadata unknown</span>' : ""}<div class="mini">${s.spark ? "White · skill spark candidate if learned" : s.rarity === 2 ? "Gold · does not itself become a skill spark" : "Spark eligibility unverified / not a white skill"}</div></th><td>${s.sources.map(source => {
+    const modeledAvailability = id => {
+      const offer = (r.skills || []).find(x => String(x.id) === id) || (r.must || []).find(x => String(x.id) === id);
+      return offer ? `<div class="mini">Estimated offer/unlock availability: ${Math.round(offer.p * 100)}%.${offer.hintP == null ? "" : ` Direct white hints: ${Math.round(offer.hintP * 100)}%.`} Not a learned-skill probability.</div>` : "";
+    };
+    const rows = skills => skills.map(s => `<tr data-parent-skill="${esc(s.id)}"><th>${name(s.id)} ${s.must ? '<span class="skillpill">Must-have</span>' : ""}${s.release === false ? ' <span class="mini warn">Not listed on Global</span>' : s.release == null ? ' <span class="mini warn">Release metadata unknown</span>' : ""}<div class="mini">${s.spark ? "White · skill spark candidate if learned" : s.rarity === 2 ? "Gold · does not itself become a skill spark" : "Spark eligibility unverified / not a white skill"}</div>${modeledAvailability(s.id)}</th><td>${s.sources.map(source => {
       const card = D.card(source.card), picked = r.cards.find(x => x.id === source.card);
-      const routes = [...new Set(source.routes.map(route => `${route.kind === "hint" ? "Training hint" : route.grant ? "Event skill grant" : "Event hint"}${route.via ? " via " + name(route.via) + " (purchase tier)" : ""}${route.unresolved ? " · event details unknown" : route.event ? ` · ${esc((window.UmaCardEvents.events[route.event] || {}).n || "event " + route.event)} / choice ${route.choice}${route.conditional ? " (conditional outcome)" : ""}${route.note ? " · " + esc(route.note) : ""}` : ""}`))];
-      return `<details><summary><b>${esc(card.n)} [${esc(card.t)}]</b>${picked.borrowed ? " · borrowed" : ""} · ${[...new Set(source.routes.map(route => route.kind === "hint" ? "Training hint" : "Event"))].join(" + ")}</summary><div class="mini">${routes.join("<br>")}</div></details>`;
+      const routes = [...new Set(source.routes.map(route => {
+        const event = route.event ? (window.UmaCardEvents.events[route.event] || {}).n || "event " + route.event : route.kind === "hint" ? "training" : "event details unknown";
+        const detail = `${esc(event)}${route.event ? " / choice " + route.choice : ""}${route.conditional ? " (conditional outcome)" : ""}${route.note ? " · " + esc(route.note) : ""}`;
+        if (route.via) return `Available through ${name(route.via)} from ${esc(card.n)} [${esc(card.t)}] / ${detail}. ${route.purchase === "prerequisite" ? "No white hint discount is granted by this gold hint." : "Purchase upgrade; not a separate hint."}`;
+        return `${route.kind === "hint" ? "Training hint" : route.grant ? "Event skill grant" : "Event hint"} · ${detail}`;
+      }))];
+      return `<details><summary><b>${esc(card.n)} [${esc(card.t)}]</b>${picked.borrowed ? " · borrowed" : ""} · ${[...new Set(source.routes.map(route => route.via ? "Purchase availability" : route.kind === "hint" ? "Training hint" : "Event"))].join(" + ")}</summary><div class="mini">${routes.join("<br>")}</div></details>`;
     }).join("<hr>")}</td></tr>`).join("");
     const section = (title, skills, open) => `<details ${open ? "open" : ""}><summary>${title} (${skills.length})</summary><div class="table-wrap"><table><thead><tr><th>Skill / status</th><th>Deck sources</th></tr></thead><tbody>${rows(skills) || '<tr><td colspan="2">No known skills in this section.</td></tr>'}</tbody></table></div></details>`;
     return `<div id="parentSkillPool" class="pred-help"><h4>Recommended deck skill pool (${pool.skills.length})</h4>
@@ -2619,7 +2649,8 @@
       ${pool.missingMust.length ? `<p class="mini warn">Must-have source not covered in this released deck pool: ${pool.missingMust.map(name).join(", ")}. A source may be on another card, trainee/scenario-only, unreleased, or unknown in the data.</p>` : ""}
       ${pool.restricted.length ? `<details><summary>Release exclusions / unknown availability (${pool.restricted.length})</summary><ul>${pool.restricted.map(s => `<li>${name(s.id)}${s.must ? " · Must-have" : ""}: ${s.release === false ? "not listed on Global" : "release metadata unknown"}; ${s.sources.map(x => esc(D.card(x.card).n)).join(", ")}</li>`).join("")}</ul></details>` : ""}
       ${pool.unavailableCards.length ? '<p class="mini warn">Unreleased or undated source cards excluded from this skill pool.</p>' : ""}
-      <details><summary>Parent estimates and limitations</summary><p class="mini">${r.expected == null ? "" : `Target offer estimate: ${r.expected.toFixed(1)} under the existing skill-source heuristic; not a learned-skill count or SP budget. `}Parent scoring uses modeled direct target offers and weighted stats; purchase-tier coverage in this inventory is not added to its score. It does not solve an affordable parent skill set. Trainee innate/awakening skills are assumed available by scoring and are excluded from its added support value; this pool still shows their support sources. Trainee-only and scenario-only skills are outside this deck-source inventory. Event data may be incomplete; unknown event routes remain labeled. Static shortlisting can miss cards that help by discounting trainee skills, and final ace simulation can rank candidates differently. All listed outcomes are possibilities, not guarantees.</p></details>
+      ${pool.unresolvedPrerequisites.length ? `<p class="mini warn">White prerequisite data missing or unsupported: ${pool.unresolvedPrerequisites.map(x => `${name(x.id)} from ${esc(D.card(x.card).n)}`).join(", ")}. No white purchase route was inferred.</p>` : ""}
+      <details><summary>Parent estimates and limitations</summary><p class="mini">${r.expected == null ? "" : `Target offer estimate: ${r.expected.toFixed(1)} under the existing skill-source heuristic; not a learned-skill count or SP budget. `}Parent scoring values each target once through modeled direct offers or canonical gold-to-white prerequisite availability, alongside weighted stats. A gold hint does not grant a separate white hint or discount. It does not solve an affordable parent skill set. Trainee innate/awakening skills are assumed available by scoring and are excluded from its added support value; this pool still shows their support sources. Trainee-only and scenario-only skills are outside this deck-source inventory. Event data may be incomplete; unknown event routes remain labeled. Static shortlisting can miss cards that help by discounting trainee skills, and final ace simulation can rank candidates differently. All listed outcomes are possibilities, not guarantees.</p></details>
     </div>`;
   }
 
@@ -3022,7 +3053,7 @@
     body.innerHTML = `<div class="cm">
       <section class="panel tier-ctl">
         <h2>Tier list</h2>
-        <p class="mini"><a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>, with skills added. The base score is Euophrys' own formula and scenario weights: the extra stats a card adds to the deck you have so far. On top comes a skill score: the skills the card can hint, valued by their median length gain on the race below (1 L counts like 60 Speed) plus the SP the hint discount saves, not counting skills your deck or trainee already cover. The total is Euophrys' score plus the skill score. Tap a card to add it and the list re-ranks for your next pick.</p>
+        <p class="mini"><a href="https://euophrys.github.io/uma-tiers/" target="_blank" rel="noopener">Euophrys' tier list</a>, with skills added. The base score is Euophrys' own formula and scenario weights: the extra stats a card adds to the deck you have so far. On top comes a skill score: ${c.goal === "race" ? "the skills the card can hint" : "parent targets available directly or through gold prerequisites"}, valued by their median length gain on the race below (1 L counts like 60 Speed) plus the SP the hint discount saves, not counting skills your deck or trainee already cover. The total is Euophrys' score plus the skill score. Tap a card to add it and the list re-ranks for your next pick.</p>
         <div class="db-controls">
           <label class="field"><span>Card type</span><select data-tier="type">${opt(TIER_TYPES, t.type)}</select></label>
           <label class="field"><span>Rarity</span><select data-tier="rarity">${opt([["1", "SSR, SR and R"], ["2", "SSR and SR"], ["3", "SSR only"]], t.rarity)}</select></label>
