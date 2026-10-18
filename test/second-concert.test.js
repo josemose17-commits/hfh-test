@@ -29,7 +29,7 @@ function advance(s, choice = rest, result) {
   if (next.gl && next.gl.pendingConcert) {
     const pt = next.gl.pendingConcert.turn;
     E.finalizeConcert(next, sc);
-    R.event(next, "finalizeConcert", { turn: pt });
+    R.recordFinalization(next, sc, pt);
   }
   return next;
 }

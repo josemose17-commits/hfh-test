@@ -303,7 +303,7 @@ test("songs purchased during the pending window are attributed to the pending pe
   const s = state({ turn: 24 }); s.gl.shop = { "song:runrun": {} };
   const next = E.advance(s, sc, rest);
   E.buySong(next, sc, "runrun");
-  assert.equal(E.glPeriodFor(sc, 25, next), 0, "pre-stage purchase attributed to pending period, not next");
+  assert.equal(E.glPeriodFor(sc, "runrun", next), 0, "pre-stage purchase attributed to pending period, not next");
   const plan = E.songPlan(next, sc);
   assert.equal(plan.bought, 1, "purchased song counted in the plan for the pending period");
 });

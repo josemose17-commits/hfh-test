@@ -19,7 +19,7 @@
     if (state.deck) out.deck = { trainee: state.deck.trainee, slots: (state.deck.slots || []).map((s) => s && { id: s.id, card: D.card(s.id) ? D.card(s.id).n : String(s.id), lb: s.lb, bond: s.bond, met: s.met, dates: s.dates }) };
     if (state.gl) {
       out.gl = {};
-      ["tokens", "songs", "lessons", "focus", "tokenTypes", "shop", "carry", "holdSong", "carriedPeriods", "hints", "pendingConcert"].forEach((key) => { if (state.gl[key] !== undefined) out.gl[key] = state.gl[key]; });
+      ["tokens", "songs", "songPeriods", "lessons", "focus", "tokenTypes", "shop", "carry", "holdSong", "carriedPeriods", "hints", "pendingConcert", "finalizationEvent"].forEach((key) => { if (state.gl[key] !== undefined) out.gl[key] = state.gl[key]; });
     }
     return clone(out);
   }
@@ -47,6 +47,24 @@
       last.delta = subtract(item.after, last.before);
     } else events.push(item);
     return item;
+  }
+
+  // Completed receipts survive clearing pendingConcert. Callers may name the
+  // concert explicitly; otherwise record the most recent completed concert.
+  function recordFinalization(state, sc, turn) {
+    if (sc.id !== "grandlive") return null;
+    const receipts = (state.gl || {}).finalizationEvent || {};
+    const eventKey = turn == null ? (sc.lives || []).filter((t) => receipts[t]).slice(-1)[0] : turn;
+    const finEvent = receipts[eventKey];
+    if (!finEvent || finEvent.turn !== eventKey || !(sc.lives || []).includes(eventKey)) return null;
+    const details = Object.assign({ concertIndex: sc.lives.indexOf(eventKey) }, finEvent);
+    const matches = (e) => e.kind === "finalizeConcert" && e.turn === eventKey;
+    const prior = (state.runPending || []).find(matches) || (state.log || []).flatMap((l) => (l.diagnostics || {}).events || []).find(matches);
+    // An older marker can be completed from its actual receipt. Repeating this
+    // before/after the event moves to a command log must not append another one.
+    if (prior) Object.assign(prior, clone(details));
+    else event(state, "finalizeConcert", details, eventKey);
+    return finEvent;
   }
 
   function balanceCorrection(state, before, type) {
@@ -116,7 +134,9 @@
     const calendar = { requested: vector(), credited: vector(), lostAtCap: vector() };
     const deferredCalendar = { requested: vector(), credited: vector(), lostAtCap: vector() };
     const reward = E.calendarPerformance(before.turn, sc);
-    if (reward && after.gl && after.gl.pendingConcert) {
+    // Check if AFTER state has a pending concert pointing to the BEFORE turn
+    // This identifies the command that ENTERED the pending phase
+    if (reward && after.gl && after.gl.pendingConcert && after.gl.pendingConcert.turn === before.turn) {
       const cap = reward.cap;
       calculated.forEach((n, i) => {
         const take = Math.max(0, Math.min(reward.amount, cap - n));
@@ -167,30 +187,38 @@
     });
     events.push(...clone(state.runPending || []).map((e) => Object.assign({ pending: true }, e)));
     const totals = { recordedTrainingIncome: vector(), trainingLostAtCap: vector(), calendarIncome: vector(), calendarLostAtCap: vector(), observedRewardIncome: vector(), observedRewardLostAtCap: vector(), netPurchaseSpend: vector(), balanceCorrections: vector(), helloIncome: vector(), helloLostAtCap: vector(), unreconciled: vector() };
+    const recordedConcertIncome = new Set();
+    const hasActualAmounts = (amounts) => amounts && ["credited", "lostAtCap"].every((key) => Array.isArray(amounts[key]) && amounts[key].length === 5 && amounts[key].every(Number.isFinite));
     turns.forEach((t) => {
       const p = t.performance; if (!p) return;
+      // Older versions recorded resolved calendar income on the command itself.
+      // Reconciled actual amounts there remain evidence without a new receipt.
+      if ((sc.lives || []).includes(t.turn) && hasActualAmounts(p.calendar) && (p.calendar.requested || []).some((n) => n > 0)
+        && Array.isArray(p.unreconciled) && p.unreconciled.length === 5 && p.unreconciled.every((n) => Number.isFinite(n) && Math.abs(n) <= 1e-9)) recordedConcertIncome.add(t.turn);
       totals.recordedTrainingIncome = add(totals.recordedTrainingIncome, p.training.credited);
       totals.trainingLostAtCap = add(totals.trainingLostAtCap, p.training.lostAtCap);
       totals.calendarIncome = add(totals.calendarIncome, p.calendar.credited);
       totals.calendarLostAtCap = add(totals.calendarLostAtCap, p.calendar.lostAtCap);
-      // Deferred calendar performance from a pending concert is counted when
-      // the concert is finalized (or immediately if the run ends before that).
-      if (p.deferredCalendar) {
-        totals.calendarIncome = add(totals.calendarIncome, p.deferredCalendar.credited);
-        totals.calendarLostAtCap = add(totals.calendarLostAtCap, p.deferredCalendar.lostAtCap);
-      }
+      // Deferred calendar performance is NOT counted here - it's a forecast.
+      // It will be counted when finalizeConcert event records actual credited amounts.
       totals.netPurchaseSpend = add(totals.netPurchaseSpend, p.prefixedPurchaseSpent);
       totals.unreconciled = add(totals.unreconciled, p.unreconciled);
     });
+    const countedConcerts = new Set();
     events.forEach((e) => {
       if (e.spent) totals.netPurchaseSpend = add(totals.netPurchaseSpend, e.spent);
       if (e.kind === "balanceCorrection") totals.balanceCorrections = add(totals.balanceCorrections, e.delta);
       if (e.kind === "finalizeConcert") {
-        // The concert's deferred calendar income was already counted above
-        // from the turn's performance; this event marks when it resolved so
-        // the concerts section can show beforeCommand vs. afterCommand.
-        if (e.deferredCalendar) {
-          // No-op: deferred calendar is attributed to the turn that deferred it.
+        // Enrich saved marker-only events from actual receipts, never forecasts.
+        // Work on the report's clones, and count each concert only once even if
+        // an older save contains repeated finalization events.
+        const receipt = ((state.gl || {}).finalizationEvent || {})[e.turn];
+        if (receipt && receipt.turn === e.turn) Object.assign(e, clone(receipt));
+        if (hasActualAmounts(e)) recordedConcertIncome.add(e.turn);
+        if (!countedConcerts.has(e.turn) && (e.credited || e.lostAtCap)) {
+          if (e.credited) totals.calendarIncome = add(totals.calendarIncome, e.credited);
+          if (e.lostAtCap) totals.calendarLostAtCap = add(totals.calendarLostAtCap, e.lostAtCap);
+          countedConcerts.add(e.turn);
         }
       }
       if (e.kind === "helloEvent") { totals.helloIncome[e.type] += e.credited; totals.helloLostAtCap[e.type] += e.amount - e.credited; }
@@ -208,16 +236,19 @@
       helloTypesAssumed: events.filter((e) => e.kind === "helloEvent" && e.typeAssumed).length,
       helloCheckWithoutEvent: !!((state.extras || {}).lh20 || turns.some((t) => t.inputs && (t.inputs.extras || {}).lh20)) && !events.some((e) => e.kind === "helloEvent")
     } : null;
+    const pendingConcert = (state.gl || {}).pendingConcert;
+    const missingConcertIncomeTurns = sc.id === "grandlive" ? (sc.lives || []).filter((turn) => turn < state.turn
+      && (!pendingConcert || pendingConcert.turn !== turn) && !recordedConcertIncome.has(turn)) : [];
     return {
       v: 2, kind: "run", build: VERSION, why: (why || "").trim(), scenario: sc.id,
-      coverage: { loggedTurns: turns.length, detailedTurns: turns.filter((t) => t.coverage === "detailed").length, legacyTurns: turns.filter((t) => t.coverage === "legacy").length, unreadableSnapshots: errors, firstLoggedTurn: turns.length ? turns[0].turn : null, startsAfterTurnOne: turns.length ? turns[0].turn > 1 : state.turn > 1, gaps, currentTurn: state.turn, endsBeforeCurrentTurn: prior != null && prior !== state.turn - 1 && !(prior === state.turn && state.turn === sc.totalTurns), unreconciledTurns: turns.filter((t) => t.performance && t.performance.unreconciled.some((n) => Math.abs(n) > 1e-9)).map((t) => t.turn) },
+      coverage: { loggedTurns: turns.length, detailedTurns: turns.filter((t) => t.coverage === "detailed").length, legacyTurns: turns.filter((t) => t.coverage === "legacy").length, unreadableSnapshots: errors, firstLoggedTurn: turns.length ? turns[0].turn : null, startsAfterTurnOne: turns.length ? turns[0].turn > 1 : state.turn > 1, gaps, currentTurn: state.turn, endsBeforeCurrentTurn: prior != null && prior !== state.turn - 1 && !(prior === state.turn && state.turn === sc.totalTurns), unreconciledTurns: turns.filter((t) => t.performance && t.performance.unreconciled.some((n) => Math.abs(n) > 1e-9)).map((t) => t.turn), concertIncomeComplete: missingConcertIncomeTurns.length === 0, missingConcertIncomeTurns },
       current: inputs(state), currentProgress: progress(state, sc), currentRecommendation: optionInfo(recommendation && recommendation.action, state, sc), currentOptions: ((recommendation && recommendation.ranked) || []).map((o) => optionInfo(o, state, sc)), runChecks: clone(state.runChecks || {}), checks: clone(E.runCheck(state, sc)),
       tokens: sc.tokens || [], totals, turns, events, observations,
       recoveryComparison: recommendation && recommendation.recoveryComparison ? clone(recommendation.recoveryComparison) : null,
       currentPeriodBudget: sc.id === "grandlive" ? E.periodSongBudget(state, sc) : null,
       concerts: (sc.lives || []).filter((turn) => turn < state.turn || turns.some((t) => t.turn === turn) || (state.gl && state.gl.pendingConcert && state.gl.pendingConcert.turn === turn)).map((turn) => {
         const logged = turns.filter((t) => t.turn === turn).slice(-1)[0];
-        const pending = state.gl && state.gl.pendingConcert && state.gl.pendingConcert.turn === turn && turn >= state.turn;
+        const pending = state.gl && state.gl.pendingConcert && state.gl.pendingConcert.turn === turn;
         const finalized = events.some((e) => e.kind === "finalizeConcert" && e.turn === turn);
         return { turn, recorded: !!logged, beforeCommand: logged ? logged.progressBeforeCommand : null, afterCommand: logged ? logged.concert : null, pending: !!pending, finalized: !!finalized };
       }),
@@ -238,6 +269,7 @@
       report.currentProgress ? "Songs: " + report.currentProgress.total + " total; " + report.currentProgress.hype.since + " this concert period." + (report.currentProgress.paid != null ? " Shop purchases: " + report.currentProgress.paid + " total; " + report.currentProgress.periodPaid + "/" + report.currentProgress.periodGuideTarget + " this period's guide target (free/held songs excluded)." : "") : ""];
     if (sc.tokens) {
       const counts = (values) => sc.tokens.map((name, i) => name + " " + Math.round(values[i] * 100) / 100).join(", ");
+      if ((c.missingConcertIncomeTurns || []).length) lines.push("Calendar income history is incomplete: actual concert rewards are unknown for turn(s) " + c.missingConcertIncomeTurns.join(", ") + ". Totals include recorded amounts only.");
       lines.push("Recorded training income (entered or estimated): " + counts(report.totals.recordedTrainingIncome), "Training income lost at cap: " + counts(report.totals.trainingLostAtCap), "Automatic calendar income: " + counts(report.totals.calendarIncome), "Observed all-token rewards: " + counts(report.totals.observedRewardIncome), "Net recorded purchase spend: " + counts(report.totals.netPurchaseSpend), "Entered balance corrections: " + counts(report.totals.balanceCorrections));
       if (report.observations) {
         const o = report.observations;
@@ -251,7 +283,7 @@
     return lines.filter(Boolean).join("\n") + "\n\n" + JSON.stringify(report);
   }
 
-  const api = { VERSION, inputs, event, balanceCorrection, purchase, recordTurn, build, format };
+  const api = { VERSION, inputs, event, balanceCorrection, purchase, recordTurn, build, format, recordFinalization };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.UmaRunReport = api;
 })(typeof window !== "undefined" ? window : globalThis);
